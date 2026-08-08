@@ -1,0 +1,77 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "demo-roma-0m",
+        "name": "Zona Test A - Centro Storico",
+        "type": "ATM09_RESTRICTED",
+        "restriction": "PROHIBITED",
+        "lowerLimit": 0,
+        "upperLimit": 120
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [12.445, 41.915],
+            [12.505, 41.930],
+            [12.535, 41.895],
+            [12.485, 41.865],
+            [12.430, 41.885],
+            [12.445, 41.915]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "demo-roma-60m",
+        "name": "Zona Test B - Quadrante Est",
+        "type": "ATM09_LIMITED",
+        "restriction": "REQ_AUTHORISATION",
+        "lowerLimit": 60,
+        "upperLimit": 120
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [12.525, 41.940],
+            [12.610, 41.930],
+            [12.635, 41.880],
+            [12.560, 41.850],
+            [12.505, 41.885],
+            [12.525, 41.940]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "demo-roma-120m",
+        "name": "Zona Test C - Fascia Ovest",
+        "type": "OPEN_AREA",
+        "restriction": "NO_RESTRICTION",
+        "lowerLimit": 120,
+        "upperLimit": 120
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [12.335, 41.925],
+            [12.420, 41.950],
+            [12.455, 41.900],
+            [12.410, 41.845],
+            [12.325, 41.870],
+            [12.335, 41.925]
+          ]
+        ]
+      }
+    }
+  ]
+}
