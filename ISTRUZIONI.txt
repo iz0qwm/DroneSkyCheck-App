@@ -1,0 +1,6 @@
+Drone Sky Check App:
+
+  "dsc_458K1Rv56n3Y43ZaBsEdrXQPx5BrF4fs": { 
+    name: "Drone Sky Check App", 
+    tier: "free" 
+  }
