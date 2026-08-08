@@ -9,7 +9,8 @@
         "type": "ATM09_RESTRICTED",
         "restriction": "PROHIBITED",
         "lowerLimit": 0,
-        "upperLimit": 120
+        "upperLimit": 120,
+        "description": "Area mock 0 m per verificare colore rosso, rendering e tap."
       },
       "geometry": {
         "type": "Polygon",
@@ -28,12 +29,13 @@
     {
       "type": "Feature",
       "properties": {
-        "id": "demo-roma-60m",
+        "id": "demo-roma-25m",
         "name": "Zona Test B - Quadrante Est",
         "type": "ATM09_LIMITED",
         "restriction": "REQ_AUTHORISATION",
-        "lowerLimit": 60,
-        "upperLimit": 120
+        "lowerLimit": 25,
+        "upperLimit": 120,
+        "description": "Area mock 25 m per verificare la fascia arancione Drone Sky Check."
       },
       "geometry": {
         "type": "Polygon",
@@ -52,12 +54,13 @@
     {
       "type": "Feature",
       "properties": {
-        "id": "demo-roma-120m",
+        "id": "demo-roma-60m",
         "name": "Zona Test C - Fascia Ovest",
-        "type": "OPEN_AREA",
-        "restriction": "NO_RESTRICTION",
-        "lowerLimit": 120,
-        "upperLimit": 120
+        "type": "ATM09_LIMITED",
+        "restriction": "REQ_AUTHORISATION",
+        "lowerLimit": 60,
+        "upperLimit": 120,
+        "description": "Area mock 60 m per verificare la fascia blu/celeste Drone Sky Check."
       },
       "geometry": {
         "type": "Polygon",

@@ -113,7 +113,9 @@ Regole osservate:
 - `getOverlappingZonesAtPoint` raccoglie zone sovrapposte e le ordina per `lowerLimit`;
 - `zoneCheckV2` invece valuta tutte le feature backend che intersecano il punto e risolve con `resolveFinalStatus`.
 
-Per Android e' meglio affidarsi a `zoneCheckV2` per il verdetto e usare `zones` solo per rendering/contesto.
+Per Android il verdetto operativo deve arrivare da `zoneCheckV3`. Le geometrie
+cartografiche non devono arrivare da `/zones`, ma dal mirror statico KWOS di
+`public/data`.
 
 ## Caricamento Attuale Della Webapp
 
@@ -146,7 +148,8 @@ Il backend:
 - tronca a `limit` max 1000;
 - cachea la risposta per 30 secondi.
 
-Questa e' la strada corretta per Android, ma il contratto e' ancora minimo.
+`/zones` resta documentata per compatibilita e altri utilizzatori, ma non e' la
+sorgente prevista per la prima app Android nativa.
 
 Gaps per viewport Android:
 
@@ -168,7 +171,7 @@ Gaps per viewport Android:
 
 I corridoi vengono convertiti in buffer poligonale a partire da `LineString` e larghezza in NM. Le aree tattiche vengono convertite in poligoni.
 
-Implicazione Android: non ricostruire parsing HTML nel client. Se queste geometrie sono necessarie in mappa, devono arrivare da `zones` o da un endpoint backend stabile.
+Implicazione Android: non ricostruire parsing HTML nel client. Se queste geometrie sono necessarie in mappa, devono essere esportate nella pipeline statica/mirror KWOS oppure rimanere calcolate dal backend operativo.
 
 ## Override E Correzioni Locali
 
@@ -198,17 +201,17 @@ All'apertura web vengono caricati o preparati:
 Android dovrebbe invece caricare inizialmente:
 
 - posizione o viewport iniziale;
-- geometrie essenziali via `zones`;
-- verdetto puntuale via `zoneCheckV2`;
+- geometrie essenziali dal mirror KWOS;
+- verdetto puntuale via `zoneCheckV3`;
 - dettagli solo su tap o apertura bottom sheet.
 
 ## Raccomandazione Per MVP Android
 
 Per la prima mappa nativa:
 
-- usare `zones` a bbox con debounce su camera idle;
-- usare `zoneCheckV2` sul punto utente e sul punto selezionato;
-- cache locale per bbox recenti e dataVersion;
-- non caricare tutti i layer all'avvio;
+- usare i GeoJSON statici da `https://www.kwos.org/appoggio/droni/DroneSkyCheck/`;
+- non usare `/zones` per le geometrie Android;
+- usare `zoneCheckV3` sul punto utente e sul punto selezionato;
 - non duplicare parser ENR/NOTAM/SUP in Kotlin;
-- richiedere un endpoint/contratto backend piu mobile-friendly prima di rifinire rendering e cache.
+- lasciare la logica aeronautica al backend;
+- introdurre cache locale e versionamento dataset in una fase successiva.

@@ -1,8 +1,24 @@
 package it.droneskycheck.app.ui.map
 
+import it.droneskycheck.app.data.ZoneCheckV3Response
+
 data class MapUiState(
     val selectedZone: DemoZone? = null,
+    val selectedPoint: MapPoint? = null,
+    val isVerdictLoading: Boolean = false,
+    val verdict: ZoneCheckV3Response? = null,
+    val verdictError: String? = null,
     val cameraBounds: CameraBounds? = null
+)
+
+data class MapTapSelection(
+    val point: MapPoint,
+    val zone: DemoZone?
+)
+
+data class MapPoint(
+    val lat: Double,
+    val lon: Double
 )
 
 data class DemoZone(
@@ -11,7 +27,8 @@ data class DemoZone(
     val type: String,
     val restriction: String?,
     val lowerLimit: Int,
-    val upperLimit: Int?
+    val upperLimit: Int?,
+    val description: String?
 ) {
     val status: DemoZoneStatus = demoStatusForLowerLimit(lowerLimit)
 }

@@ -2,7 +2,12 @@ package it.droneskycheck.app.map
 
 import android.content.ComponentCallbacks
 import android.content.res.Configuration
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.PointF
+import android.graphics.RectF
 import android.os.Bundle
 import android.util.Log
 import androidx.compose.runtime.Composable
@@ -16,6 +21,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import it.droneskycheck.app.ui.map.CameraBounds
 import it.droneskycheck.app.ui.map.DemoZone
+import it.droneskycheck.app.ui.map.MapPoint
+import it.droneskycheck.app.ui.map.MapTapSelection
 import java.net.URI
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.geometry.LatLng
@@ -24,9 +31,11 @@ import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
 import org.maplibre.android.style.expressions.Expression
 import org.maplibre.android.style.layers.FillLayer
+import org.maplibre.android.style.layers.Layer
 import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.PropertyFactory.fillColor
 import org.maplibre.android.style.layers.PropertyFactory.fillOpacity
+import org.maplibre.android.style.layers.PropertyFactory.fillPattern
 import org.maplibre.android.style.layers.PropertyFactory.lineColor
 import org.maplibre.android.style.layers.PropertyFactory.lineOpacity
 import org.maplibre.android.style.layers.PropertyFactory.lineWidth
@@ -35,7 +44,7 @@ import org.maplibre.geojson.Feature
 
 @Composable
 fun DroneSkyMapView(
-    onZoneTapped: (DemoZone) -> Unit,
+    onMapTapped: (MapTapSelection) -> Unit,
     onCameraIdle: (CameraBounds) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -45,7 +54,7 @@ fun DroneSkyMapView(
         MapView(context).apply {
             onCreate(Bundle())
             getMapAsync { map ->
-                configureMap(map, onZoneTapped, onCameraIdle)
+                configureMap(map, onMapTapped, onCameraIdle)
             }
         }
     }
@@ -96,7 +105,7 @@ fun DroneSkyMapView(
 
 private fun configureMap(
     map: MapLibreMap,
-    onZoneTapped: (DemoZone) -> Unit,
+    onMapTapped: (MapTapSelection) -> Unit,
     onCameraIdle: (CameraBounds) -> Unit
 ) {
     map.cameraPosition = CameraPosition.Builder()
@@ -104,47 +113,59 @@ private fun configureMap(
         .zoom(ROME_ZOOM)
         .build()
 
-    map.setStyle(
-        Style.Builder()
-            .fromUri(MapLayerIds.STYLE_URL)
-            .withSource(
-                GeoJsonSource(
-                    MapLayerIds.ZONES_SOURCE_ID,
-                    URI("asset://${MapLayerIds.SAMPLE_ZONES_ASSET}")
-                )
-            )
+    val styleBuilder = Style.Builder().fromUri(MapLayerIds.STYLE_URL)
+    MapLayerIds.STATIC_LAYERS.forEach { layer ->
+        styleBuilder
+            .withSource(GeoJsonSource(layer.sourceId, URI(layer.url)))
             .withLayer(
                 FillLayer(
-                    MapLayerIds.ZONES_FILL_LAYER_ID,
-                    MapLayerIds.ZONES_SOURCE_ID
+                    layer.fillLayerId,
+                    layer.sourceId
                 ).withProperties(
                     fillColor(zoneFillColorExpression()),
-                    fillOpacity(0.42f)
-                )
+                    fillOpacity(DscZoneMapColors.fillOpacityExpression(layer))
+                ).withZoomRange(layer)
             )
+        if (layer.usesZebraPattern) {
+            styleBuilder.withLayer(
+                FillLayer(
+                    layer.zebraLayerId,
+                    layer.sourceId
+                ).withProperties(
+                    fillPattern(NOTAM_ZEBRA_PATTERN_ID),
+                    fillOpacity(NOTAM_ZEBRA_OPACITY)
+                ).withZoomRange(layer)
+            )
+        }
+        styleBuilder
             .withLayer(
                 LineLayer(
-                    MapLayerIds.ZONES_LINE_LAYER_ID,
-                    MapLayerIds.ZONES_SOURCE_ID
+                    layer.lineLayerId,
+                    layer.sourceId
                 ).withProperties(
                     lineColor(zoneLineColorExpression()),
-                    lineOpacity(0.92f),
-                    lineWidth(2.2f)
-                )
+                    lineOpacity(DscZoneMapColors.lineOpacityExpression()),
+                    lineWidth(layer.lineWidth)
+                ).withZoomRange(layer)
             )
-    ) {
+    }
+
+    map.setStyle(styleBuilder) {
+        it.addImage(NOTAM_ZEBRA_PATTERN_ID, createNotamZebraPattern())
+
         map.addOnMapClickListener { latLng ->
             val selectedZone = map.queryRenderedFeatures(
-                pointForLatLng(map, latLng),
-                MapLayerIds.ZONES_FILL_LAYER_ID
+                touchAreaForLatLng(map, latLng),
+                *interactiveLayerIds()
             ).firstOrNull()?.let(::featureToDemoZone)
 
-            if (selectedZone != null) {
-                onZoneTapped(selectedZone)
-                true
-            } else {
-                false
-            }
+            onMapTapped(
+                MapTapSelection(
+                    point = MapPoint(lat = latLng.latitude, lon = latLng.longitude),
+                    zone = selectedZone
+                )
+            )
+            true
         }
 
         map.addOnCameraIdleListener {
@@ -163,50 +184,108 @@ private fun configureMap(
             onCameraIdle(cameraBounds)
         }
 
-        Log.d(LOG_TAG, "Loaded local demo GeoJSON from assets/${MapLayerIds.SAMPLE_ZONES_ASSET}")
+        Log.d(LOG_TAG, "Loaded DSC static GeoJSON layers from ${MapLayerIds.KWOS_DATA_BASE_URL}")
     }
 }
 
-private fun pointForLatLng(map: MapLibreMap, latLng: LatLng): PointF =
-    map.projection.toScreenLocation(latLng)
+private fun <T : Layer> T.withZoomRange(layer: DscMapLayer): T {
+    minZoom = layer.minZoom
+    return this
+}
+
+private fun touchAreaForLatLng(map: MapLibreMap, latLng: LatLng): RectF {
+    val center: PointF = map.projection.toScreenLocation(latLng)
+    return RectF(
+        center.x - TAP_HIT_SLOP_PX,
+        center.y - TAP_HIT_SLOP_PX,
+        center.x + TAP_HIT_SLOP_PX,
+        center.y + TAP_HIT_SLOP_PX
+    )
+}
 
 private fun featureToDemoZone(feature: Feature): DemoZone {
     val properties = feature.properties()
     return DemoZone(
-        id = properties?.get("id")?.asString.orEmpty(),
-        name = properties?.get("name")?.asString ?: "Zona senza nome",
-        type = properties?.get("type")?.asString ?: "UNKNOWN",
-        restriction = properties?.get("restriction")?.takeIf { !it.isJsonNull }?.asString,
-        lowerLimit = properties?.get("lowerLimit")?.asInt ?: 120,
-        upperLimit = properties?.get("upperLimit")?.takeIf { !it.isJsonNull }?.asInt
+        id = properties?.stringValue("id")
+            ?: properties?.stringValue("identifier")
+            ?: "",
+        name = properties?.stringValue("name") ?: "Zona senza nome",
+        type = properties?.stringValue("_splitType")
+            ?: properties?.stringValue("type")
+            ?: "UNKNOWN",
+        restriction = properties?.stringValue("restriction"),
+        lowerLimit = properties?.intValue("lowerLimit")
+            ?: properties?.intValue("lowerlimit")
+            ?: 120,
+        upperLimit = properties?.intValue("upperLimit")
+            ?: properties?.intValue("upperlimit"),
+        description = properties?.stringValue("description")
+            ?: properties?.stringValue("message")
     )
 }
 
+private fun interactiveLayerIds(): Array<String> =
+    MapLayerIds.STATIC_LAYERS
+        .flatMap { layer ->
+            buildList {
+                add(layer.fillLayerId)
+                if (layer.usesZebraPattern) add(layer.zebraLayerId)
+                add(layer.lineLayerId)
+            }
+        }
+        .toTypedArray()
+
+private fun createNotamZebraPattern(): Bitmap {
+    val bitmap = Bitmap.createBitmap(NOTAM_ZEBRA_SIZE_PX, NOTAM_ZEBRA_SIZE_PX, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor(DscZoneMapColors.noFly0m.webHex)
+        strokeWidth = NOTAM_ZEBRA_STROKE_PX
+    }
+
+    for (offset in -NOTAM_ZEBRA_SIZE_PX..NOTAM_ZEBRA_SIZE_PX step NOTAM_ZEBRA_STEP_PX) {
+        canvas.drawLine(
+            offset.toFloat(),
+            NOTAM_ZEBRA_SIZE_PX.toFloat(),
+            (offset + NOTAM_ZEBRA_SIZE_PX).toFloat(),
+            0f,
+            paint
+        )
+    }
+    return bitmap
+}
+
+private fun com.google.gson.JsonObject.stringValue(key: String): String? =
+    get(key)
+        ?.takeIf { !it.isJsonNull }
+        ?.let { value ->
+            runCatching { value.asString }.getOrNull()
+        }
+        ?.takeIf { it.isNotBlank() }
+
+private fun com.google.gson.JsonObject.intValue(key: String): Int? =
+    get(key)
+        ?.takeIf { !it.isJsonNull }
+        ?.let { value ->
+            when {
+                value.isJsonPrimitive && value.asJsonPrimitive.isNumber -> value.asInt
+                else -> value.asString.toDoubleOrNull()?.toInt()
+            }
+        }
+
 private fun zoneFillColorExpression(): Expression =
-    Expression.match(
-        Expression.get("lowerLimit"),
-        Expression.literal(0),
-        Expression.rgba(198.0f, 40.0f, 40.0f, 1.0f),
-        Expression.literal(60),
-        Expression.rgba(245.0f, 124.0f, 0.0f, 1.0f),
-        Expression.literal(120),
-        Expression.rgba(38.0f, 166.0f, 154.0f, 1.0f),
-        Expression.rgba(96.0f, 125.0f, 139.0f, 1.0f)
-    )
+    DscZoneMapColors.fillExpression()
 
 private fun zoneLineColorExpression(): Expression =
-    Expression.match(
-        Expression.get("lowerLimit"),
-        Expression.literal(0),
-        Expression.rgba(127.0f, 29.0f, 29.0f, 1.0f),
-        Expression.literal(60),
-        Expression.rgba(180.0f, 83.0f, 9.0f, 1.0f),
-        Expression.literal(120),
-        Expression.rgba(13.0f, 148.0f, 136.0f, 1.0f),
-        Expression.rgba(69.0f, 90.0f, 100.0f, 1.0f)
-    )
+    DscZoneMapColors.lineExpression()
 
 private const val ROME_LATITUDE = 41.9028
 private const val ROME_LONGITUDE = 12.4964
 private const val ROME_ZOOM = 10.0
+private const val TAP_HIT_SLOP_PX = 18.0f
+private const val NOTAM_ZEBRA_PATTERN_ID = "dsc-notam-zebra"
+private const val NOTAM_ZEBRA_SIZE_PX = 16
+private const val NOTAM_ZEBRA_STEP_PX = 8
+private const val NOTAM_ZEBRA_STROKE_PX = 2.5f
+private const val NOTAM_ZEBRA_OPACITY = 0.22f
 private const val LOG_TAG = "DroneSkyMap"

@@ -8,10 +8,11 @@ Fonti principali: `functions/index.js`, `functions/api/zoneCheckV2.js`, `functio
 
 | API/funzione | Stato per Android | Nota |
 | --- | --- | --- |
-| `zoneCheckV2` | Riutilizzabile con modifiche di sicurezza | Contratto piu importante per il verdetto operativo. Oggi usa `x-api-key`. |
-| `zones` | Riutilizzabile con modifiche di contratto | Gia supporta bbox. Mancano zoom/tiling/versioning piu robusti. |
+| `zoneCheckV3` | Sorgente operativa Android | Nuovo contratto strutturato per verdetto, zone, blocker, warning e Bottom Sheet nativo. |
+| `zoneCheckV2` | Compatibilita legacy | Non modificare per Android; resta disponibile per client esistenti. |
+| `zones` | Compatibilita cartografica legacy | Non usare per geometrie Android. La nuova app usa il mirror statico KWOS di `public/data`. |
 | `zoneCheck` legacy | Non usare per nuova app | Endpoint precedente, logica piu vecchia e meno completa. |
-| `notamProxy` | Non chiamare direttamente da app | Meglio passare da `zoneCheckV2`, salvo dettaglio NOTAM dedicato futuro. |
+| `notamProxy` | Non chiamare direttamente da app | Meglio passare da `zoneCheckV3`, salvo dettaglio NOTAM dedicato futuro. |
 | `metarProxy` | Riutilizzabile, non core MVP | Utile per pannello meteo aeronautico. Pubblico. |
 | `airplanesLiveProxy`, `adsbLolProxy` | Valutare dopo MVP | Proxy traffico aereo, non necessario per prima mappa UAS. |
 | Firestore realtime public reads | Riutilizzabile dopo MVP | Droni, receiver, tracker, DOA. Richiede SDK Firebase e regole chiare. |
@@ -20,7 +21,7 @@ Fonti principali: `functions/index.js`, `functions/api/zoneCheckV2.js`, `functio
 
 ## Sicurezza API Attuale
 
-`zoneCheckV2`, `zones` e `stats` usano `applySecurity`:
+`zoneCheckV3`, `zoneCheckV2`, `zones` e `stats` usano `applySecurity`:
 
 - header richiesto: `x-api-key`;
 - errore `401` se assente o invalido;
@@ -32,7 +33,59 @@ Problema Android: una API key statica hardcoded sarebbe estraibile dall'APK. Pri
 
 Nota: in `core/security.js` il parametro `debug=true` bypassa la API key. Questo va rimosso o limitato a chiave interna prima di considerare gli endpoint sicuri per mobile.
 
+## `zoneCheckV3`
+
+Endpoint previsto:
+
+- metodo: `GET`;
+- URL Android prototipo: `https://zonecheckv3-32dg4v266a-uc.a.run.app/zoneCheckV3`;
+- autenticazione: header `x-api-key`;
+- implementazione backend: `functions/api/zoneCheckV3.js`.
+
+Parametri query:
+
+| Parametro | Tipo | Obbligatorio | Uso |
+| --- | --- | --- | --- |
+| `lat` | number | Si | Latitudine decimale. |
+| `lon` | number | Si | Longitudine decimale. |
+| `bearing` | number | No | Direzione per stimare `distanceToExitMeters` in NFZ. |
+
+Forma risposta:
+
+```json
+{
+  "position": { "lat": 41.9, "lon": 12.5 },
+  "verdict": {
+    "status": "OPEN",
+    "maxAltitudeMetersAgl": 120,
+    "source": "BASE",
+    "baselineMetersAgl": 120,
+    "isBaseline": true,
+    "explanation": "Nessuna restrizione rilevata nel punto selezionato: vale la baseline generale 120 m AGL."
+  },
+  "zones": [],
+  "blockers": [],
+  "warnings": [],
+  "baseline": {
+    "maxAltitudeMetersAgl": 120,
+    "representedAsZone": false
+  },
+  "meta": {
+    "engine": "DSC",
+    "version": "v3"
+  }
+}
+```
+
+Valutazione Android:
+
+- usare come sorgente primaria del verdetto operativo;
+- non duplicare parser ENR/NOTAM/SUP in Kotlin;
+- mostrare i dati V3 in Bottom Sheet nativo.
+
 ## `zoneCheckV2`
+
+`zoneCheckV2` resta invariata e disponibile per client esistenti.
 
 Endpoint documentato:
 
@@ -90,11 +143,8 @@ Uso attuale nella webapp:
 - vista 3D documentata come consumatrice: `docs/user/airspace-3d.md`;
 - la mappa web principale usa ancora molta logica locale e non dipende sempre da questa API.
 
-Valutazione Android:
-
-- da usare come sorgente primaria per il verdetto operativo;
-- non duplicare il motore in Kotlin;
-- prima del rilascio: sistemare auth mobile, debug bypass, test regressivi su casi ENR/NOTAM/SUP, latenza e timeout.
+Valutazione Android: non usarlo per la nuova app nativa, salvo confronti
+regressivi. `zoneCheckV3` e' il contratto Android.
 
 ## `zones`
 
@@ -159,10 +209,9 @@ Caching:
 
 Valutazione Android:
 
-- e' la base migliore per caricamento viewport;
-- mancano ancora parametri espliciti `zoom`, `layers`, `minImportance`, `geometryDetail`, `dataVersion`;
-- il limite massimo 1000 puo troncare viewport molto densi;
-- serve un contratto stabile per aggiornamento incrementale e cache locale.
+- non usarlo per le geometrie della nuova app nativa;
+- usare invece il mirror statico KWOS di `public/data`;
+- mantenerlo invariato per compatibilita con eventuali client esistenti.
 
 ## `zoneCheck` Legacy
 
@@ -170,7 +219,7 @@ Implementazione: `functions/index.js`.
 
 Endpoint storico con parametri `lat`, `lon`, `bearing`, `compact`. Carica tutte le feature locali e restituisce `currentZone`, `nearestOpenZone`, `summary`, oppure forma compatta.
 
-Valutazione Android: non usarlo come base. E' utile per capire la prima versione del motore, ma `zoneCheckV2` contiene ENR/NOTAM/SUP e risposta piu adatta.
+Valutazione Android: non usarlo come base. E' utile solo per capire la prima versione del motore.
 
 ## Proxy NOTAM
 
@@ -189,7 +238,7 @@ Risposta: HTML da `deskaeronautico.it`, `Content-Type: text/html`, cache 5 minut
 Valutazione Android:
 
 - non chiamare direttamente nel primo MVP;
-- usare `zoneCheckV2` per avere NOTAM gia interpretati;
+- usare `zoneCheckV3` per avere NOTAM gia interpretati;
 - se in futuro serve dettaglio NOTAM ufficiale, creare endpoint JSON backend dedicato.
 
 ## `metarProxy`

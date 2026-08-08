@@ -12,6 +12,7 @@ class DemoZoneStatusTest {
     @Test
     fun lowerLimitBetweenOneAnd119MapsToLimited() {
         assertEquals(DemoZoneStatus.Limited, demoStatusForLowerLimit(1))
+        assertEquals(DemoZoneStatus.Limited, demoStatusForLowerLimit(25))
         assertEquals(DemoZoneStatus.Limited, demoStatusForLowerLimit(60))
         assertEquals(DemoZoneStatus.Limited, demoStatusForLowerLimit(119))
     }

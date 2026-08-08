@@ -1,5 +1,10 @@
 # Android Backend Gaps
 
+Nota 2026-08-08: questo audit e' storico. La direzione attuale implementata e'
+`zoneCheckV3` per il verdetto operativo e mirror statico KWOS di `public/data`
+per le geometrie Android. Le note sotto restano utili come contesto dei gap
+precedenti, ma non rappresentano piu la scelta architetturale corrente.
+
 Questo documento elenca cio che manca o va consolidato nel backend storico prima di sviluppare seriamente la mappa nativa Android.
 
 Fonti principali: `functions/api/zoneCheckV2.js`, `functions/api/zones.js`, `functions/core/security.js`, `firestore.rules`, `storage.rules`, `public/main.js`, `public/js/utility-layers.js`, `docs/developer/backend.md`, `docs/developer/schedule-engine.md`.

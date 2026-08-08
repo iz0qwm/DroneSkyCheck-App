@@ -10,7 +10,8 @@ La logica decisionale esiste sia frontend sia backend.
 
 Backend:
 
-- `zoneCheckV2` e' il motore piu completo;
+- `zoneCheckV3` e' il contratto operativo previsto per Android;
+- `zoneCheckV2` resta il motore legacy piu completo per i client esistenti;
 - usa Turf per intersezioni e distanze;
 - integra ENR, NOTAM e SUP;
 - produce una risposta JSON utilizzabile da client esterni.
@@ -169,7 +170,7 @@ Frontend:
 - `getOverlappingZonesAtPoint` elenca le sovrapposte;
 - il calcolo locale dipende dai layer visibili.
 
-Android non dovrebbe decidere localmente quale zona prevale per il verdetto. Puo usare la lista `zones` per UI progressiva, ma il verdetto deve arrivare da backend.
+Android non dovrebbe decidere localmente quale zona prevale per il verdetto. Puo usare le feature cartografiche statiche per il rendering, ma il verdetto deve arrivare da backend `zoneCheckV3`.
 
 ## Distanza Dalla Zona
 
@@ -206,7 +207,7 @@ Punti da consolidare:
 
 Per il primo MVP:
 
-- usare `zoneCheckV2` come unica fonte del verdetto;
+- usare `zoneCheckV3` come unica fonte del verdetto Android;
 - non implementare in Kotlin parsing ENR, NOTAM o SUP;
 - non copiare `geojson-pill.js`;
 - usare un modello locale solo per mappare `status`, `maxAltitude`, `blockers`, `warnings` in UI;

@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -25,6 +26,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import it.droneskycheck.app.data.ZoneCheckV3Response
 import it.droneskycheck.app.map.DroneSkyMapView
 
 @Composable
@@ -35,7 +37,7 @@ fun MapScreen(
 
     Box(modifier = Modifier.fillMaxSize()) {
         DroneSkyMapView(
-            onZoneTapped = viewModel::onZoneSelected,
+            onMapTapped = viewModel::onMapTapped,
             onCameraIdle = viewModel::onCameraIdle,
             modifier = Modifier.fillMaxSize()
         )
@@ -47,9 +49,13 @@ fun MapScreen(
                 .padding(horizontal = 16.dp, vertical = 12.dp)
         )
 
-        uiState.selectedZone?.let { zone ->
+        uiState.selectedPoint?.let { point ->
             ZoneBottomSheet(
-                zone = zone,
+                point = point,
+                zone = uiState.selectedZone,
+                isLoading = uiState.isVerdictLoading,
+                verdict = uiState.verdict,
+                error = uiState.verdictError,
                 onDismiss = viewModel::onZoneSheetDismissed
             )
         }
@@ -90,7 +96,11 @@ private fun MapTitlePill(modifier: Modifier = Modifier) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ZoneBottomSheet(
-    zone: DemoZone,
+    point: MapPoint,
+    zone: DemoZone?,
+    isLoading: Boolean,
+    verdict: ZoneCheckV3Response?,
+    error: String?,
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -105,28 +115,69 @@ private fun ZoneBottomSheet(
                 .padding(start = 24.dp, top = 8.dp, end = 24.dp, bottom = 36.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Text(
-                text = zone.name,
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                text = zone.status.label,
-                style = MaterialTheme.typography.titleMedium,
-                color = statusColor(zone.status)
-            )
-            ZoneDetail(label = "Quota", value = "${zone.lowerLimit} m")
-            ZoneDetail(label = "Tipo zona", value = zone.type)
-            zone.restriction?.let { restriction ->
-                ZoneDetail(label = "Restriction", value = restriction)
+            if (isLoading) {
+                CircularProgressIndicator()
+                Text(
+                    text = "Verifica operativa in corso",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
             }
-            zone.upperLimit?.let { upperLimit ->
-                ZoneDetail(label = "Limite superiore", value = "$upperLimit m")
+
+            verdict?.let { response ->
+                Text(
+                    text = verdictTitle(response),
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = response.verdict.explanation,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = verdictColor(response.verdict.status)
+                )
+                ZoneDetail(
+                    label = "Limite massimo consentito",
+                    value = "${response.verdict.maxAltitudeMetersAgl} m AGL"
+                )
+                ZoneDetail(label = "Fonte verdetto", value = response.verdict.source ?: "Baseline")
+                ZoneDetail(label = "Motore", value = "${response.meta.engine} ${response.meta.version}")
+                if (response.blockers.isNotEmpty()) {
+                    ZoneDetail(
+                        label = "Blocker",
+                        value = response.blockers.joinToString { it.code ?: "BLOCKER" }
+                    )
+                }
+                if (response.warnings.isNotEmpty()) {
+                    ZoneDetail(
+                        label = "Warning",
+                        value = response.warnings.joinToString { it.code ?: "WARNING" }
+                    )
+                }
+                response.zones.firstOrNull()?.description?.let { description ->
+                    ZoneDetail(label = "Descrizione", value = description)
+                }
             }
-            Text(
-                text = "Zona dimostrativa locale",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+
+            error?.let {
+                Text(
+                    text = "Verdetto non disponibile",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+                ZoneDetail(label = "Errore", value = it)
+            }
+
+            zone?.let { tappedZone ->
+                ZoneDetail(label = "Feature cartografica", value = tappedZone.name)
+                ZoneDetail(label = "Layer", value = tappedZone.type)
+                tappedZone.restriction?.let { restriction ->
+                    ZoneDetail(label = "Restriction", value = restriction)
+                }
+            }
+
+            ZoneDetail(
+                label = "Punto interrogato",
+                value = "${point.lat.formatCoordinate()}, ${point.lon.formatCoordinate()}"
             )
         }
     }
@@ -153,3 +204,22 @@ private fun statusColor(status: DemoZoneStatus) = when (status) {
     DemoZoneStatus.Limited -> MaterialTheme.colorScheme.tertiary
     DemoZoneStatus.Open -> MaterialTheme.colorScheme.primary
 }
+
+@Composable
+private fun verdictColor(status: String) = when (status) {
+    "NO_FLY" -> MaterialTheme.colorScheme.error
+    "LIMITED" -> MaterialTheme.colorScheme.tertiary
+    else -> MaterialTheme.colorScheme.primary
+}
+
+private fun verdictTitle(response: ZoneCheckV3Response): String =
+    when (response.verdict.status) {
+        "NO_FLY" -> "NO FLY"
+        "LIMITED" -> "LIMITED"
+        else -> "OPEN"
+    }
+
+private fun Double.formatCoordinate(): String =
+    "%.${CoordinateDecimals}f".format(this)
+
+private const val CoordinateDecimals = 5
