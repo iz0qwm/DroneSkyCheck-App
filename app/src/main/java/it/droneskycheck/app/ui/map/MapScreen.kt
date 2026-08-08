@@ -17,6 +17,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -74,11 +75,23 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
+import it.droneskycheck.app.data.AuthorizationInfo
+import it.droneskycheck.app.data.AuthorityInfo
+import it.droneskycheck.app.data.EnrInfo
 import it.droneskycheck.app.data.Issue
+import it.droneskycheck.app.data.KeyValueInfo
+import it.droneskycheck.app.data.NotamInfo
+import it.droneskycheck.app.data.OfficialInfo
+import it.droneskycheck.app.data.SupInfo
+import it.droneskycheck.app.data.ValidityInfo
 import it.droneskycheck.app.data.ZoneCheckV3Response
 import it.droneskycheck.app.data.ZoneInfo
 import it.droneskycheck.app.map.DscLayerCategory
+import it.droneskycheck.app.map.DscZoneMapColors
 import it.droneskycheck.app.map.DroneSkyMapView
+import it.droneskycheck.app.map.MapLayerIds
+import org.json.JSONArray
+import org.json.JSONObject
 
 @Composable
 fun MapScreen(
@@ -202,6 +215,7 @@ fun MapScreen(
                 isLoading = uiState.isVerdictLoading,
                 verdict = uiState.verdict,
                 error = uiState.verdictError,
+                onRetry = viewModel::onZoneCheckRetryRequested,
                 onDismiss = viewModel::onZoneSheetDismissed
             )
         }
@@ -603,6 +617,7 @@ private fun ZoneBottomSheet(
     isLoading: Boolean,
     verdict: ZoneCheckV3Response?,
     error: String?,
+    onRetry: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -632,32 +647,21 @@ private fun ZoneBottomSheet(
             }
 
             verdict?.let { response ->
-                Text(
-                    text = verdictHeader(response),
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    text = response.verdict.explanation,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = verdictColor(response.verdict.status)
-                )
-                ZoneDetail(
-                    label = "Limite massimo consentito",
-                    value = "${response.verdict.maxAltitudeMetersAgl} m AGL"
-                )
-                ZoneDetail(label = "Fonte verdetto", value = response.verdict.source ?: "Baseline")
-                ZoneDetail(label = "Motore", value = "${response.meta.engine} ${response.meta.version}")
-                if (response.blockers.isNotEmpty()) {
-                    ZoneDetail(
-                        label = "Blocker",
-                        value = response.blockers.joinToString { it.code ?: "BLOCKER" }
-                    )
-                }
-                if (response.warnings.isNotEmpty()) {
-                    ZoneDetail(
-                        label = "Warning",
-                        value = response.warnings.joinToString { it.code ?: "WARNING" }
+                VerdictBadge(response)
+                response.verdict.explanation
+                    .takeUnless { it.isBlank() || it == verdictHeader(response) }
+                    ?.let { explanation ->
+                        Text(
+                            text = explanation.cleanUserText(),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                if (response.warnings.isNotEmpty() && response.zones.size > 1) {
+                    Text(
+                        text = "In questo punto sono presenti piu zone sovrapposte: controlla i dettagli qui sotto.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 HorizontalDivider()
@@ -677,6 +681,7 @@ private fun ZoneBottomSheet(
                         ZoneInfoCard(
                             zone = zoneInfo,
                             index = index,
+                            verdict = response,
                             blockers = response.blockers,
                             warnings = response.warnings
                         )
@@ -690,14 +695,21 @@ private fun ZoneBottomSheet(
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.SemiBold
                 )
-                ZoneDetail(label = "Errore", value = it)
+                Text(
+                    text = "DSC non e' raggiungibile in questo momento.",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Button(onClick = onRetry) {
+                    Text("Riprova")
+                }
             }
 
-            zone?.let { tappedZone ->
-                ZoneDetail(label = "Feature cartografica", value = tappedZone.name)
-                ZoneDetail(label = "Layer", value = tappedZone.type)
-                tappedZone.restriction?.let { restriction ->
-                    ZoneDetail(label = "Restriction", value = restriction)
+            if (verdict == null) {
+                zone?.let { tappedZone ->
+                    ZoneOptionalDetail("Zona selezionata", tappedZone.name.cleanZoneName())
+                    ZoneOptionalDetail("Categoria", tappedZone.userCategoryTitle())
+                    ZoneOptionalDetail("Requisito", tappedZone.restriction?.toUserText())
                 }
             }
 
@@ -715,16 +727,26 @@ private fun ZoneBottomSheet(
 private fun ZoneInfoCard(
     zone: ZoneInfo,
     index: Int,
+    verdict: ZoneCheckV3Response,
     blockers: List<Issue>,
     warnings: List<Issue>
 ) {
     var expanded by remember(zone.name, zone.type, index) { mutableStateOf(index == 0) }
     val hasBlocker = blockers.any { it.zoneName == zone.name }
     val hasWarning = warnings.any { it.zoneName == zone.name }
+    val isResponsible = zone.isVerdictSource == true ||
+        verdict.responsibleZone?.id?.let { it == zone.id } == true ||
+        verdict.responsibleZone?.name?.let { it == zone.name } == true ||
+        verdict.verdict.responsibleZoneId?.let { it == zone.id } == true ||
+        verdict.verdict.responsibleZoneName?.let { it == zone.name } == true
 
     Card(
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+            containerColor = if (isResponsible) {
+                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+            } else {
+                MaterialTheme.colorScheme.surfaceContainerHigh
+            }
         )
     ) {
         Column(
@@ -745,7 +767,7 @@ private fun ZoneInfoCard(
                 )
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = zone.name ?: "Zona senza nome",
+                        text = zone.displayName(),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = if (expanded) 3 else 1,
@@ -764,27 +786,37 @@ private fun ZoneInfoCard(
                 }
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                CompactInfoPill(zone.limitMetersAgl?.let { "$it m AGL" } ?: "Limite N/D")
-                zone.activeNow?.let { CompactInfoPill(if (it) "Attiva" else "Non attiva") }
-                if (zone.authorizationRequired == true) CompactInfoPill("Autorizzazione")
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    zone.limitMetersAgl?.takeUnless { zone.isInactiveNow() }?.let {
+                        ZoneLimitPill(it)
+                    }
+                    zone.userOperationalStatus()?.let {
+                        ZoneStatusPill(it, zone.isInactiveNow())
+                    }
+                    if (zone.authorizationRequired == true) CompactInfoPill("Autorizzazione richiesta")
+                }
+                if (isResponsible) {
+                    Row {
+                        CompactInfoPill("Determina il verdetto")
+                    }
+                }
             }
 
             if (expanded) {
-                ZoneOptionalDetail("Famiglia", zone.family)
-                ZoneOptionalDetail("Tipo", zone.type)
-                ZoneOptionalDetail("Descrizione", zone.description)
-                if (hasBlocker) {
-                    ZoneOptionalDetail(
-                        "Blocker zona",
-                        blockers.filter { it.zoneName == zone.name }.joinToString { it.code ?: "BLOCKER" }
-                    )
+                ZoneNarrativeSection(zone)
+                OfficialSection(zone.official)
+                NotamSection(zone.notams)
+                EnrSection(zone.enr)
+                SupSection(zone.sup)
+                AuthorizationSection(zone.authorization)
+                AuthoritySection(zone.authority)
+                ZoneOptionalDetail("Descrizione", zone.description?.cleanUserText())
+                zone.blockers.filterRelevantFor(zone).takeIf { it.isNotEmpty() }?.let {
+                    ZoneOptionalDetail("Attenzione", it.joinIssues())
                 }
-                if (hasWarning) {
-                    ZoneOptionalDetail(
-                        "Warning zona",
-                        warnings.filter { it.zoneName == zone.name }.joinToString { it.code ?: "WARNING" }
-                    )
+                zone.warnings.filterRelevantFor(zone).takeIf { it.isNotEmpty() }?.let {
+                    ZoneOptionalDetail("Avvisi", it.joinIssues())
                 }
             }
         }
@@ -792,11 +824,249 @@ private fun ZoneInfoCard(
 }
 
 @Composable
-private fun CompactInfoPill(text: String) {
+private fun ZoneNarrativeSection(zone: ZoneInfo) {
+    val narrative = zone.info
+    if (narrative?.summary.isNullOrBlank() &&
+        narrative?.explanation.isNullOrBlank() &&
+        narrative?.operationalMeaning.isNullOrBlank()
+    ) {
+        return
+    }
+
+    ZoneSection(title = "Situazione operativa") {
+        ZoneOptionalDetail("Sintesi", narrative?.summary)
+        ZoneOptionalDetail("Spiegazione DSC", narrative?.explanation)
+        ZoneOptionalDetail("Significato operativo", narrative?.operationalMeaning)
+    }
+}
+
+@Composable
+private fun OfficialSection(
+    official: OfficialInfo?,
+    title: String = "Informazioni ufficiali"
+) {
+    if (official == null || !official.hasContent()) return
+    var expanded by remember(title, official.sourceText, official.sourceReference) { mutableStateOf(false) }
+
+    ZoneSection(title = title) {
+        ZoneOptionalDetail("Fonte", official.sourceReference)
+        if (official.fields.isNotEmpty()) {
+            KeyValueList(official.fields)
+        }
+        official.sourceText?.takeIf { it.isNotBlank() }?.let { text ->
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = if (expanded) Int.MAX_VALUE else 4,
+                overflow = if (expanded) TextOverflow.Clip else TextOverflow.Ellipsis
+            )
+            TextButton(onClick = { expanded = !expanded }) {
+                Text(if (expanded) "Comprimi testo" else "Leggi testo completo")
+            }
+        }
+    }
+}
+
+@Composable
+private fun ValiditySection(validity: ValidityInfo?) {
+    if (validity == null || !validity.hasContent()) return
+
+    ZoneSection(title = "Validita e orari") {
+        ZoneOptionalDetail("Da", validity.validFrom)
+        ZoneOptionalDetail("A", validity.validTo)
+        ZoneOptionalDetail("Schedule", validity.schedule)
+        ZoneOptionalDetail("Schedule interpretata", validity.interpretedSchedule)
+    }
+}
+
+@Composable
+private fun NotamSection(notams: List<NotamInfo>) {
+    val usefulNotams = notams.filter { it.hasUsefulContent() }
+    if (usefulNotams.isEmpty()) return
+
+    ZoneSection(title = "NOTAM") {
+        usefulNotams.forEachIndexed { index, notam ->
+            if (index > 0) HorizontalDivider()
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = notam.code.orEmpty(),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+                ZoneOptionalDetail("Stato", notam.validity?.statusLabel())
+                ZoneOptionalDetail("FIR", notam.fir)
+                ZoneOptionalDetail("Localita", notam.location)
+                ZoneOptionalDetail("Zona", notam.zoneReference)
+                ZoneOptionalDetail("Attivita", notam.activityType)
+                ZoneOptionalDetail("Impatto", notam.severity?.toUserText())
+                ZoneOptionalDetail("Sintesi", notam.summary)
+                ZoneOptionalDetail("Spiegazione", notam.explanation)
+                ZoneOptionalDetail("Significato operativo", notam.operationalMeaning)
+                ZoneOptionalDetail("Motivo bloccante", notam.blockingReason)
+                ValiditySection(notam.validity)
+                OfficialSection(notam.official, title = "Testo ufficiale NOTAM")
+                if (notam.blockers.isNotEmpty()) ZoneOptionalDetail("Blocker", notam.blockers.joinIssues())
+                if (notam.warnings.isNotEmpty()) ZoneOptionalDetail("Warning", notam.warnings.joinIssues())
+            }
+        }
+    }
+}
+
+@Composable
+private fun EnrSection(enr: EnrInfo?) {
+    if (enr == null || !enr.hasContent()) return
+
+    ZoneSection(title = "ENR") {
+        ZoneOptionalDetail("Nome", enr.name)
+        ZoneOptionalDetail("Attivazione", enr.activationType?.toUserText())
+        ZoneOptionalDetail("Operazioni", enr.operationSummary())
+        ZoneOptionalDetail("Attestato di competenza minimo richiesto", enr.requiredLicense.formatRequiredLicense())
+        ZoneOptionalDetail("Autorizzazione", enr.authorizationRequired?.formatBoolean())
+        ZoneOptionalDetail("Spiegazione", enr.explanation)
+        ZoneOptionalDetail("Significato operativo", enr.operationalMeaning)
+        ValiditySection(enr.validity)
+        AuthoritySection(enr.authority)
+        OfficialSection(enr.official, title = "Testo ufficiale ENR")
+    }
+}
+
+@Composable
+private fun SupSection(sup: SupInfo?) {
+    if (sup == null || !sup.hasContent()) return
+
+    ZoneSection(title = "SUP") {
+        ZoneOptionalDetail("Titolo", sup.title)
+        ZoneOptionalDetail("Riferimento", sup.reference)
+        ZoneOptionalDetail("Generalita", sup.generality)
+        ZoneOptionalDetail("Descrizione", sup.description)
+        ZoneOptionalDetail("Spiegazione", sup.explanation)
+        ZoneOptionalDetail("Significato operativo", sup.operationalMeaning)
+        ValiditySection(sup.validity)
+        AuthorizationSection(sup.authorization)
+        AuthoritySection(sup.authority)
+        OfficialSection(sup.official, title = "Testo ufficiale SUP")
+        if (sup.blockers.isNotEmpty()) ZoneOptionalDetail("Blocker", sup.blockers.joinIssues())
+        if (sup.warnings.isNotEmpty()) ZoneOptionalDetail("Warning", sup.warnings.joinIssues())
+    }
+}
+
+@Composable
+private fun AuthorizationSection(authorization: AuthorizationInfo?) {
+    if (authorization == null || !authorization.hasContent()) return
+
+    ZoneSection(title = "Autorizzazioni") {
+        ZoneOptionalDetail("Richiesta", authorization.required?.formatBoolean())
+        ZoneOptionalDetail("Requisito", authorization.requirement?.toUserText())
+        ZoneOptionalDetail("Operazioni", authorization.operationSummary())
+        ZoneOptionalDetail("Attestato di competenza minimo richiesto", authorization.requiredLicense.formatRequiredLicense())
+        ZoneOptionalDetail("Spiegazione", authorization.explanation)
+    }
+}
+
+@Composable
+private fun AuthoritySection(authority: AuthorityInfo?) {
+    if (authority == null || !authority.hasContent()) return
+
+    ZoneSection(title = "Autorita / fonte") {
+        ZoneOptionalDetail("Invio richieste a", authority.formatRequestContacts())
+        ZoneOptionalDetail("Fonte", authority.source)
+    }
+}
+
+@Composable
+private fun EnrichedSection(enriched: List<KeyValueInfo>) {
+    if (enriched.isEmpty()) return
+
+    ZoneSection(title = "Dati enriched") {
+        KeyValueList(enriched)
+    }
+}
+
+@Composable
+private fun ZoneSection(
+    title: String,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold
+        )
+        Column(
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            content = content
+        )
+    }
+}
+
+@Composable
+private fun KeyValueList(items: List<KeyValueInfo>) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        items.forEach { item ->
+            ZoneDetail(label = item.key, value = item.value)
+        }
+    }
+}
+
+@Composable
+private fun VerdictBadge(response: ZoneCheckV3Response) {
+    val altitude = response.verdict.maxAltitudeMetersAgl
+    val badgeColor = dscAltitudeColor(altitude)
+    val contentColor = if (altitude == 45) Color.Black else Color.White
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        color = badgeColor,
+        contentColor = contentColor
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = verdictBadgeTitle(response),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "$altitude m AGL",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+@Composable
+private fun ZoneLimitPill(limit: Int) {
+    CompactInfoPill(
+        text = "$limit m AGL",
+        containerColor = dscAltitudeColor(limit),
+        contentColor = if (limit == 45) Color.Black else Color.White
+    )
+}
+
+@Composable
+private fun ZoneStatusPill(text: String, inactive: Boolean) {
+    CompactInfoPill(
+        text = text,
+        containerColor = if (inactive) InactiveZonePillColor else MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = if (inactive) Color.White else MaterialTheme.colorScheme.onSecondaryContainer
+    )
+}
+
+@Composable
+private fun CompactInfoPill(
+    text: String,
+    containerColor: Color = MaterialTheme.colorScheme.secondaryContainer,
+    contentColor: Color = MaterialTheme.colorScheme.onSecondaryContainer
+) {
     Surface(
         shape = CircleShape,
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+        color = containerColor,
+        contentColor = contentColor
     ) {
         Text(
             text = text,
@@ -828,25 +1098,97 @@ private fun ZoneDetail(label: String, value: String) {
     }
 }
 
-@Composable
-private fun statusColor(status: DemoZoneStatus) = when (status) {
-    DemoZoneStatus.NoFly -> MaterialTheme.colorScheme.error
-    DemoZoneStatus.Limited -> MaterialTheme.colorScheme.tertiary
-    DemoZoneStatus.Open -> MaterialTheme.colorScheme.primary
-}
+private fun OfficialInfo.hasContent(): Boolean =
+    !sourceText.isNullOrBlank() ||
+        !sourceReference.isNullOrBlank() ||
+        !qLine.isNullOrBlank() ||
+        fields.isNotEmpty()
 
-@Composable
-private fun verdictColor(status: String) = when (status) {
-    "NO_FLY" -> MaterialTheme.colorScheme.error
-    "LIMITED" -> MaterialTheme.colorScheme.tertiary
-    else -> MaterialTheme.colorScheme.primary
-}
+private fun ValidityInfo.hasContent(): Boolean =
+    activeNow != null ||
+        !validFrom.isNullOrBlank() ||
+        !validTo.isNullOrBlank() ||
+        !schedule.isNullOrBlank() ||
+        !interpretedSchedule.isNullOrBlank() ||
+        !explanation.isNullOrBlank() ||
+        future != null ||
+        expired != null
 
-private fun verdictTitle(response: ZoneCheckV3Response): String =
-    when (response.verdict.status) {
-        "NO_FLY" -> "NO FLY"
-        "LIMITED" -> "LIMITED"
-        else -> "OPEN"
+private fun AuthorizationInfo.hasContent(): Boolean =
+    required != null ||
+        !requirement.isNullOrBlank() ||
+        !operationMode.isNullOrBlank() ||
+        !operationCategory.isNullOrBlank() ||
+        !requiredLicense.isNullOrBlank() ||
+        !explanation.isNullOrBlank()
+
+private fun AuthorityInfo.hasContent(): Boolean =
+    !name.isNullOrBlank() ||
+        !code.isNullOrBlank() ||
+        !contact.isNullOrBlank() ||
+        !source.isNullOrBlank()
+
+private fun EnrInfo.hasContent(): Boolean =
+    !code.isNullOrBlank() ||
+        !name.isNullOrBlank() ||
+        !classification.isNullOrBlank() ||
+        !activationType.isNullOrBlank() ||
+        !operationMode.isNullOrBlank() ||
+        !operationCategory.isNullOrBlank() ||
+        !requiredLicense.isNullOrBlank() ||
+        authorizationRequired != null ||
+        authority?.hasContent() == true ||
+        official?.hasContent() == true ||
+        validity?.hasContent() == true ||
+        !explanation.isNullOrBlank() ||
+        !operationalMeaning.isNullOrBlank()
+
+private fun SupInfo.hasContent(): Boolean =
+    !title.isNullOrBlank() ||
+        !reference.isNullOrBlank() ||
+        !generality.isNullOrBlank() ||
+        !description.isNullOrBlank() ||
+        authority?.hasContent() == true ||
+        official?.hasContent() == true ||
+        validity?.hasContent() == true ||
+        authorization?.hasContent() == true ||
+        !explanation.isNullOrBlank() ||
+        !operationalMeaning.isNullOrBlank() ||
+        blockers.isNotEmpty() ||
+        warnings.isNotEmpty()
+
+private fun ValidityInfo.statusLabel(): String? =
+    when {
+        activeNow == true -> "Attiva ora"
+        expired == true -> "Scaduta"
+        future == true -> "Futura"
+        activeNow == false -> "Non attiva ora"
+        else -> null
+    }
+
+private fun Boolean.formatBoolean(): String =
+    if (this) "Si" else "No"
+
+private fun List<Issue>.joinIssues(): String =
+    joinToString(separator = "\n") { issue ->
+        listOfNotNull(
+            issue.message?.cleanUserText(),
+            issue.explanation?.cleanUserText(),
+            issue.operationalMeaning?.cleanUserText(),
+            issue.code?.toUserText(),
+            issue.severity?.toUserText()
+        ).distinct().joinToString(" - ").ifBlank { "Elemento senza dettaglio" }
+    }
+
+private fun verdictBadgeTitle(response: ZoneCheckV3Response): String =
+    when {
+        response.verdict.maxAltitudeMetersAgl <= 0 ||
+            response.verdict.status in setOf("NO_FLY", "PROHIBITED", "NOT_ALLOWED") ->
+            "ORA NON PUOI VOLARE QUI"
+        response.verdict.maxAltitudeMetersAgl < 120 ->
+            "PUOI VOLARE FINO A"
+        else ->
+            "PUOI VOLARE FINO A"
     }
 
 private fun verdictHeader(response: ZoneCheckV3Response): String =
@@ -870,18 +1212,228 @@ private fun ZoneCheckV3Response.sortedZones(): List<ZoneInfo> =
     )
 
 private fun zoneSubtitle(zone: ZoneInfo): String =
-    listOfNotNull(zone.family, zone.type)
-        .filter { it.isNotBlank() }
-        .joinToString(" · ")
-        .ifBlank { "Classificazione non disponibile" }
+    zone.userCategoryTitle() ?: zone.family?.toUserText() ?: "Zona aeronautica"
 
 @Composable
 private fun zoneSeverityColor(zone: ZoneInfo, hasBlocker: Boolean, hasWarning: Boolean): Color =
     when {
-        hasBlocker || (zone.limitMetersAgl ?: 120) <= 0 -> MaterialTheme.colorScheme.error
-        hasWarning || (zone.limitMetersAgl ?: 120) < 60 -> MaterialTheme.colorScheme.tertiary
+        zone.isInactiveNow() -> MaterialTheme.colorScheme.outline
+        hasBlocker || (zone.limitMetersAgl ?: 120) <= 0 -> dscAltitudeColor(0)
+        hasWarning || (zone.limitMetersAgl ?: 120) < 60 -> dscAltitudeColor(zone.limitMetersAgl ?: 45)
         else -> MaterialTheme.colorScheme.primary
     }
+
+@Composable
+private fun dscAltitudeColor(limit: Int): Color =
+    when {
+        limit <= 0 -> DscZoneMapColors.noFly0m.toComposeColor()
+        limit <= 25 -> DscZoneMapColors.limited25m.toComposeColor()
+        limit <= 45 -> DscZoneMapColors.limited45m.toComposeColor()
+        limit <= 60 -> DscZoneMapColors.limited60m.toComposeColor()
+        else -> MaterialTheme.colorScheme.primary
+    }
+
+private fun it.droneskycheck.app.map.Rgba.toComposeColor(): Color =
+    Color(red / 255f, green / 255f, blue / 255f, 1f)
+
+private fun ZoneInfo.displayName(): String =
+    (name ?: "Zona senza nome").cleanZoneName()
+
+private fun ZoneInfo.userCategoryTitle(): String? =
+    MapLayerIds.categoryForFeatureType(type)?.title
+
+private fun DemoZone.userCategoryTitle(): String? =
+    MapLayerIds.categoryForFeatureType(type)?.title
+
+private fun ZoneInfo.zoneLimitLabel(): String? =
+    when {
+        isInactiveNow() -> null
+        limitMetersAgl != null -> "${limitMetersAgl} m AGL"
+        else -> null
+    }
+
+private fun ZoneInfo.userOperationalStatus(): String? =
+    operationalStatus?.toUserText()
+        ?: validity?.statusLabel()
+        ?: activeNow?.let { if (it) "Attiva ora" else "Non attiva in questo momento" }
+
+private fun ZoneInfo.isInactiveNow(): Boolean =
+    operationalStatus in setOf("ENR_INACTIVE_NOW", "NOTAM_INACTIVE_NOW", "SUP_INACTIVE_NOW", "INACTIVE_NOW") ||
+        activeNow == false
+
+private fun NotamInfo.hasUsefulContent(): Boolean =
+    !code.isNullOrBlank() &&
+        (
+            !summary.isNullOrBlank() ||
+                !explanation.isNullOrBlank() ||
+                !operationalMeaning.isNullOrBlank() ||
+                official?.hasContent() == true ||
+                validity?.hasContent() == true
+        )
+
+private fun String.cleanZoneName(): String =
+    trim()
+        .replace('_', ' ')
+        .replace(Regex("\\s+"), " ")
+        .replace(Regex("^([A-Z0-9]+)\\s+(.+)$")) { match ->
+            val code = match.groupValues[1]
+            val rest = match.groupValues[2]
+            if (code.length >= 5 && rest.any { it.isLetter() }) {
+                "$code - ${rest.lowercase().replaceFirstChar { it.uppercase() }}"
+            } else {
+                match.value
+            }
+        }
+
+private fun String.cleanUserText(): String =
+    toUserText().replace(Regex("\\s+"), " ").trim()
+
+private fun String.toUserText(): String =
+    when (trim().uppercase()) {
+        "REQ_AUTHORIZATION", "AUTHORIZATION_REQUIRED" ->
+            "Autorizzazione richiesta"
+        "ACTIVE", "ENR_ACTIVE", "NOTAM_ACTIVE", "SUP_ACTIVE" ->
+            "Attiva ora"
+        "ACTIVE_LIMITED" ->
+            "Attiva con limite"
+        "ENR_INACTIVE_NOW", "NOTAM_INACTIVE_NOW", "SUP_INACTIVE_NOW", "INACTIVE_NOW", "SUP_INACTIVE" ->
+            "Non attiva in questo momento"
+        "ENR_TEMPORAL_UNKNOWN" ->
+            "Orari non valutabili automaticamente"
+        "CHECK_NOTAM" ->
+            "Attivazione da verificare tramite NOTAM"
+        "ACTIVE_ENR" ->
+            "ENR attiva"
+        "ACTIVE_HARD_NOTAM" ->
+            "NOTAM attivo bloccante"
+        "ACTIVE_SOFT_NOTAM" ->
+            "NOTAM attivo da verificare"
+        "ACTIVE_SUP_AUTH_REQUIRED" ->
+            "SUP attivo con autorizzazione richiesta"
+        "PROTECTED_AREA" ->
+            "Area protetta"
+        "AERONAUTICAL_INFRASTRUCTURE" ->
+            "Infrastruttura aeronautica"
+        "PROHIBITED" ->
+            "Volo non consentito"
+        "RESTRICTED" ->
+            "Area regolamentata"
+        "DANGER" ->
+            "Area pericolosa"
+        "HARD", "BLOCKER" ->
+            "Bloccante"
+        "SOFT", "WARNING" ->
+            "Da verificare"
+        "INFO", "INFORMATION" ->
+            "Informativa"
+        "OPEN_WITH_AUTH" ->
+            "Operazioni OPEN previa autorizzazione"
+        "SPECIFIC_REQUIRED" ->
+            "Categoria Specific richiesta"
+        "OPEN_POSSIBLE" ->
+            "Operazioni OPEN possibili"
+        "ATM09" ->
+            "Procedura ATM09"
+        "ATM05" ->
+            "Autorizzazione ATM05"
+        else -> this
+    }
+
+private fun List<Issue>.filterRelevantFor(zone: ZoneInfo): List<Issue> =
+    filterNot { issue ->
+        val code = issue.code?.trim()?.uppercase()
+        code == zone.operationalStatus?.trim()?.uppercase() ||
+            (zone.isInactiveNow() && code?.contains("INACTIVE") == true)
+    }
+
+private fun EnrInfo.operationSummary(): String? =
+    operationSummary(operationMode, operationCategory)
+
+private fun AuthorizationInfo.operationSummary(): String? =
+    operationSummary(operationMode, operationCategory)
+
+private fun operationSummary(mode: String?, category: String?): String? {
+    val modeCode = mode?.trim()?.uppercase()
+    val categoryCode = category?.trim()?.uppercase()
+
+    return when {
+        modeCode == null && categoryCode == null -> null
+        modeCode == "OPEN_POSSIBLE" && categoryCode == "OPEN_WITH_AUTH" ->
+            "Sono possibili operazioni in OPEN previa autorizzazione"
+        modeCode == "SPECIFIC" || categoryCode == "SPECIFIC_REQUIRED" ->
+            "Sono richieste operazioni in categoria Specific"
+        categoryCode == "OPEN_WITH_AUTH" ->
+            "Sono possibili operazioni in OPEN previa autorizzazione"
+        modeCode == "OPEN_POSSIBLE" ->
+            "Sono possibili operazioni in OPEN"
+        else ->
+            listOfNotNull(mode?.toUserText(), category?.toUserText())
+                .distinct()
+                .joinToString(" - ")
+                .ifBlank { null }
+    }
+}
+
+private fun String?.formatRequiredLicense(): String? {
+    if (isNullOrBlank()) return null
+    val values = parseJsonStringList(this).ifEmpty {
+        split(',', ';')
+            .map { it.trim().trim('[', ']', '"') }
+            .filter { it.isNotBlank() }
+    }
+
+    return values
+        .map { it.replace("\\/", "/").trim() }
+        .filter { it.isNotBlank() }
+        .distinct()
+        .joinToString(" o ")
+        .ifBlank { null }
+}
+
+private fun AuthorityInfo.formatRequestContacts(): String? {
+    val chunks = listOfNotNull(name, contact, source)
+    val objects = chunks.mapNotNull { it.parseJsonObjectOrNull() }
+    val note = objects.firstNotNullOfOrNull { it.optNullableText("note") }
+        ?: name?.takeUnless { it.trim().startsWith("{") }
+    val emails = objects.flatMap { it.optStringList("emails") } +
+        listOfNotNull(contact?.takeIf { "@" in it && !it.trim().startsWith("{") })
+
+    if (note.isNullOrBlank() && emails.isEmpty()) return null
+
+    return buildString {
+        if (!note.isNullOrBlank()) append(note.cleanUserText())
+        if (emails.isNotEmpty()) {
+            if (isNotEmpty()) append(": ")
+            append(emails.distinct().joinToString(", "))
+        }
+    }
+}
+
+private fun String.parseJsonObjectOrNull(): JSONObject? =
+    runCatching { JSONObject(this) }.getOrNull()
+
+private fun parseJsonStringList(value: String): List<String> =
+    runCatching {
+        val array = JSONArray(value)
+        (0 until array.length()).mapNotNull { index ->
+            array.optString(index).takeIf { it.isNotBlank() }
+        }
+    }.getOrDefault(emptyList())
+
+private fun JSONObject.optNullableText(name: String): String? =
+    if (!has(name) || isNull(name)) null else optString(name).takeIf { it.isNotBlank() }
+
+private fun JSONObject.optStringList(name: String): List<String> {
+    if (!has(name) || isNull(name)) return emptyList()
+    val value = opt(name)
+    return when (value) {
+        is JSONArray -> (0 until value.length()).mapNotNull { index ->
+            value.optString(index).takeIf { it.isNotBlank() }
+        }
+        is String -> listOf(value).filter { it.isNotBlank() }
+        else -> emptyList()
+    }
+}
 
 private fun Double.formatCoordinate(): String =
     "%.${CoordinateDecimals}f".format(this)
@@ -1037,4 +1589,5 @@ private val LocationPermissions = arrayOf(
 private const val LOCATION_MIN_TIME_MS = 2_500L
 private const val LOCATION_MIN_DISTANCE_METERS = 5f
 private val ZoneSheetMaxHeight = 720.dp
+private val InactiveZonePillColor = Color(46, 125, 50)
 private const val CoordinateDecimals = 5

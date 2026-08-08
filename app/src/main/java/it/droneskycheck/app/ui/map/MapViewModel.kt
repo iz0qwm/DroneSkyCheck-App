@@ -18,6 +18,20 @@ class MapViewModel(
     val uiState: StateFlow<MapUiState> = _uiState.asStateFlow()
 
     fun onMapTapped(selection: MapTapSelection) {
+        requestVerdict(selection)
+    }
+
+    fun onZoneCheckRetryRequested() {
+        val point = _uiState.value.selectedPoint ?: return
+        requestVerdict(
+            MapTapSelection(
+                point = point,
+                zone = _uiState.value.selectedZone
+            )
+        )
+    }
+
+    private fun requestVerdict(selection: MapTapSelection) {
         _uiState.value = _uiState.value.copy(
             selectedZone = selection.zone,
             selectedPoint = selection.point,
@@ -44,7 +58,7 @@ class MapViewModel(
             }.onFailure { error ->
                 _uiState.value = _uiState.value.copy(
                     isVerdictLoading = false,
-                    verdictError = error.message ?: "Errore zoneCheckV3"
+                    verdictError = "DSC non e' raggiungibile in questo momento."
                 )
             }
         }

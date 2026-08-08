@@ -11,7 +11,7 @@ object MapLayerIds {
         DscMapLayer("p-parks", "split/P_PARKS.geojson", DscLayerCategory.Parks, "Parks NFZ", minZoom = 5.0f, zeroLimitOpacity = 0.08f),
         DscMapLayer("atm09-parks", "split/ATM09_PARKS.geojson", DscLayerCategory.Parks, "ATM09 parks", minZoom = 6.0f, zeroLimitOpacity = 0.05f),
         DscMapLayer("atm09-ctr", "split/ATM09_CTR.geojson", DscLayerCategory.Ctr, "CTR", minZoom = 6.0f, lineWidth = 1.1f),
-        DscMapLayer("other", "split/Other.geojson", DscLayerCategory.Atz, "ATZ", minZoom = 7.0f, lineWidth = 1.2f),
+        DscMapLayer("other", "split/Other.geojson", DscLayerCategory.Atz, "ATZ", minZoom = 7.0f, lineWidth = 1.2f, featureTypeAliases = setOf("Other_ATZ")),
         DscMapLayer("atm09-other", "split/ATM09_OTHER.geojson", DscLayerCategory.Airports, "Airports", minZoom = 8.0f, lineWidth = 1.3f),
         DscMapLayer("atm09-aviosup-rebuilt", "split/ATM09_AVIOSUP_REBUILT.geojson", DscLayerCategory.Aviosuperfici, "Aviosuperfici rebuilt", minZoom = 9.0f, lineWidth = 1.4f),
         DscMapLayer("atm09-lif", "split/ATM09_LIF.geojson", DscLayerCategory.Lif, "LIF", minZoom = 7.0f),
@@ -24,6 +24,11 @@ object MapLayerIds {
         DscMapLayer("p-notam-faa", "split/P_NOTAM_FAA.geojson", DscLayerCategory.Notam, "NOTAM FAA", minZoom = 7.0f, zeroLimitOpacity = 0.22f),
         DscMapLayer("p-notam", "split/P_NOTAM.geojson", DscLayerCategory.Notam, "NOTAM merged", minZoom = 7.0f, zeroLimitOpacity = 0.22f)
     )
+
+    fun categoryForFeatureType(type: String?): DscLayerCategory? {
+        if (type.isNullOrBlank()) return null
+        return STATIC_LAYERS.firstOrNull { it.matchesFeatureType(type) }?.category
+    }
 }
 
 enum class DscLayerCategory(
@@ -124,7 +129,8 @@ data class DscMapLayer(
     val label: String,
     val minZoom: Float,
     val zeroLimitOpacity: Float = 0.19f,
-    val lineWidth: Float = 0.9f
+    val lineWidth: Float = 0.9f,
+    val featureTypeAliases: Set<String> = emptySet()
 ) {
     val sourceId: String = "dsc-$key-source"
     val fillLayerId: String = "dsc-$key-fill"
@@ -132,4 +138,11 @@ data class DscMapLayer(
     val lineLayerId: String = "dsc-$key-line"
     val usesZebraPattern: Boolean = key.startsWith("p-notam")
     val url: String = "${MapLayerIds.KWOS_DATA_BASE_URL}/$relativePath"
+    private val fileStem: String = relativePath.substringAfterLast('/').substringBeforeLast('.')
+
+    fun matchesFeatureType(type: String): Boolean =
+        type.equals(key, ignoreCase = true) ||
+            type.equals(label, ignoreCase = true) ||
+            type.equals(fileStem, ignoreCase = true) ||
+            featureTypeAliases.any { it.equals(type, ignoreCase = true) }
 }
