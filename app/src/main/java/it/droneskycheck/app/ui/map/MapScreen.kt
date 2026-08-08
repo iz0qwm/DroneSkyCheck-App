@@ -92,6 +92,10 @@ import it.droneskycheck.app.map.DroneSkyMapView
 import it.droneskycheck.app.map.MapLayerIds
 import org.json.JSONArray
 import org.json.JSONObject
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 
 @Composable
 fun MapScreen(
@@ -843,25 +847,32 @@ private fun ZoneNarrativeSection(zone: ZoneInfo) {
 @Composable
 private fun OfficialSection(
     official: OfficialInfo?,
-    title: String = "Informazioni ufficiali"
+    title: String = "Informazioni ufficiali",
+    compactUntilOpened: Boolean = false,
+    openLabel: String = "Leggi testo completo",
+    closeLabel: String = "Comprimi testo"
 ) {
     if (official == null || !official.hasContent()) return
     var expanded by remember(title, official.sourceText, official.sourceReference) { mutableStateOf(false) }
 
     ZoneSection(title = title) {
-        ZoneOptionalDetail("Fonte", official.sourceReference)
-        if (official.fields.isNotEmpty()) {
-            KeyValueList(official.fields)
+        if (!compactUntilOpened || expanded) {
+            ZoneOptionalDetail("Fonte", official.sourceReference)
+            if (official.fields.isNotEmpty()) {
+                KeyValueList(official.fields)
+            }
         }
         official.sourceText?.takeIf { it.isNotBlank() }?.let { text ->
-            Text(
-                text = text,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = if (expanded) Int.MAX_VALUE else 4,
-                overflow = if (expanded) TextOverflow.Clip else TextOverflow.Ellipsis
-            )
             TextButton(onClick = { expanded = !expanded }) {
-                Text(if (expanded) "Comprimi testo" else "Leggi testo completo")
+                Text(if (expanded) closeLabel else openLabel)
+            }
+            if (expanded || !compactUntilOpened) {
+                Text(
+                    text = text,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = if (expanded) Int.MAX_VALUE else 4,
+                    overflow = if (expanded) TextOverflow.Clip else TextOverflow.Ellipsis
+                )
             }
         }
     }
@@ -872,8 +883,8 @@ private fun ValiditySection(validity: ValidityInfo?) {
     if (validity == null || !validity.hasContent()) return
 
     ZoneSection(title = "Validita e orari") {
-        ZoneOptionalDetail("Da", validity.validFrom)
-        ZoneOptionalDetail("A", validity.validTo)
+        ZoneOptionalDetail("Da", validity.validFrom.formatNotamUtcDate())
+        ZoneOptionalDetail("A", validity.validTo.formatNotamUtcDate())
         ZoneOptionalDetail("Schedule", validity.schedule)
         ZoneOptionalDetail("Schedule interpretata", validity.interpretedSchedule)
     }
@@ -899,12 +910,24 @@ private fun NotamSection(notams: List<NotamInfo>) {
                 ZoneOptionalDetail("Zona", notam.zoneReference)
                 ZoneOptionalDetail("Attivita", notam.activityType)
                 ZoneOptionalDetail("Impatto", notam.severity?.toUserText())
-                ZoneOptionalDetail("Sintesi", notam.summary)
-                ZoneOptionalDetail("Spiegazione", notam.explanation)
+                ZoneOptionalDetail("Inizio schedulazione del NOTAM", notam.validity?.validFrom.formatNotamUtcDate())
+                ZoneOptionalDetail("Fine schedulazione del NOTAM", notam.validity?.validTo.formatNotamUtcDate())
+                ZoneOptionalDetail(
+                    "Orari",
+                    notam.schedule?.human
+                        ?: notam.validity?.interpretedSchedule
+                        ?: notam.validity?.schedule.toItalianNotamSchedule()
+                )
+                ZoneOptionalDetail("Spiegazione DSC", notam.explanation.distinctFrom(notam.schedule?.human))
                 ZoneOptionalDetail("Significato operativo", notam.operationalMeaning)
                 ZoneOptionalDetail("Motivo bloccante", notam.blockingReason)
-                ValiditySection(notam.validity)
-                OfficialSection(notam.official, title = "Testo ufficiale NOTAM")
+                OfficialSection(
+                    official = notam.official,
+                    title = "Testo ufficiale NOTAM",
+                    compactUntilOpened = true,
+                    openLabel = "Apri testo ufficiale",
+                    closeLabel = "Chiudi testo ufficiale"
+                )
                 if (notam.blockers.isNotEmpty()) ZoneOptionalDetail("Blocker", notam.blockers.joinIssues())
                 if (notam.warnings.isNotEmpty()) ZoneOptionalDetail("Warning", notam.warnings.joinIssues())
             }
@@ -918,15 +941,25 @@ private fun EnrSection(enr: EnrInfo?) {
 
     ZoneSection(title = "ENR") {
         ZoneOptionalDetail("Nome", enr.name)
+        ZoneOptionalDetail("Stato", enr.validity?.statusLabel())
+        ZoneOptionalDetail("Descrizione", enr.description.usableUserText())
+        ZoneOptionalDetail("Orari di attivita", enr.schedule?.human ?: enr.validity?.schedule)
+        ZoneOptionalDetail("Limiti", enr.limitText.usableUserText())
+        ZoneOptionalDetail("Note", enr.notes.usableUserText())
         ZoneOptionalDetail("Attivazione", enr.activationType?.toUserText())
         ZoneOptionalDetail("Operazioni", enr.operationSummary())
         ZoneOptionalDetail("Attestato di competenza minimo richiesto", enr.requiredLicense.formatRequiredLicense())
         ZoneOptionalDetail("Autorizzazione", enr.authorizationRequired?.formatBoolean())
-        ZoneOptionalDetail("Spiegazione", enr.explanation)
+        ZoneOptionalDetail("Spiegazione", enr.explanation.distinctFrom(enr.schedule?.human))
         ZoneOptionalDetail("Significato operativo", enr.operationalMeaning)
-        ValiditySection(enr.validity)
         AuthoritySection(enr.authority)
-        OfficialSection(enr.official, title = "Testo ufficiale ENR")
+        OfficialSection(
+            official = enr.official,
+            title = "Dettagli ufficiali ENR",
+            compactUntilOpened = true,
+            openLabel = "Apri dettagli ufficiali",
+            closeLabel = "Chiudi dettagli ufficiali"
+        )
     }
 }
 
@@ -1114,6 +1147,12 @@ private fun ValidityInfo.hasContent(): Boolean =
         future != null ||
         expired != null
 
+private fun it.droneskycheck.app.data.ScheduleInfo.hasContent(): Boolean =
+    !raw.isNullOrBlank() ||
+        !human.isNullOrBlank() ||
+        activeNow != null ||
+        !explanation.isNullOrBlank()
+
 private fun AuthorizationInfo.hasContent(): Boolean =
     required != null ||
         !requirement.isNullOrBlank() ||
@@ -1131,12 +1170,16 @@ private fun AuthorityInfo.hasContent(): Boolean =
 private fun EnrInfo.hasContent(): Boolean =
     !code.isNullOrBlank() ||
         !name.isNullOrBlank() ||
+        !description.isNullOrBlank() ||
+        !limitText.isNullOrBlank() ||
+        !notes.isNullOrBlank() ||
         !classification.isNullOrBlank() ||
         !activationType.isNullOrBlank() ||
         !operationMode.isNullOrBlank() ||
         !operationCategory.isNullOrBlank() ||
         !requiredLicense.isNullOrBlank() ||
         authorizationRequired != null ||
+        schedule?.hasContent() == true ||
         authority?.hasContent() == true ||
         official?.hasContent() == true ||
         validity?.hasContent() == true ||
@@ -1230,7 +1273,7 @@ private fun dscAltitudeColor(limit: Int): Color =
         limit <= 25 -> DscZoneMapColors.limited25m.toComposeColor()
         limit <= 45 -> DscZoneMapColors.limited45m.toComposeColor()
         limit <= 60 -> DscZoneMapColors.limited60m.toComposeColor()
-        else -> MaterialTheme.colorScheme.primary
+        else -> OpenVerdictColor
     }
 
 private fun it.droneskycheck.app.map.Rgba.toComposeColor(): Color =
@@ -1266,6 +1309,7 @@ private fun NotamInfo.hasUsefulContent(): Boolean =
         (
             !summary.isNullOrBlank() ||
                 !explanation.isNullOrBlank() ||
+                schedule?.hasContent() == true ||
                 !operationalMeaning.isNullOrBlank() ||
                 official?.hasContent() == true ||
                 validity?.hasContent() == true
@@ -1287,6 +1331,16 @@ private fun String.cleanZoneName(): String =
 
 private fun String.cleanUserText(): String =
     toUserText().replace(Regex("\\s+"), " ").trim()
+
+private fun String?.usableUserText(): String? =
+    this?.cleanUserText()
+        ?.takeUnless { it.isBlank() || it.equals("NIL", ignoreCase = true) }
+
+private fun String?.distinctFrom(other: String?): String? {
+    val value = usableUserText() ?: return null
+    val compare = other.usableUserText() ?: return value
+    return value.takeUnless { it.equals(compare, ignoreCase = true) }
+}
 
 private fun String.toUserText(): String =
     when (trim().uppercase()) {
@@ -1407,6 +1461,52 @@ private fun AuthorityInfo.formatRequestContacts(): String? {
             append(emails.distinct().joinToString(", "))
         }
     }
+}
+
+private fun String?.formatNotamUtcDate(): String? {
+    if (isNullOrBlank()) return null
+    val value = trim()
+
+    runCatching {
+        return NotamUtcFormatter.format(Instant.parse(value))
+    }
+
+    val compact = Regex("""^(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$""").matchEntire(value)
+        ?: return value
+    val date = LocalDateTime.of(
+        2000 + compact.groupValues[1].toInt(),
+        compact.groupValues[2].toInt(),
+        compact.groupValues[3].toInt(),
+        compact.groupValues[4].toInt(),
+        compact.groupValues[5].toInt()
+    )
+    return NotamUtcFormatter.format(date.atOffset(ZoneOffset.UTC))
+}
+
+private fun String?.toItalianNotamSchedule(): String? {
+    if (isNullOrBlank()) return null
+    val value = trim().uppercase().replace(Regex("\\s+"), " ")
+    val dayText = when {
+        "DAILY" in value -> "Ogni giorno"
+        Regex("\\bMON-FRI\\b").containsMatchIn(value) -> "Da lunedi a venerdi"
+        Regex("\\bMON-THU\\b").containsMatchIn(value) -> "Da lunedi a giovedi"
+        Regex("\\bSAT\\b").containsMatchIn(value) -> "Sabato"
+        Regex("\\bSUN\\b").containsMatchIn(value) -> "Domenica"
+        Regex("\\bFRI\\b").containsMatchIn(value) -> "Venerdi"
+        Regex("\\bTHU\\b").containsMatchIn(value) -> "Giovedi"
+        Regex("\\bWED\\b").containsMatchIn(value) -> "Mercoledi"
+        Regex("\\bTUE\\b").containsMatchIn(value) -> "Martedi"
+        Regex("\\bMON\\b").containsMatchIn(value) -> "Lunedi"
+        else -> null
+    }
+    val time = Regex("""\b(\d{2})(\d{2})-(\d{2})(\d{2})\b""").find(value)
+    val timeText = time?.let {
+        "dalle ${it.groupValues[1]}:${it.groupValues[2]} alle ${it.groupValues[3]}:${it.groupValues[4]} UTC"
+    } ?: if ("H24" in value) "24 ore su 24 UTC" else null
+
+    return listOfNotNull(dayText, timeText)
+        .joinToString(" ")
+        .ifBlank { value }
 }
 
 private fun String.parseJsonObjectOrNull(): JSONObject? =
@@ -1589,5 +1689,8 @@ private val LocationPermissions = arrayOf(
 private const val LOCATION_MIN_TIME_MS = 2_500L
 private const val LOCATION_MIN_DISTANCE_METERS = 5f
 private val ZoneSheetMaxHeight = 720.dp
+private val NotamUtcFormatter: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm 'UTC'").withZone(ZoneOffset.UTC)
+private val OpenVerdictColor = Color(46, 125, 50)
 private val InactiveZonePillColor = Color(46, 125, 50)
 private const val CoordinateDecimals = 5

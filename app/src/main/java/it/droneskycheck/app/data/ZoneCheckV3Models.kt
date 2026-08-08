@@ -110,6 +110,13 @@ data class ValidityInfo(
     val expired: Boolean?
 )
 
+data class ScheduleInfo(
+    val raw: String?,
+    val human: String?,
+    val activeNow: Boolean?,
+    val explanation: String?
+)
+
 data class AuthorizationInfo(
     val required: Boolean?,
     val requirement: String?,
@@ -137,6 +144,7 @@ data class NotamInfo(
     val explanation: String?,
     val operationalMeaning: String?,
     val blockingReason: String?,
+    val schedule: ScheduleInfo?,
     val official: OfficialInfo?,
     val validity: ValidityInfo?,
     val blockers: List<Issue> = emptyList(),
@@ -146,12 +154,16 @@ data class NotamInfo(
 data class EnrInfo(
     val code: String?,
     val name: String?,
+    val description: String?,
+    val limitText: String?,
+    val notes: String?,
     val classification: String?,
     val activationType: String?,
     val operationMode: String?,
     val operationCategory: String?,
     val requiredLicense: String?,
     val authorizationRequired: Boolean?,
+    val schedule: ScheduleInfo?,
     val authority: AuthorityInfo?,
     val official: OfficialInfo?,
     val validity: ValidityInfo?,

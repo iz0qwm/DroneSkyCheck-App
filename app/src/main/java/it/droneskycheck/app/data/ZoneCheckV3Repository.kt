@@ -157,6 +157,7 @@ private fun JSONObject.toNotamInfo(): NotamInfo =
         explanation = optFirstString("explanation"),
         operationalMeaning = optFirstString("operationalMeaning", "meaning"),
         blockingReason = optFirstString("blockingReason"),
+        schedule = optJSONObject("schedule")?.toScheduleInfo(),
         official = (optJSONObject("official") ?: optJSONObject("raw"))?.toOfficialInfo()
             ?: toOfficialInfoFromInlineFields(),
         validity = optJSONObject("validity")?.toValidityInfo() ?: toValidityInfo(),
@@ -168,12 +169,16 @@ private fun JSONObject.toEnrInfo(): EnrInfo =
     EnrInfo(
         code = optFirstString("code", "reference", "id"),
         name = optFirstString("name", "title"),
+        description = optFirstString("description", "desc"),
+        limitText = optFirstString("limitText"),
+        notes = optFirstString("notes"),
         classification = optFirstString("classification", "type"),
         activationType = optFirstString("activationType"),
         operationMode = optFirstString("operationMode"),
         operationCategory = optFirstString("operationCategory"),
         requiredLicense = optFirstString("requiredLicense"),
         authorizationRequired = optFirstBoolean("authorizationRequired"),
+        schedule = optJSONObject("schedule")?.toScheduleInfo(),
         authority = optJSONObject("authority")?.toAuthorityInfo(),
         official = (optJSONObject("official") ?: optJSONObject("source"))?.toOfficialInfo()
             ?: toOfficialInfoFromInlineFields(),
@@ -234,6 +239,14 @@ private fun JSONObject.toValidityInfo(): ValidityInfo =
         explanation = optFirstString("explanation", "stateExplanation"),
         future = optFirstBoolean("future", "isFuture"),
         expired = optFirstBoolean("expired", "isExpired")
+    )
+
+private fun JSONObject.toScheduleInfo(): ScheduleInfo =
+    ScheduleInfo(
+        raw = optFirstString("raw", "rawSchedule", "original"),
+        human = optFirstString("human", "scheduleHuman", "interpretedSchedule"),
+        activeNow = optFirstBoolean("activeNow"),
+        explanation = optFirstString("explanation")
     )
 
 private fun JSONObject.toOfficialInfo(): OfficialInfo =
