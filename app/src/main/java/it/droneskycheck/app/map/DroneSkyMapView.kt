@@ -9,6 +9,8 @@ import android.graphics.Paint
 import android.graphics.PointF
 import android.graphics.RectF
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -23,27 +25,48 @@ import it.droneskycheck.app.ui.map.CameraBounds
 import it.droneskycheck.app.ui.map.DemoZone
 import it.droneskycheck.app.ui.map.MapPoint
 import it.droneskycheck.app.ui.map.MapTapSelection
-import java.net.URI
+import it.droneskycheck.app.ui.map.UserLocation
+import java.net.HttpURLConnection
+import java.net.URL
+import java.util.concurrent.Executors
 import org.maplibre.android.camera.CameraPosition
+import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
 import org.maplibre.android.style.expressions.Expression
+import org.maplibre.android.style.layers.CircleLayer
 import org.maplibre.android.style.layers.FillLayer
 import org.maplibre.android.style.layers.Layer
 import org.maplibre.android.style.layers.LineLayer
+import org.maplibre.android.style.layers.Property
+import org.maplibre.android.style.layers.PropertyFactory.circleBlur
+import org.maplibre.android.style.layers.PropertyFactory.circleColor
+import org.maplibre.android.style.layers.PropertyFactory.circleOpacity
+import org.maplibre.android.style.layers.PropertyFactory.circleRadius
+import org.maplibre.android.style.layers.PropertyFactory.circleStrokeColor
+import org.maplibre.android.style.layers.PropertyFactory.circleStrokeOpacity
+import org.maplibre.android.style.layers.PropertyFactory.circleStrokeWidth
 import org.maplibre.android.style.layers.PropertyFactory.fillColor
 import org.maplibre.android.style.layers.PropertyFactory.fillOpacity
 import org.maplibre.android.style.layers.PropertyFactory.fillPattern
 import org.maplibre.android.style.layers.PropertyFactory.lineColor
 import org.maplibre.android.style.layers.PropertyFactory.lineOpacity
 import org.maplibre.android.style.layers.PropertyFactory.lineWidth
+import org.maplibre.android.style.layers.PropertyFactory.visibility
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.geojson.Feature
+import org.maplibre.geojson.FeatureCollection
+import org.maplibre.geojson.Point
 
 @Composable
 fun DroneSkyMapView(
+    visibleLayerCategories: Set<DscLayerCategory>,
+    selectedPoint: MapPoint?,
+    userLocation: UserLocation?,
+    shouldCenterOnUserLocation: Boolean,
+    onUserLocationCentered: () -> Unit,
     onMapTapped: (MapTapSelection) -> Unit,
     onCameraIdle: (CameraBounds) -> Unit,
     modifier: Modifier = Modifier
@@ -54,7 +77,7 @@ fun DroneSkyMapView(
         MapView(context).apply {
             onCreate(Bundle())
             getMapAsync { map ->
-                configureMap(map, onMapTapped, onCameraIdle)
+                configureMap(this, map, visibleLayerCategories, onMapTapped, onCameraIdle)
             }
         }
     }
@@ -99,12 +122,26 @@ fun DroneSkyMapView(
 
     AndroidView(
         factory = { mapView },
+        update = { view ->
+            view.getMapAsync { map ->
+                map.getStyle { style ->
+                    applyLayerVisibility(style, visibleLayerCategories)
+                    updatePointMarkers(style, selectedPoint, userLocation)
+                    if (shouldCenterOnUserLocation && userLocation != null) {
+                        centerOnUserLocation(map, userLocation)
+                        onUserLocationCentered()
+                    }
+                }
+            }
+        },
         modifier = modifier
     )
 }
 
 private fun configureMap(
+    mapView: MapView,
     map: MapLibreMap,
+    visibleLayerCategories: Set<DscLayerCategory>,
     onMapTapped: (MapTapSelection) -> Unit,
     onCameraIdle: (CameraBounds) -> Unit
 ) {
@@ -114,44 +151,15 @@ private fun configureMap(
         .build()
 
     val styleBuilder = Style.Builder().fromUri(MapLayerIds.STYLE_URL)
-    MapLayerIds.STATIC_LAYERS.forEach { layer ->
-        styleBuilder
-            .withSource(GeoJsonSource(layer.sourceId, URI(layer.url)))
-            .withLayer(
-                FillLayer(
-                    layer.fillLayerId,
-                    layer.sourceId
-                ).withProperties(
-                    fillColor(zoneFillColorExpression()),
-                    fillOpacity(DscZoneMapColors.fillOpacityExpression(layer))
-                ).withZoomRange(layer)
-            )
-        if (layer.usesZebraPattern) {
-            styleBuilder.withLayer(
-                FillLayer(
-                    layer.zebraLayerId,
-                    layer.sourceId
-                ).withProperties(
-                    fillPattern(NOTAM_ZEBRA_PATTERN_ID),
-                    fillOpacity(NOTAM_ZEBRA_OPACITY)
-                ).withZoomRange(layer)
-            )
-        }
-        styleBuilder
-            .withLayer(
-                LineLayer(
-                    layer.lineLayerId,
-                    layer.sourceId
-                ).withProperties(
-                    lineColor(zoneLineColorExpression()),
-                    lineOpacity(DscZoneMapColors.lineOpacityExpression()),
-                    lineWidth(layer.lineWidth)
-                ).withZoomRange(layer)
-            )
-    }
 
     map.setStyle(styleBuilder) {
         it.addImage(NOTAM_ZEBRA_PATTERN_ID, createNotamZebraPattern())
+        addDscLayers(it)
+        addPointMarkerLayers(it)
+        updatePointMarkers(it, null, null)
+        loadDscGeoJsonSources(it)
+        applyLayerVisibility(it, visibleLayerCategories)
+        logFocusLayerState(mapView, map, it, visibleLayerCategories, map.cameraPosition.zoom)
 
         map.addOnMapClickListener { latLng ->
             val selectedZone = map.queryRenderedFeatures(
@@ -182,10 +190,263 @@ private fun configureMap(
                 "camera idle zoom=${cameraBounds.zoom}, bbox=${cameraBounds.bbox}"
             )
             onCameraIdle(cameraBounds)
+            map.getStyle { style ->
+                logFocusLayerState(mapView, map, style, visibleLayerCategories, cameraBounds.zoom)
+            }
         }
 
         Log.d(LOG_TAG, "Loaded DSC static GeoJSON layers from ${MapLayerIds.KWOS_DATA_BASE_URL}")
     }
+}
+
+private fun addPointMarkerLayers(style: Style) {
+    style.addSource(GeoJsonSource(SELECTED_POINT_SOURCE_ID, emptyFeatureCollection()))
+    style.addSource(GeoJsonSource(USER_LOCATION_SOURCE_ID, emptyFeatureCollection()))
+
+    style.addLayer(
+        CircleLayer(SELECTED_POINT_RING_LAYER_ID, SELECTED_POINT_SOURCE_ID)
+            .withProperties(
+                circleRadius(14.0f),
+                circleColor("#ffffff"),
+                circleOpacity(0.82f),
+                circleStrokeColor(DscZoneMapColors.noFly0m.webHex),
+                circleStrokeWidth(3.0f),
+                circleStrokeOpacity(0.98f)
+            )
+    )
+    style.addLayer(
+        CircleLayer(SELECTED_POINT_DOT_LAYER_ID, SELECTED_POINT_SOURCE_ID)
+            .withProperties(
+                circleRadius(4.0f),
+                circleColor(DscZoneMapColors.noFly0m.webHex),
+                circleStrokeColor("#ffffff"),
+                circleStrokeWidth(1.4f)
+            )
+    )
+
+    style.addLayer(
+        CircleLayer(USER_LOCATION_ACCURACY_LAYER_ID, USER_LOCATION_SOURCE_ID)
+            .withProperties(
+                circleRadius(userAccuracyRadiusExpression()),
+                circleColor("#1e88e5"),
+                circleOpacity(0.16f),
+                circleStrokeColor("#1e88e5"),
+                circleStrokeOpacity(0.34f),
+                circleStrokeWidth(1.0f)
+            )
+    )
+    style.addLayer(
+        CircleLayer(USER_LOCATION_DOT_LAYER_ID, USER_LOCATION_SOURCE_ID)
+            .withProperties(
+                circleRadius(8.0f),
+                circleColor("#1e88e5"),
+                circleStrokeColor("#ffffff"),
+                circleStrokeWidth(3.0f)
+            )
+    )
+    style.addLayer(
+        CircleLayer(USER_LOCATION_PULSE_LAYER_ID, USER_LOCATION_SOURCE_ID)
+            .withProperties(
+                circleRadius(15.0f),
+                circleColor("#1e88e5"),
+                circleOpacity(0.0f),
+                circleStrokeColor("#1e88e5"),
+                circleStrokeWidth(2.0f),
+                circleStrokeOpacity(0.45f),
+                circleBlur(0.2f)
+            )
+    )
+}
+
+private fun updatePointMarkers(
+    style: Style,
+    selectedPoint: MapPoint?,
+    userLocation: UserLocation?
+) {
+    style.getSourceAs<GeoJsonSource>(SELECTED_POINT_SOURCE_ID)
+        ?.setGeoJson(selectedPoint?.toFeatureCollection() ?: emptyFeatureCollection())
+    style.getSourceAs<GeoJsonSource>(USER_LOCATION_SOURCE_ID)
+        ?.setGeoJson(userLocation?.toFeatureCollection() ?: emptyFeatureCollection())
+}
+
+private fun centerOnUserLocation(map: MapLibreMap, userLocation: UserLocation) {
+    val currentZoom = map.cameraPosition.zoom
+    map.animateCamera(
+        CameraUpdateFactory.newLatLngZoom(
+            LatLng(userLocation.point.lat, userLocation.point.lon),
+            maxOf(currentZoom, USER_LOCATION_CENTER_ZOOM)
+        )
+    )
+}
+
+private fun addDscLayers(style: Style) {
+    MapLayerIds.STATIC_LAYERS.forEach { layer ->
+        logLayerDefinition(layer)
+        style.addSource(GeoJsonSource(layer.sourceId))
+        style.addLayer(
+                FillLayer(
+                    layer.fillLayerId,
+                    layer.sourceId
+                ).withProperties(
+                    fillColor(zoneFillColorExpression()),
+                    fillOpacity(DscZoneMapColors.fillOpacityExpression(layer))
+                ).withZoomRange(layer)
+            )
+        if (layer.usesZebraPattern) {
+            style.addLayer(
+                FillLayer(
+                    layer.zebraLayerId,
+                    layer.sourceId
+                ).withProperties(
+                    fillPattern(NOTAM_ZEBRA_PATTERN_ID),
+                    fillOpacity(NOTAM_ZEBRA_OPACITY)
+                ).withZoomRange(layer)
+            )
+        }
+        style.addLayer(
+                LineLayer(
+                    layer.lineLayerId,
+                    layer.sourceId
+                ).withProperties(
+                    lineColor(zoneLineColorExpression()),
+                    lineOpacity(DscZoneMapColors.lineOpacityExpression()),
+                    lineWidth(layer.lineWidth)
+                ).withZoomRange(layer)
+            )
+    }
+}
+
+private fun loadDscGeoJsonSources(style: Style) {
+    MapLayerIds.STATIC_LAYERS.forEach { layer ->
+        DSC_GEOJSON_EXECUTOR.execute {
+            val startedAt = System.currentTimeMillis()
+            runCatching {
+                val connection = (URL(layer.url).openConnection() as HttpURLConnection).apply {
+                    connectTimeout = GEOJSON_CONNECT_TIMEOUT_MS
+                    readTimeout = GEOJSON_READ_TIMEOUT_MS
+                    requestMethod = "GET"
+                    useCaches = true
+                }
+
+                try {
+                    val statusCode = connection.responseCode
+                    if (statusCode !in 200..299) {
+                        error("HTTP $statusCode")
+                    }
+
+                    connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                } finally {
+                    connection.disconnect()
+                }
+            }.mapCatching { geoJson ->
+                geoJson to FeatureCollection.fromJson(geoJson)
+            }.onSuccess { (geoJson, featureCollection) ->
+                val elapsedMs = System.currentTimeMillis() - startedAt
+                if (layer.category in DIAGNOSTIC_CATEGORIES) {
+                    Log.d(
+                        LOG_TAG,
+                        "[layer-debug] fetch key=${layer.key}, bytes=${geoJson.length}, " +
+                            "features=${featureCollection.features()?.size ?: 0}, elapsedMs=$elapsedMs"
+                    )
+                }
+                MAIN_HANDLER.post {
+                    style.getSourceAs<GeoJsonSource>(layer.sourceId)
+                        ?.setGeoJson(featureCollection)
+                    if (layer.category in DIAGNOSTIC_CATEGORIES) {
+                        Log.d(LOG_TAG, "[layer-debug] source populated key=${layer.key}")
+                    }
+                }
+            }.onFailure { error ->
+                Log.w(LOG_TAG, "[layer-debug] fetch failed key=${layer.key}, url=${layer.url}", error)
+            }
+        }
+    }
+}
+
+private fun applyLayerVisibility(style: Style, visibleLayerCategories: Set<DscLayerCategory>) {
+    MapLayerIds.STATIC_LAYERS.forEach { layer ->
+        val nextVisibility = if (layer.category in visibleLayerCategories) {
+            Property.VISIBLE
+        } else {
+            Property.NONE
+        }
+
+        style.getLayer(layer.fillLayerId)?.setProperties(visibility(nextVisibility))
+        if (layer.usesZebraPattern) {
+            style.getLayer(layer.zebraLayerId)?.setProperties(visibility(nextVisibility))
+        }
+        style.getLayer(layer.lineLayerId)?.setProperties(visibility(nextVisibility))
+    }
+}
+
+private fun logLayerDefinition(layer: DscMapLayer) {
+    if (layer.category !in DIAGNOSTIC_CATEGORIES) return
+
+    Log.d(
+        LOG_TAG,
+        "[layer-debug] define key=${layer.key}, category=${layer.category.name}, " +
+            "source=${layer.sourceId}, fill=${layer.fillLayerId}, line=${layer.lineLayerId}, " +
+            "minZoom=${layer.minZoom}, url=${layer.url}"
+    )
+}
+
+private fun logFocusLayerState(
+    mapView: MapView,
+    map: MapLibreMap,
+    style: Style,
+    visibleLayerCategories: Set<DscLayerCategory>,
+    zoom: Double
+) {
+    MapLayerIds.STATIC_LAYERS
+        .filter { it.category in DIAGNOSTIC_CATEGORIES }
+        .forEach { layer ->
+            val visibleCategory = layer.category in visibleLayerCategories
+            val meetsMinZoom = zoom >= layer.minZoom
+            val fillLayerPresent = style.getLayer(layer.fillLayerId) != null
+            val lineLayerPresent = style.getLayer(layer.lineLayerId) != null
+            val zebraLayerPresent = !layer.usesZebraPattern || style.getLayer(layer.zebraLayerId) != null
+            val sourceFeatureCount = countSourceFeatures(style, layer)
+            val renderedFeatureCount = countRenderedFeatures(mapView, map, layer)
+
+            Log.d(
+                LOG_TAG,
+                "[layer-debug] state key=${layer.key}, category=${layer.category.name}, " +
+                    "visibleCategory=$visibleCategory, zoom=${"%.2f".format(zoom)}, " +
+                    "minZoom=${layer.minZoom}, meetsMinZoom=$meetsMinZoom, " +
+                    "fillLayer=$fillLayerPresent, lineLayer=$lineLayerPresent, " +
+                    "zebraLayer=$zebraLayerPresent, sourceFeatures=$sourceFeatureCount, " +
+                    "renderedFeatures=$renderedFeatureCount"
+            )
+        }
+}
+
+private fun countSourceFeatures(style: Style, layer: DscMapLayer): Int? =
+    runCatching {
+        style.getSourceAs<GeoJsonSource>(layer.sourceId)
+            ?.querySourceFeatures(Expression.literal(true))
+            ?.size
+    }.onFailure { error ->
+        Log.w(LOG_TAG, "[layer-debug] source feature query failed for ${layer.key}", error)
+    }.getOrNull()
+
+private fun countRenderedFeatures(
+    mapView: MapView,
+    map: MapLibreMap,
+    layer: DscMapLayer
+): Int? {
+    val width = mapView.width
+    val height = mapView.height
+    if (width <= 0 || height <= 0) return null
+
+    return runCatching {
+        map.queryRenderedFeatures(
+            RectF(0f, 0f, width.toFloat(), height.toFloat()),
+            layer.fillLayerId,
+            layer.lineLayerId
+        ).size
+    }.onFailure { error ->
+        Log.w(LOG_TAG, "[layer-debug] rendered feature query failed for ${layer.key}", error)
+    }.getOrNull()
 }
 
 private fun <T : Layer> T.withZoomRange(layer: DscMapLayer): T {
@@ -223,6 +484,33 @@ private fun featureToDemoZone(feature: Feature): DemoZone {
             ?: properties?.stringValue("message")
     )
 }
+
+private fun emptyFeatureCollection(): FeatureCollection =
+    FeatureCollection.fromFeatures(emptyList())
+
+private fun MapPoint.toFeatureCollection(): FeatureCollection =
+    FeatureCollection.fromFeature(
+        Feature.fromGeometry(Point.fromLngLat(lon, lat))
+    )
+
+private fun UserLocation.toFeatureCollection(): FeatureCollection {
+    val feature = Feature.fromGeometry(Point.fromLngLat(point.lon, point.lat))
+    feature.addBooleanProperty("precise", isPrecise)
+    feature.addNumberProperty("accuracyMeters", accuracyMeters ?: DEFAULT_APPROXIMATE_ACCURACY_METERS)
+    return FeatureCollection.fromFeature(feature)
+}
+
+private fun userAccuracyRadiusExpression(): Expression =
+    Expression.interpolate(
+        Expression.linear(),
+        Expression.get("accuracyMeters"),
+        Expression.literal(50),
+        Expression.literal(22.0f),
+        Expression.literal(500),
+        Expression.literal(34.0f),
+        Expression.literal(3_000),
+        Expression.literal(48.0f)
+    )
 
 private fun interactiveLayerIds(): Array<String> =
     MapLayerIds.STATIC_LAYERS
@@ -282,10 +570,27 @@ private fun zoneLineColorExpression(): Expression =
 private const val ROME_LATITUDE = 41.9028
 private const val ROME_LONGITUDE = 12.4964
 private const val ROME_ZOOM = 10.0
+private const val USER_LOCATION_CENTER_ZOOM = 15.0
+private const val DEFAULT_APPROXIMATE_ACCURACY_METERS = 3_000f
 private const val TAP_HIT_SLOP_PX = 18.0f
+private const val SELECTED_POINT_SOURCE_ID = "dsc-selected-point-source"
+private const val SELECTED_POINT_RING_LAYER_ID = "dsc-selected-point-ring"
+private const val SELECTED_POINT_DOT_LAYER_ID = "dsc-selected-point-dot"
+private const val USER_LOCATION_SOURCE_ID = "dsc-user-location-source"
+private const val USER_LOCATION_ACCURACY_LAYER_ID = "dsc-user-location-accuracy"
+private const val USER_LOCATION_DOT_LAYER_ID = "dsc-user-location-dot"
+private const val USER_LOCATION_PULSE_LAYER_ID = "dsc-user-location-pulse"
 private const val NOTAM_ZEBRA_PATTERN_ID = "dsc-notam-zebra"
 private const val NOTAM_ZEBRA_SIZE_PX = 16
 private const val NOTAM_ZEBRA_STEP_PX = 8
 private const val NOTAM_ZEBRA_STROKE_PX = 2.5f
 private const val NOTAM_ZEBRA_OPACITY = 0.22f
+private const val GEOJSON_CONNECT_TIMEOUT_MS = 15_000
+private const val GEOJSON_READ_TIMEOUT_MS = 45_000
 private const val LOG_TAG = "DroneSkyMap"
+private val DIAGNOSTIC_CATEGORIES = setOf(
+    DscLayerCategory.Airports,
+    DscLayerCategory.Aviosuperfici
+)
+private val MAIN_HANDLER = Handler(Looper.getMainLooper())
+private val DSC_GEOJSON_EXECUTOR = Executors.newFixedThreadPool(3)
