@@ -21,13 +21,13 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import it.droneskycheck.app.data.CachedGeoJsonRepository
+import it.droneskycheck.app.data.ZonesRepository
 import it.droneskycheck.app.ui.map.CameraBounds
 import it.droneskycheck.app.ui.map.DemoZone
 import it.droneskycheck.app.ui.map.MapPoint
 import it.droneskycheck.app.ui.map.MapTapSelection
 import it.droneskycheck.app.ui.map.UserLocation
-import java.net.HttpURLConnection
-import java.net.URL
 import java.util.concurrent.Executors
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
@@ -69,6 +69,7 @@ fun DroneSkyMapView(
     onUserLocationCentered: () -> Unit,
     onMapTapped: (MapTapSelection) -> Unit,
     onCameraIdle: (CameraBounds) -> Unit,
+    onMapDataDegraded: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -77,7 +78,7 @@ fun DroneSkyMapView(
         MapView(context).apply {
             onCreate(Bundle())
             getMapAsync { map ->
-                configureMap(this, map, visibleLayerCategories, onMapTapped, onCameraIdle)
+                configureMap(this, map, visibleLayerCategories, onMapTapped, onCameraIdle, onMapDataDegraded)
             }
         }
     }
@@ -126,6 +127,13 @@ fun DroneSkyMapView(
             view.getMapAsync { map ->
                 map.getStyle { style ->
                     applyLayerVisibility(style, visibleLayerCategories)
+                    loadDynamicZonesSources(
+                        zonesRepository = ZonesRepository(view.context.applicationContext),
+                        style = style,
+                        cameraBounds = map.currentCameraBounds(),
+                        visibleLayerCategories = visibleLayerCategories,
+                        onMapDataDegraded = onMapDataDegraded
+                    )
                     updatePointMarkers(style, selectedPoint, userLocation)
                     if (shouldCenterOnUserLocation && userLocation != null) {
                         centerOnUserLocation(map, userLocation)
@@ -143,7 +151,8 @@ private fun configureMap(
     map: MapLibreMap,
     visibleLayerCategories: Set<DscLayerCategory>,
     onMapTapped: (MapTapSelection) -> Unit,
-    onCameraIdle: (CameraBounds) -> Unit
+    onCameraIdle: (CameraBounds) -> Unit,
+    onMapDataDegraded: () -> Unit
 ) {
     map.cameraPosition = CameraPosition.Builder()
         .target(LatLng(ROME_LATITUDE, ROME_LONGITUDE))
@@ -151,13 +160,22 @@ private fun configureMap(
         .build()
 
     val styleBuilder = Style.Builder().fromUri(MapLayerIds.STYLE_URL)
+    val geoJsonRepository = CachedGeoJsonRepository(mapView.context.applicationContext)
+    val zonesRepository = ZonesRepository(mapView.context.applicationContext)
 
     map.setStyle(styleBuilder) {
         it.addImage(NOTAM_ZEBRA_PATTERN_ID, createNotamZebraPattern())
         addDscLayers(it)
         addPointMarkerLayers(it)
         updatePointMarkers(it, null, null)
-        loadDscGeoJsonSources(it)
+        loadDscGeoJsonSources(geoJsonRepository, it, onMapDataDegraded)
+        loadDynamicZonesSources(
+            zonesRepository,
+            it,
+            map.currentCameraBounds(),
+            visibleLayerCategories,
+            onMapDataDegraded
+        )
         applyLayerVisibility(it, visibleLayerCategories)
         logFocusLayerState(mapView, map, it, visibleLayerCategories, map.cameraPosition.zoom)
 
@@ -191,6 +209,13 @@ private fun configureMap(
             )
             onCameraIdle(cameraBounds)
             map.getStyle { style ->
+                loadDynamicZonesSources(
+                    zonesRepository,
+                    style,
+                    cameraBounds,
+                    visibleLayerCategories,
+                    onMapDataDegraded
+                )
                 logFocusLayerState(mapView, map, style, visibleLayerCategories, cameraBounds.zoom)
             }
         }
@@ -314,39 +339,52 @@ private fun addDscLayers(style: Style) {
                 ).withZoomRange(layer)
             )
     }
+    MapLayerIds.DYNAMIC_ZONES_LAYERS.forEach { layer ->
+        style.addSource(GeoJsonSource(layer.sourceId, emptyFeatureCollection()))
+        style.addLayer(
+            FillLayer(
+                layer.fillLayerId,
+                layer.sourceId
+            ).withProperties(
+                fillColor(zoneFillColorExpression()),
+                fillOpacity(DscZoneMapColors.fillOpacityExpression(layer))
+            ).withZoomRange(layer)
+        )
+        style.addLayer(
+            LineLayer(
+                layer.lineLayerId,
+                layer.sourceId
+            ).withProperties(
+                lineColor(zoneLineColorExpression()),
+                lineOpacity(DscZoneMapColors.lineOpacityExpression()),
+                lineWidth(layer.lineWidth)
+            ).withZoomRange(layer)
+        )
+    }
 }
 
-private fun loadDscGeoJsonSources(style: Style) {
+private fun loadDscGeoJsonSources(
+    geoJsonRepository: CachedGeoJsonRepository,
+    style: Style,
+    onMapDataDegraded: () -> Unit
+) {
     MapLayerIds.STATIC_LAYERS.forEach { layer ->
         DSC_GEOJSON_EXECUTOR.execute {
             val startedAt = System.currentTimeMillis()
             runCatching {
-                val connection = (URL(layer.url).openConnection() as HttpURLConnection).apply {
-                    connectTimeout = GEOJSON_CONNECT_TIMEOUT_MS
-                    readTimeout = GEOJSON_READ_TIMEOUT_MS
-                    requestMethod = "GET"
-                    useCaches = true
-                }
-
-                try {
-                    val statusCode = connection.responseCode
-                    if (statusCode !in 200..299) {
-                        error("HTTP $statusCode")
-                    }
-
-                    connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-                } finally {
-                    connection.disconnect()
-                }
-            }.mapCatching { geoJson ->
-                geoJson to FeatureCollection.fromJson(geoJson)
-            }.onSuccess { (geoJson, featureCollection) ->
+                val cached = geoJsonRepository.get(layer.url, layer.key)
+                cached to FeatureCollection.fromJson(cached.body)
+            }.onSuccess { (cached, featureCollection) ->
                 val elapsedMs = System.currentTimeMillis() - startedAt
+                if (cached.degraded) {
+                    MAIN_HANDLER.post(onMapDataDegraded)
+                }
                 if (layer.category in DIAGNOSTIC_CATEGORIES) {
                     Log.d(
                         LOG_TAG,
-                        "[layer-debug] fetch key=${layer.key}, bytes=${geoJson.length}, " +
-                            "features=${featureCollection.features()?.size ?: 0}, elapsedMs=$elapsedMs"
+                        "[layer-debug] fetch key=${layer.key}, bytes=${cached.body.length}, " +
+                            "features=${featureCollection.features()?.size ?: 0}, " +
+                            "degraded=${cached.degraded}, elapsedMs=$elapsedMs"
                     )
                 }
                 MAIN_HANDLER.post {
@@ -363,6 +401,46 @@ private fun loadDscGeoJsonSources(style: Style) {
     }
 }
 
+private fun loadDynamicZonesSources(
+    zonesRepository: ZonesRepository,
+    style: Style,
+    cameraBounds: CameraBounds,
+    visibleLayerCategories: Set<DscLayerCategory>,
+    onMapDataDegraded: () -> Unit
+) {
+    MapLayerIds.DYNAMIC_ZONES_LAYERS
+        .filter { layer ->
+            layer.category in visibleLayerCategories && cameraBounds.zoom >= layer.minZoom
+        }
+        .forEach { layer ->
+            DSC_GEOJSON_EXECUTOR.execute {
+                runCatching {
+                    val cached = zonesRepository.getZonesResult(
+                        bbox = cameraBounds.bbox,
+                        type = layer.zonesType
+                    )
+                    cached to FeatureCollection.fromJson(cached.body)
+                }.onSuccess { (cached, featureCollection) ->
+                    if (cached.degraded) {
+                        MAIN_HANDLER.post(onMapDataDegraded)
+                    }
+                    MAIN_HANDLER.post {
+                        style.getSourceAs<GeoJsonSource>(layer.sourceId)
+                            ?.setGeoJson(featureCollection)
+                    }
+                    Log.d(
+                        LOG_TAG,
+                        "[zones-api] loaded type=${layer.zonesType}, bbox=${cameraBounds.bbox}, " +
+                            "bytes=${cached.body.length}, features=${featureCollection.features()?.size ?: 0}, " +
+                            "degraded=${cached.degraded}"
+                    )
+                }.onFailure { error ->
+                    Log.w(LOG_TAG, "[zones-api] fetch failed type=${layer.zonesType}", error)
+                }
+            }
+        }
+}
+
 private fun applyLayerVisibility(style: Style, visibleLayerCategories: Set<DscLayerCategory>) {
     MapLayerIds.STATIC_LAYERS.forEach { layer ->
         val nextVisibility = if (layer.category in visibleLayerCategories) {
@@ -375,6 +453,16 @@ private fun applyLayerVisibility(style: Style, visibleLayerCategories: Set<DscLa
         if (layer.usesZebraPattern) {
             style.getLayer(layer.zebraLayerId)?.setProperties(visibility(nextVisibility))
         }
+        style.getLayer(layer.lineLayerId)?.setProperties(visibility(nextVisibility))
+    }
+    MapLayerIds.DYNAMIC_ZONES_LAYERS.forEach { layer ->
+        val nextVisibility = if (layer.category in visibleLayerCategories) {
+            Property.VISIBLE
+        } else {
+            Property.NONE
+        }
+
+        style.getLayer(layer.fillLayerId)?.setProperties(visibility(nextVisibility))
         style.getLayer(layer.lineLayerId)?.setProperties(visibility(nextVisibility))
     }
 }
@@ -454,6 +542,22 @@ private fun <T : Layer> T.withZoomRange(layer: DscMapLayer): T {
     return this
 }
 
+private fun <T : Layer> T.withZoomRange(layer: DscDynamicZonesLayer): T {
+    minZoom = layer.minZoom
+    return this
+}
+
+private fun MapLibreMap.currentCameraBounds(): CameraBounds {
+    val bounds = projection.visibleRegion.latLngBounds
+    return CameraBounds(
+        zoom = cameraPosition.zoom,
+        north = bounds.latitudeNorth,
+        south = bounds.latitudeSouth,
+        east = bounds.longitudeEast,
+        west = bounds.longitudeWest
+    )
+}
+
 private fun touchAreaForLatLng(map: MapLibreMap, latLng: LatLng): RectF {
     val center: PointF = map.projection.toScreenLocation(latLng)
     return RectF(
@@ -513,14 +617,18 @@ private fun userAccuracyRadiusExpression(): Expression =
     )
 
 private fun interactiveLayerIds(): Array<String> =
-    MapLayerIds.STATIC_LAYERS
-        .flatMap { layer ->
+    (
+        MapLayerIds.STATIC_LAYERS.flatMap { layer ->
             buildList {
                 add(layer.fillLayerId)
                 if (layer.usesZebraPattern) add(layer.zebraLayerId)
                 add(layer.lineLayerId)
             }
-        }
+        } +
+            MapLayerIds.DYNAMIC_ZONES_LAYERS.flatMap { layer ->
+                listOf(layer.fillLayerId, layer.lineLayerId)
+            }
+        )
         .toTypedArray()
 
 private fun createNotamZebraPattern(): Bitmap {
@@ -585,8 +693,6 @@ private const val NOTAM_ZEBRA_SIZE_PX = 16
 private const val NOTAM_ZEBRA_STEP_PX = 8
 private const val NOTAM_ZEBRA_STROKE_PX = 2.5f
 private const val NOTAM_ZEBRA_OPACITY = 0.22f
-private const val GEOJSON_CONNECT_TIMEOUT_MS = 15_000
-private const val GEOJSON_READ_TIMEOUT_MS = 45_000
 private const val LOG_TAG = "DroneSkyMap"
 private val DIAGNOSTIC_CATEGORIES = setOf(
     DscLayerCategory.Airports,

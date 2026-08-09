@@ -25,9 +25,31 @@ object MapLayerIds {
         DscMapLayer("p-notam", "split/P_NOTAM.geojson", DscLayerCategory.Notam, "NOTAM merged", minZoom = 7.0f, zeroLimitOpacity = 0.22f)
     )
 
+    val DYNAMIC_ZONES_LAYERS = listOf(
+        DscDynamicZonesLayer(
+            key = "tactical-enr-5-2-2-6",
+            zonesType = "TACTICAL",
+            category = DscLayerCategory.Tactical,
+            label = "Aree tattiche ENR 5.2.2.6",
+            minZoom = 6.0f,
+            lineWidth = 1.0f,
+            featureTypeAliases = setOf("TACTICAL_ENR_5_2_2_6")
+        ),
+        DscDynamicZonesLayer(
+            key = "corridor-enr-5-2-2-5",
+            zonesType = "CORRIDOR",
+            category = DscLayerCategory.Corridors,
+            label = "Corridoi APR ENR 5.2.2.5",
+            minZoom = 7.0f,
+            lineWidth = 1.1f,
+            featureTypeAliases = setOf("CORRIDOR_ENR_5_2_2_5")
+        )
+    )
+
     fun categoryForFeatureType(type: String?): DscLayerCategory? {
         if (type.isNullOrBlank()) return null
         return STATIC_LAYERS.firstOrNull { it.matchesFeatureType(type) }?.category
+            ?: DYNAMIC_ZONES_LAYERS.firstOrNull { it.matchesFeatureType(type) }?.category
     }
 }
 
@@ -114,12 +136,45 @@ enum class DscLayerCategory(
         subtitle = "Aree pericolose",
         webappLabel = "Pericolose (LI D)",
         swatchHex = DscZoneMapColors.limited45m.webHex
+    ),
+    Tactical(
+        title = "Aree tattiche",
+        subtitle = "ENR 5.2.2.6, 45 m nei giorni feriali",
+        webappLabel = "Aree tattiche (ENR 5.2.2.6)",
+        swatchHex = DscZoneMapColors.limited45m.webHex
+    ),
+    Corridors(
+        title = "Corridoi APR",
+        subtitle = "ENR 5.2.2.5",
+        webappLabel = "Corridoi APR (ENR 5.2.2.5)",
+        swatchHex = DscZoneMapColors.noFly0m.webHex
     );
 
     companion object {
         val defaultVisibility: Map<DscLayerCategory, Boolean> =
             entries.associateWith { true }
     }
+}
+
+data class DscDynamicZonesLayer(
+    val key: String,
+    val zonesType: String,
+    val category: DscLayerCategory,
+    val label: String,
+    val minZoom: Float,
+    val zeroLimitOpacity: Float = 0.19f,
+    val lineWidth: Float = 0.9f,
+    val featureTypeAliases: Set<String> = emptySet()
+) {
+    val sourceId: String = "dsc-$key-source"
+    val fillLayerId: String = "dsc-$key-fill"
+    val lineLayerId: String = "dsc-$key-line"
+
+    fun matchesFeatureType(type: String): Boolean =
+        type.equals(key, ignoreCase = true) ||
+            type.equals(label, ignoreCase = true) ||
+            type.equals(zonesType, ignoreCase = true) ||
+            featureTypeAliases.any { it.equals(type, ignoreCase = true) }
 }
 
 data class DscMapLayer(

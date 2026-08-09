@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import it.droneskycheck.app.data.ZoneCheckV3Repository
 import it.droneskycheck.app.map.DscLayerCategory
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -53,13 +54,26 @@ class MapViewModel(
                 _uiState.value = _uiState.value.copy(
                     isVerdictLoading = false,
                     verdict = response,
-                    verdictError = null
+                    verdictError = null,
+                    mapStatusMessage = null
                 )
             }.onFailure { error ->
                 _uiState.value = _uiState.value.copy(
                     isVerdictLoading = false,
                     verdictError = "DSC non e' raggiungibile in questo momento."
                 )
+            }
+        }
+    }
+
+    fun onMapDataDegraded() {
+        _uiState.value = _uiState.value.copy(
+            mapStatusMessage = CachedMapDataMessage
+        )
+        viewModelScope.launch {
+            delay(StatusMessageMillis)
+            if (_uiState.value.mapStatusMessage == CachedMapDataMessage) {
+                _uiState.value = _uiState.value.copy(mapStatusMessage = null)
             }
         }
     }
@@ -187,5 +201,10 @@ class MapViewModel(
         _uiState.value = _uiState.value.copy(
             locationStatusMessage = "Posizione non disponibile: controlla che i servizi di localizzazione siano attivi."
         )
+    }
+
+    private companion object {
+        const val CachedMapDataMessage = "Dati mappa salvati"
+        const val StatusMessageMillis = 8_000L
     }
 }

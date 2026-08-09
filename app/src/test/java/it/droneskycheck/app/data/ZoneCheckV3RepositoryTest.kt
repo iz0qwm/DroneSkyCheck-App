@@ -157,6 +157,57 @@ class ZoneCheckV3RepositoryTest {
     }
 
     @Test
+    fun parserReadsNormalizedAppAuthorizationContract() {
+        val response = parseZoneCheckV3Response(overlapJson(
+            status = "NO_FLY",
+            limit = 0,
+            zones = """
+              {
+                "identity": { "id": "park", "name": "LIPROT123" },
+                "classification": { "type": "ATM09_PARKS", "family": "PROTECTED_AREA" },
+                "authorization": {
+                  "applicability": "WHEN_ACTIVE",
+                  "resolutionStatus": "RESOLVED",
+                  "procedures": [
+                    {
+                      "type": "ATM05",
+                      "version": 1,
+                      "label": "ATM05",
+                      "reasonCode": "PROTECTED_AREA_ATM05"
+                    }
+                  ],
+                  "additionalRequirements": [
+                    {
+                      "type": "ENTE_PARCO",
+                      "label": "Ente Parco",
+                      "reasonCode": "PROTECTED_AREA_ENTE_PARCO"
+                    }
+                  ],
+                  "reasonCodes": [
+                    "PROTECTED_AREA_ATM05",
+                    "PROTECTED_AREA_ENTE_PARCO"
+                  ],
+                  "blockingReasons": [],
+                  "resolverVersion": 1
+                }
+              }
+            """.trimIndent()
+        ))
+
+        val zone = response.zones.single()
+        val authorization = zone.authorization
+
+        assertEquals(true, zone.authorizationRequired)
+        assertEquals("WHEN_ACTIVE", authorization?.applicability)
+        assertEquals("RESOLVED", authorization?.resolutionStatus)
+        assertEquals("ATM05", authorization?.procedures?.single()?.type)
+        assertEquals(1, authorization?.procedures?.single()?.version)
+        assertEquals("ENTE_PARCO", authorization?.additionalRequirements?.single()?.type)
+        assertEquals("PROTECTED_AREA_ATM05", authorization?.reasonCodes?.first())
+        assertEquals(1, authorization?.resolverVersion)
+    }
+
+    @Test
     fun parserKeepsGlobalNoFlyWhenInactiveEnrOverlapsActiveZeroMeterZone() {
         val response = parseZoneCheckV3Response(overlapJson(
             status = "NO_FLY",

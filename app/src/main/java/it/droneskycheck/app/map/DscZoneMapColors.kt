@@ -28,10 +28,16 @@ object DscZoneMapColors {
         )
 
     fun fillOpacityExpression(layer: DscMapLayer): Expression =
+        fillOpacityExpression(layer.zeroLimitOpacity)
+
+    fun fillOpacityExpression(layer: DscDynamicZonesLayer): Expression =
+        fillOpacityExpression(layer.zeroLimitOpacity)
+
+    private fun fillOpacityExpression(zeroLimitOpacity: Float): Expression =
         Expression.match(
             lowerLimitTextExpression(),
             Expression.literal("0"),
-            Expression.literal(layer.zeroLimitOpacity),
+            Expression.literal(zeroLimitOpacity),
             Expression.literal("25"),
             Expression.literal(0.19f),
             Expression.literal("45"),

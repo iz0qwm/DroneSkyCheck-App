@@ -16,6 +16,7 @@ data class MapUiState(
     val isVerdictLoading: Boolean = false,
     val verdict: ZoneCheckV3Response? = null,
     val verdictError: String? = null,
+    val mapStatusMessage: String? = null,
     val cameraBounds: CameraBounds? = null,
     val layerVisibility: Map<DscLayerCategory, Boolean> = DscLayerCategory.defaultVisibility,
     val isLayerSheetVisible: Boolean = false

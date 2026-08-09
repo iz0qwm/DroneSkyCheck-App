@@ -102,7 +102,7 @@ private fun JSONObject.toZoneInfo(): ZoneInfo {
     val info = optJSONObject("info")
     val authority = optJSONObject("authority")
     val validity = optJSONObject("validity")?.toValidityInfo()
-    val authorization = (optJSONObject("authorization") ?: authority).toAuthorizationInfo()
+    val authorization = optJSONObject("authorization").toAuthorizationInfo()
     val official = (optJSONObject("official") ?: optJSONObject("source") ?: optJSONObject("raw"))
         ?.toOfficialInfo()
         ?: toOfficialInfoFromInlineFields()
@@ -137,7 +137,8 @@ private fun JSONObject.toZoneInfo(): ZoneInfo {
         blockers = optArray("blockers").toIssueList(),
         warnings = optArray("warnings").toIssueList(),
         enriched = optEnrichedData(),
-        authorizationRequired = authorization.required
+        authorizationRequired = authorization?.required
+            ?: authorization?.derivedRequired()
             ?: authority?.optFirstBoolean("authorizationRequired", "required")
             ?: optFirstBoolean("authorizationRequired"),
         activeNow = validity?.activeNow ?: optFirstBoolean("activeNow"),
@@ -211,14 +212,48 @@ private fun JSONObject.toZoneNarrative(): ZoneNarrative =
         operationalMeaning = optFirstString("operationalMeaning", "meaning")
     )
 
-private fun JSONObject?.toAuthorizationInfo(): AuthorizationInfo =
-    AuthorizationInfo(
-        required = this?.optFirstBoolean("required", "authorizationRequired"),
-        requirement = this?.optFirstString("requirement", "authorizationRequirement"),
-        operationMode = this?.optFirstString("operationMode"),
-        operationCategory = this?.optFirstString("operationCategory"),
-        requiredLicense = this?.optFirstString("requiredLicense"),
-        explanation = this?.optFirstString("explanation")
+private fun JSONObject?.toAuthorizationInfo(): AuthorizationInfo? {
+    if (this == null) return null
+
+    return AuthorizationInfo(
+        required = optFirstBoolean("required", "authorizationRequired"),
+        requirement = optFirstString("requirement", "authorizationRequirement"),
+        operationMode = optFirstString("operationMode"),
+        operationCategory = optFirstString("operationCategory"),
+        requiredLicense = optFirstString("requiredLicense"),
+        explanation = optFirstString("explanation"),
+        applicability = optFirstString("applicability"),
+        resolutionStatus = optFirstString("resolutionStatus"),
+        procedures = optArray("procedures").toObjectList { it.toAuthorizationProcedure() },
+        additionalRequirements = optArray("additionalRequirements").toObjectList {
+            it.toAuthorizationAdditionalRequirement()
+        },
+        reasonCodes = optArray("reasonCodes").toStringList(),
+        blockingReasons = optArray("blockingReasons").toObjectList {
+            it.toAuthorizationBlockingReason()
+        },
+        resolverVersion = optFirstInt("resolverVersion")
+    )
+}
+
+private fun JSONObject.toAuthorizationProcedure(): AuthorizationProcedure =
+    AuthorizationProcedure(
+        type = optFirstString("type"),
+        version = optFirstInt("version"),
+        label = optFirstString("label"),
+        reasonCode = optFirstString("reasonCode")
+    )
+
+private fun JSONObject.toAuthorizationAdditionalRequirement(): AuthorizationAdditionalRequirement =
+    AuthorizationAdditionalRequirement(
+        type = optFirstString("type"),
+        label = optFirstString("label"),
+        reasonCode = optFirstString("reasonCode")
+    )
+
+private fun JSONObject.toAuthorizationBlockingReason(): AuthorizationBlockingReason =
+    AuthorizationBlockingReason(
+        code = optFirstString("code")
     )
 
 private fun JSONObject.toAuthorityInfo(): AuthorityInfo =
@@ -298,6 +333,13 @@ private fun JSONArray?.toIssueList(): List<Issue> =
         }
     }
 
+private fun AuthorizationInfo.derivedRequired(): Boolean? =
+    when {
+        procedures.isNotEmpty() || additionalRequirements.isNotEmpty() -> true
+        applicability.equals("NONE", ignoreCase = true) -> false
+        else -> null
+    }
+
 private fun JSONObject.collectOfficialFields(): List<KeyValueInfo> =
     buildList {
         val fieldObject = optJSONObject("fields") ?: optJSONObject("originalFields")
@@ -333,6 +375,11 @@ private fun JSONObject.optArray(vararg names: String): JSONArray? =
 private fun <T> JSONArray?.toObjectList(transform: (JSONObject) -> T): List<T> =
     this.toMixedList { value ->
         (value as? JSONObject)?.let(transform)
+    }
+
+private fun JSONArray?.toStringList(): List<String> =
+    this.toMixedList { value ->
+        value?.toString()?.takeIf { it.isNotBlank() }
     }
 
 private fun <T> JSONArray?.toMixedList(transform: (Any) -> T?): List<T> {

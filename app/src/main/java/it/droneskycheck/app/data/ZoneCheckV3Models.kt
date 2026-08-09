@@ -123,7 +123,31 @@ data class AuthorizationInfo(
     val operationMode: String?,
     val operationCategory: String?,
     val requiredLicense: String?,
-    val explanation: String?
+    val explanation: String?,
+    val applicability: String? = null,
+    val resolutionStatus: String? = null,
+    val procedures: List<AuthorizationProcedure> = emptyList(),
+    val additionalRequirements: List<AuthorizationAdditionalRequirement> = emptyList(),
+    val reasonCodes: List<String> = emptyList(),
+    val blockingReasons: List<AuthorizationBlockingReason> = emptyList(),
+    val resolverVersion: Int? = null
+)
+
+data class AuthorizationProcedure(
+    val type: String?,
+    val version: Int?,
+    val label: String?,
+    val reasonCode: String?
+)
+
+data class AuthorizationAdditionalRequirement(
+    val type: String?,
+    val label: String?,
+    val reasonCode: String?
+)
+
+data class AuthorizationBlockingReason(
+    val code: String?
 )
 
 data class AuthorityInfo(

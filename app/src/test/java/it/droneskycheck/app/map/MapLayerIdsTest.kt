@@ -17,6 +17,22 @@ class MapLayerIdsTest {
     }
 
     @Test
+    fun tacticalAndCorridorLayersUseDynamicZonesApiTypes() {
+        val dynamicTypes = MapLayerIds.DYNAMIC_ZONES_LAYERS.map { it.zonesType }.toSet()
+
+        assertEquals(setOf("TACTICAL", "CORRIDOR"), dynamicTypes)
+        assertTrue(MapLayerIds.DYNAMIC_ZONES_LAYERS.all { it.minZoom >= 6.0f })
+    }
+
+    @Test
+    fun tacticalAndCorridorFeatureTypesResolveToUserCategories() {
+        assertEquals(DscLayerCategory.Tactical, MapLayerIds.categoryForFeatureType("TACTICAL"))
+        assertEquals(DscLayerCategory.Tactical, MapLayerIds.categoryForFeatureType("TACTICAL_ENR_5_2_2_6"))
+        assertEquals(DscLayerCategory.Corridors, MapLayerIds.categoryForFeatureType("CORRIDOR"))
+        assertEquals(DscLayerCategory.Corridors, MapLayerIds.categoryForFeatureType("CORRIDOR_ENR_5_2_2_5"))
+    }
+
+    @Test
     fun staticLayersCoverExpectedSplitGeoJsonFiles() {
         val expected = setOf(
             "split/ATM09_AVIOSUP_REBUILT.geojson",

@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -66,6 +67,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -76,6 +78,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import it.droneskycheck.app.data.AuthorizationInfo
+import it.droneskycheck.app.data.AuthorizationAdditionalRequirement
+import it.droneskycheck.app.data.AuthorizationProcedure
 import it.droneskycheck.app.data.AuthorityInfo
 import it.droneskycheck.app.data.EnrInfo
 import it.droneskycheck.app.data.Issue
@@ -153,10 +157,12 @@ fun MapScreen(
             onUserLocationCentered = viewModel::onUserLocationCentered,
             onMapTapped = viewModel::onMapTapped,
             onCameraIdle = viewModel::onCameraIdle,
+            onMapDataDegraded = viewModel::onMapDataDegraded,
             modifier = Modifier.fillMaxSize()
         )
 
         MapTitlePill(
+            statusMessage = uiState.mapStatusMessage,
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .windowInsetsPadding(WindowInsets.safeDrawing)
@@ -583,11 +589,24 @@ private fun LayerVisibilityRow(
 }
 
 @Composable
-private fun MapTitlePill(modifier: Modifier = Modifier) {
+private fun MapTitlePill(
+    statusMessage: String?,
+    modifier: Modifier = Modifier
+) {
+    val degraded = !statusMessage.isNullOrBlank()
     Surface(
         modifier = modifier.widthIn(max = 280.dp),
         shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+        color = if (degraded) {
+            MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.94f)
+        } else {
+            MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
+        },
+        contentColor = if (degraded) {
+            MaterialTheme.colorScheme.onTertiaryContainer
+        } else {
+            MaterialTheme.colorScheme.onSurface
+        },
         tonalElevation = 6.dp,
         shadowElevation = 4.dp
     ) {
@@ -596,16 +615,20 @@ private fun MapTitlePill(modifier: Modifier = Modifier) {
             verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
             Text(
-                text = "Drone Sky Check",
+                text = statusMessage ?: "Drone Sky Check",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             Text(
-                text = "Mappa UAS",
+                text = if (degraded) "Ultima copia disponibile" else "Mappa UAS",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (degraded) {
+                    MaterialTheme.colorScheme.onTertiaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -850,30 +873,132 @@ private fun OfficialSection(
     title: String = "Informazioni ufficiali",
     compactUntilOpened: Boolean = false,
     openLabel: String = "Leggi testo completo",
-    closeLabel: String = "Comprimi testo"
+    closeLabel: String = "Comprimi testo",
+    sourceText: String? = official?.sourceText,
+    includeSourceReference: Boolean = true,
+    includeFields: Boolean = true,
+    monospace: Boolean = false
 ) {
-    if (official == null || !official.hasContent()) return
-    var expanded by remember(title, official.sourceText, official.sourceReference) { mutableStateOf(false) }
+    val displayText = sourceText?.takeIf { it.isNotBlank() }
+    val hasReference = includeSourceReference && !official?.sourceReference.isNullOrBlank()
+    val hasFields = includeFields && official?.fields?.isNotEmpty() == true
+    if (displayText == null && !hasReference && !hasFields) return
+
+    var expanded by remember(title, displayText, official?.sourceReference) { mutableStateOf(false) }
+
+    if (compactUntilOpened) {
+        OfficialAccordion(title = title, expanded = expanded, onToggle = { expanded = !expanded }) {
+            OfficialContent(
+                sourceReference = official?.sourceReference?.takeIf { hasReference },
+                fields = official?.fields.orEmpty().takeIf { hasFields }.orEmpty(),
+                sourceText = displayText,
+                monospace = monospace
+            )
+        }
+        return
+    }
 
     ZoneSection(title = title) {
-        if (!compactUntilOpened || expanded) {
-            ZoneOptionalDetail("Fonte", official.sourceReference)
-            if (official.fields.isNotEmpty()) {
-                KeyValueList(official.fields)
-            }
+        if (hasReference) {
+            ZoneOptionalDetail("Fonte", official?.sourceReference)
         }
-        official.sourceText?.takeIf { it.isNotBlank() }?.let { text ->
+        if (hasFields) {
+            KeyValueList(official?.fields.orEmpty())
+        }
+        displayText?.let { text ->
             TextButton(onClick = { expanded = !expanded }) {
                 Text(if (expanded) closeLabel else openLabel)
             }
-            if (expanded || !compactUntilOpened) {
+            OfficialTextBox(
+                text = text,
+                expanded = expanded,
+                monospace = monospace
+            )
+        }
+    }
+}
+
+@Composable
+private fun OfficialAccordion(
+    title: String,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        TextButton(
+            onClick = onToggle,
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 0.dp, vertical = 2.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 Text(
-                    text = text,
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = if (expanded) Int.MAX_VALUE else 4,
-                    overflow = if (expanded) TextOverflow.Clip else TextOverflow.Ellipsis
+                    text = title,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = if (expanded) "\u25B2" else "\u25BC",
+                    style = MaterialTheme.typography.labelLarge
                 )
             }
+        }
+        if (expanded) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                content = content
+            )
+        }
+    }
+}
+
+@Composable
+private fun OfficialContent(
+    sourceReference: String?,
+    fields: List<KeyValueInfo>,
+    sourceText: String?,
+    monospace: Boolean
+) {
+    ZoneOptionalDetail("Fonte", sourceReference)
+    if (fields.isNotEmpty()) {
+        KeyValueList(fields)
+    }
+    sourceText?.let { text ->
+        OfficialTextBox(
+            text = text,
+            expanded = true,
+            monospace = monospace
+        )
+    }
+}
+
+@Composable
+private fun OfficialTextBox(
+    text: String,
+    expanded: Boolean,
+    monospace: Boolean
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurface
+    ) {
+        SelectionContainer {
+            Text(
+                text = text,
+                modifier = Modifier.padding(12.dp),
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontFamily = if (monospace) FontFamily.Monospace else null
+                ),
+                maxLines = if (expanded) Int.MAX_VALUE else 4,
+                overflow = if (expanded) TextOverflow.Clip else TextOverflow.Ellipsis
+            )
         }
     }
 }
@@ -923,10 +1048,13 @@ private fun NotamSection(notams: List<NotamInfo>) {
                 ZoneOptionalDetail("Motivo bloccante", notam.blockingReason)
                 OfficialSection(
                     official = notam.official,
-                    title = "Testo ufficiale NOTAM",
+                    title = "Testo NOTAM ufficiale",
                     compactUntilOpened = true,
                     openLabel = "Apri testo ufficiale",
-                    closeLabel = "Chiudi testo ufficiale"
+                    closeLabel = "Chiudi testo ufficiale",
+                    includeSourceReference = false,
+                    includeFields = false,
+                    monospace = true
                 )
                 if (notam.blockers.isNotEmpty()) ZoneOptionalDetail("Blocker", notam.blockers.joinIssues())
                 if (notam.warnings.isNotEmpty()) ZoneOptionalDetail("Warning", notam.warnings.joinIssues())
@@ -949,16 +1077,19 @@ private fun EnrSection(enr: EnrInfo?) {
         ZoneOptionalDetail("Attivazione", enr.activationType?.toUserText())
         ZoneOptionalDetail("Operazioni", enr.operationSummary())
         ZoneOptionalDetail("Attestato di competenza minimo richiesto", enr.requiredLicense.formatRequiredLicense())
-        ZoneOptionalDetail("Autorizzazione", enr.authorizationRequired?.formatBoolean())
+        ZoneOptionalDetail("Autorizzazione", enr.authorizationRequiredText())
         ZoneOptionalDetail("Spiegazione", enr.explanation.distinctFrom(enr.schedule?.human))
         ZoneOptionalDetail("Significato operativo", enr.operationalMeaning)
         AuthoritySection(enr.authority)
         OfficialSection(
             official = enr.official,
-            title = "Dettagli ufficiali ENR",
+            title = "Dettagli ufficiali",
             compactUntilOpened = true,
             openLabel = "Apri dettagli ufficiali",
-            closeLabel = "Chiudi dettagli ufficiali"
+            closeLabel = "Chiudi dettagli ufficiali",
+            sourceText = enr.officialSourceText(),
+            includeSourceReference = false,
+            includeFields = false
         )
     }
 }
@@ -988,11 +1119,46 @@ private fun AuthorizationSection(authorization: AuthorizationInfo?) {
     if (authorization == null || !authorization.hasContent()) return
 
     ZoneSection(title = "Autorizzazioni") {
-        ZoneOptionalDetail("Richiesta", authorization.required?.formatBoolean())
-        ZoneOptionalDetail("Requisito", authorization.requirement?.toUserText())
+        AuthorizationBadges(authorization)
+        ZoneOptionalDetail("Richiesta", authorization.requiredText())
+        ZoneOptionalDetail("Stato", authorization.resolutionStatus.formatResolutionStatus())
+        ZoneOptionalDetail("Applicabilita", authorization.applicability.formatApplicability())
+        ZoneOptionalDetail("Procedure", authorization.procedures.formatProcedures())
+        ZoneOptionalDetail("Requisiti aggiuntivi", authorization.additionalRequirements.formatAdditionalRequirements())
+        ZoneOptionalDetail("Requisito", authorization.requirement.usableAuthorizationText())
         ZoneOptionalDetail("Operazioni", authorization.operationSummary())
         ZoneOptionalDetail("Attestato di competenza minimo richiesto", authorization.requiredLicense.formatRequiredLicense())
         ZoneOptionalDetail("Spiegazione", authorization.explanation)
+        ZoneOptionalDetail("Motivi", authorization.reasonCodes.formatReasonCodes())
+        ZoneOptionalDetail("Blocchi", authorization.blockingReasons.mapNotNull { it.code }.formatReasonCodes())
+    }
+}
+
+@Composable
+private fun AuthorizationBadges(authorization: AuthorizationInfo) {
+    val badges = buildList {
+        authorization.procedures.forEach { procedure ->
+            val label = procedure.label ?: procedure.type
+            if (!label.isNullOrBlank()) add(procedure.type.orEmpty() to label)
+        }
+        authorization.additionalRequirements.forEach { requirement ->
+            val label = requirement.label ?: requirement.type
+            if (!label.isNullOrBlank()) add(requirement.type.orEmpty() to label)
+        }
+    }
+    if (badges.isEmpty()) return
+
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        badges.forEach { (type, label) ->
+            CompactInfoPill(
+                text = label,
+                containerColor = authorizationBadgeColor(type),
+                contentColor = Color.White
+            )
+        }
     }
 }
 
@@ -1154,11 +1320,16 @@ private fun it.droneskycheck.app.data.ScheduleInfo.hasContent(): Boolean =
         !explanation.isNullOrBlank()
 
 private fun AuthorizationInfo.hasContent(): Boolean =
-    required != null ||
-        !requirement.isNullOrBlank() ||
-        !operationMode.isNullOrBlank() ||
-        !operationCategory.isNullOrBlank() ||
-        !requiredLicense.isNullOrBlank() ||
+    required == true ||
+        !applicability.isNullOrBlank() ||
+        !resolutionStatus.isNullOrBlank() ||
+        procedures.isNotEmpty() ||
+        additionalRequirements.isNotEmpty() ||
+        reasonCodes.isNotEmpty() ||
+        blockingReasons.isNotEmpty() ||
+        requirement.usableAuthorizationText() != null ||
+        operationSummary() != null ||
+        requiredLicense.formatRequiredLicense() != null ||
         !explanation.isNullOrBlank()
 
 private fun AuthorityInfo.hasContent(): Boolean =
@@ -1178,7 +1349,7 @@ private fun EnrInfo.hasContent(): Boolean =
         !operationMode.isNullOrBlank() ||
         !operationCategory.isNullOrBlank() ||
         !requiredLicense.isNullOrBlank() ||
-        authorizationRequired != null ||
+        authorizationRequired == true ||
         schedule?.hasContent() == true ||
         authority?.hasContent() == true ||
         official?.hasContent() == true ||
@@ -1211,6 +1382,187 @@ private fun ValidityInfo.statusLabel(): String? =
 
 private fun Boolean.formatBoolean(): String =
     if (this) "Si" else "No"
+
+private fun AuthorizationInfo.requiredText(): String? =
+    when {
+        procedures.isNotEmpty() || additionalRequirements.isNotEmpty() ->
+            "Negli orari di attivita della zona e necessario richiedere l'autorizzazione."
+        required == true -> "Si"
+        resolutionStatus.equals("MANUAL_CHECK", ignoreCase = true) -> "Verifica manuale necessaria"
+        resolutionStatus.equals("BLOCKED", ignoreCase = true) -> "Non gestibile automaticamente"
+        else -> null
+    }
+
+private fun String?.formatResolutionStatus(): String? =
+    when (this?.uppercase()) {
+        "RESOLVED" -> "Risolta"
+        "MANUAL_CHECK" -> "Verifica manuale"
+        "BLOCKED" -> "Bloccata"
+        else -> this
+    }
+
+private fun String?.formatApplicability(): String? =
+    when (this?.uppercase()) {
+        "WHEN_ACTIVE" -> "Quando la zona e attiva"
+        "NONE" -> "Nessuna"
+        else -> this
+    }
+
+private fun List<AuthorizationProcedure>.formatProcedures(): String? =
+    mapNotNull { procedure ->
+        val label = procedure.label ?: procedure.type
+        val reason = procedure.reasonCode
+        when {
+            label.isNullOrBlank() -> null
+            reason.isNullOrBlank() -> label
+            else -> "$label ($reason)"
+        }
+    }.takeIf { it.isNotEmpty() }?.joinToString(", ")
+
+private fun List<AuthorizationAdditionalRequirement>.formatAdditionalRequirements(): String? =
+    mapNotNull { requirement ->
+        val label = requirement.label ?: requirement.type
+        val reason = requirement.reasonCode
+        when {
+            label.isNullOrBlank() -> null
+            reason.isNullOrBlank() -> label
+            else -> "$label ($reason)"
+        }
+    }.takeIf { it.isNotEmpty() }?.joinToString(", ")
+
+private fun List<String>.formatReasonCodes(): String? =
+    takeIf { it.isNotEmpty() }?.joinToString(", ")
+
+private fun authorizationBadgeColor(type: String): Color =
+    when (type.uppercase()) {
+        "ATM09" -> Color(0xFFC0392B)
+        "ATM05" -> Color(0xFFE67E22)
+        "ENTE_PARCO" -> Color(0xFF7D3C98)
+        else -> Color(0xFF5B6470)
+    }
+
+private fun EnrInfo.authorizationRequiredText(): String? =
+    if (authorizationRequired == true) {
+        "Negli orari di attivita della zona e necessario richiedere l'autorizzazione."
+    } else {
+        null
+    }
+
+private fun EnrInfo.officialSourceText(): String? {
+    val officialText = official?.sourceText.cleanOfficialSourceText()
+    val descriptionText = description.cleanOfficialSourceText()
+        ?.takeUnless { it.isEquivalentTo(officialText) || officialText.containsEquivalent(it) }
+    val rawSchedule = (schedule?.raw ?: validity?.schedule)
+        .cleanOfficialSourceText()
+        ?.takeUnless { it.isEquivalentTo(schedule?.human) }
+        ?.takeUnless { officialText.containsEquivalent(it) || descriptionText.containsEquivalent(it) }
+
+    return listOfNotNull(descriptionText, officialText, rawSchedule)
+        .distinctBy { it.normalizedOfficialText() }
+        .joinToString(separator = "\n\n")
+        .ifBlank { null }
+}
+
+private fun String?.cleanOfficialSourceText(): String? {
+    if (isNullOrBlank()) return null
+
+    val cleanedLines = mutableListOf<String>()
+    var skipNextSourceValue = false
+    var skipNextInterpretedValue = false
+
+    lineSequence().forEach { originalLine ->
+        val trimmed = originalLine.trim()
+
+        when {
+            trimmed.isBlank() -> {
+                if (cleanedLines.lastOrNull()?.isNotBlank() == true) cleanedLines.add("")
+            }
+            skipNextSourceValue -> {
+                skipNextSourceValue = false
+            }
+            skipNextInterpretedValue -> {
+                skipNextInterpretedValue = false
+            }
+            trimmed.isSourceReferenceLabel() -> {
+                skipNextSourceValue = true
+            }
+            trimmed.isInterpretedScheduleLabel() -> {
+                skipNextInterpretedValue = true
+            }
+            trimmed.isRawScheduleLabel() -> Unit
+            else -> {
+                trimmed.withoutTechnicalOfficialLabel()?.let { value ->
+                    cleanedLines.add(value)
+                }
+            }
+        }
+    }
+
+    return cleanedLines
+        .dropWhile { it.isBlank() }
+        .dropLastWhile { it.isBlank() }
+        .joinToString(separator = "\n")
+        .ifBlank { null }
+}
+
+private fun String.isSourceReferenceLabel(): Boolean =
+    equals("Fonte", ignoreCase = true) ||
+        equals("source", ignoreCase = true) ||
+        equals("sourceReference", ignoreCase = true) ||
+        equals("reference", ignoreCase = true)
+
+private fun String.isInterpretedScheduleLabel(): Boolean =
+    equals("scheduleHuman", ignoreCase = true) ||
+        equals("Schedule interpretata", ignoreCase = true)
+
+private fun String.isRawScheduleLabel(): Boolean =
+    equals("rawSchedule", ignoreCase = true) ||
+        equals("Orari raw", ignoreCase = true)
+
+private fun String.withoutTechnicalOfficialLabel(): String? {
+    val property = Regex(
+        pattern = "^\"?(source|sourceReference|reference|scheduleHuman)\"?\\s*[:=]\\s*(.*)$",
+        option = RegexOption.IGNORE_CASE
+    )
+    if (property.matches(this)) return null
+
+    val rawValue = Regex(
+        pattern = "^\"?(rawSchedule|schedule|officialText|sourceText|description)\"?\\s*[:=]\\s*(.+)$",
+        option = RegexOption.IGNORE_CASE
+    ).matchEntire(this)?.groupValues?.get(2)
+
+    val value = rawValue ?: this
+    return value.cleanJsonLikeValue()
+        .takeUnless { it.isBlank() || it.matches(Regex("""^[{}\[\],]+$""")) }
+}
+
+private fun String.cleanJsonLikeValue(): String =
+    trim()
+        .removeSuffix(",")
+        .trim()
+        .trim('"')
+        .trim()
+
+private fun String?.containsEquivalent(other: String?): Boolean {
+    val normalizedSelf = normalizedOfficialText()
+    val normalizedOther = other.normalizedOfficialText()
+    return normalizedSelf.isNotBlank() &&
+        normalizedOther.isNotBlank() &&
+        normalizedSelf.contains(normalizedOther)
+}
+
+private fun String?.isEquivalentTo(other: String?): Boolean {
+    val normalizedSelf = normalizedOfficialText()
+    val normalizedOther = other.normalizedOfficialText()
+    return normalizedSelf.isNotBlank() &&
+        normalizedSelf == normalizedOther
+}
+
+private fun String?.normalizedOfficialText(): String =
+    orEmpty()
+        .trim()
+        .lowercase()
+        .replace(Regex("\\s+"), " ")
 
 private fun List<Issue>.joinIssues(): String =
     joinToString(separator = "\n") { issue ->
@@ -1336,6 +1688,14 @@ private fun String?.usableUserText(): String? =
     this?.cleanUserText()
         ?.takeUnless { it.isBlank() || it.equals("NIL", ignoreCase = true) }
 
+private fun String?.usableAuthorizationText(): String? =
+    usableUserText()
+        ?.takeUnless { it.isNoLikeValue() }
+        ?.toUserText()
+
+private fun String.isNoLikeValue(): Boolean =
+    trim().trim('"').trim().uppercase() in setOf("NO", "FALSE", "N/A", "NA", "NONE", "NULL")
+
 private fun String?.distinctFrom(other: String?): String? {
     val value = usableUserText() ?: return null
     val compare = other.usableUserText() ?: return value
@@ -1407,8 +1767,10 @@ private fun AuthorizationInfo.operationSummary(): String? =
     operationSummary(operationMode, operationCategory)
 
 private fun operationSummary(mode: String?, category: String?): String? {
-    val modeCode = mode?.trim()?.uppercase()
-    val categoryCode = category?.trim()?.uppercase()
+    val modeValue = mode.takeUnlessNoLike()
+    val categoryValue = category.takeUnlessNoLike()
+    val modeCode = modeValue?.trim()?.uppercase()
+    val categoryCode = categoryValue?.trim()?.uppercase()
 
     return when {
         modeCode == null && categoryCode == null -> null
@@ -1421,12 +1783,15 @@ private fun operationSummary(mode: String?, category: String?): String? {
         modeCode == "OPEN_POSSIBLE" ->
             "Sono possibili operazioni in OPEN"
         else ->
-            listOfNotNull(mode?.toUserText(), category?.toUserText())
+            listOfNotNull(modeValue?.toUserText(), categoryValue?.toUserText())
                 .distinct()
                 .joinToString(" - ")
                 .ifBlank { null }
     }
 }
+
+private fun String?.takeUnlessNoLike(): String? =
+    this?.takeUnless { it.isNoLikeValue() }
 
 private fun String?.formatRequiredLicense(): String? {
     if (isNullOrBlank()) return null
@@ -1438,7 +1803,7 @@ private fun String?.formatRequiredLicense(): String? {
 
     return values
         .map { it.replace("\\/", "/").trim() }
-        .filter { it.isNotBlank() }
+        .filter { it.isNotBlank() && !it.isNoLikeValue() }
         .distinct()
         .joinToString(" o ")
         .ifBlank { null }
