@@ -76,9 +76,9 @@ internal fun ZoneInfo.temporalDetailsPresentation(): TemporalDetailsPresentation
     val notam = notams.firstOrNull { it.hasTemporalContent() }
     val sourceValidity = validity ?: notam?.validity ?: enr?.validity ?: sup?.validity
     val schedule = bestSchedule(enr, notam, sup, sourceValidity)
-    val interpreted = schedule?.human
+    val interpreted = schedule?.readableSchedule()
         ?: sourceValidity?.interpretedSchedule
-        ?: sourceValidity?.schedule?.toItalianScheduleText()
+        ?: sourceValidity?.schedule.readableScheduleText()
     val raw = schedule?.raw ?: sourceValidity?.schedule
 
     return TemporalDetailsPresentation(
@@ -96,6 +96,10 @@ internal fun ZoneInfo.temporalDetailsPresentation(): TemporalDetailsPresentation
 
 internal fun ZoneInfo.activityScheduleLabel(): String? =
     temporalDetailsPresentation().activitySchedule
+
+internal fun EnrInfo.activityScheduleForUi(): String? =
+    schedule?.readableSchedule()
+        ?: validity?.schedule.readableScheduleText()
 
 internal fun NotamInfo.presentation(): NotamPresentation {
     val severityCode = severity?.trim()?.uppercase()
@@ -124,9 +128,9 @@ internal fun NotamInfo.presentation(): NotamPresentation {
                 .ifBlank { "Consulta il testo ufficiale prima dell'operazione." }
     }
 
-    val schedule = schedule?.human
+    val schedule = schedule?.readableSchedule()
         ?: validity?.interpretedSchedule
-        ?: validity?.schedule.toItalianScheduleText()
+        ?: validity?.schedule.readableScheduleText()
 
     return NotamPresentation(
         code = code.orEmpty(),
@@ -174,6 +178,11 @@ private fun bestSchedule(
 private fun ScheduleInfo.hasAnyScheduleText(): Boolean =
     !raw.isNullOrBlank() || !human.isNullOrBlank()
 
+private fun ScheduleInfo.readableSchedule(): String? =
+    raw.toItalianScheduleText()
+        ?: human.cleanItalianUiTextOrNull()
+        ?: raw.cleanItalianUiTextOrNull()
+
 private fun NotamInfo.hasTemporalContent(): Boolean =
     validity != null || schedule?.hasAnyScheduleText() == true
 
@@ -200,35 +209,258 @@ private fun ValidityInfo.validityRangeLabel(): String? {
 
 private fun String?.toItalianScheduleText(): String? {
     if (isNullOrBlank()) return null
-    val value = trim().uppercase().replace(Regex("\\s+"), " ")
-    val dayText = when {
-        "DAILY" in value -> "Ogni giorno"
-        Regex("\\bMON-FRI\\b").containsMatchIn(value) -> "Da lunedì a venerdì"
-        Regex("\\bMON-THU\\b").containsMatchIn(value) -> "Da lunedì a giovedì"
-        Regex("\\bSAT-SUN\\b").containsMatchIn(value) -> "Sabato e domenica"
-        Regex("\\bSAT\\b").containsMatchIn(value) -> "Sabato"
-        Regex("\\bSUN\\b").containsMatchIn(value) -> "Domenica"
-        Regex("\\bFRI\\b").containsMatchIn(value) -> "Venerdì"
-        Regex("\\bTHU\\b").containsMatchIn(value) -> "Giovedì"
-        Regex("\\bWED\\b").containsMatchIn(value) -> "Mercoledì"
-        Regex("\\bTUE\\b").containsMatchIn(value) -> "Martedì"
-        Regex("\\bMON\\b").containsMatchIn(value) -> "Lunedì"
-        else -> null
+    val value = trim()
+        .uppercase()
+        .replace(ParenthesizedTextRegex, " ")
+        .replace(Regex("\\s+"), " ")
+        .normalizeBilingualScheduleMarkers()
+        .withoutDuplicatedBilingualSchedule()
+        .trim()
+    val fromToText = value.toItalianFromToSchedule()
+    val notamOnlyText = value.toItalianNotamOnlySchedule()
+    val clauseText = value.toItalianScheduleClauses()
+    val holidayText = value.toItalianHolidayText()
+    val inactiveText = value.toItalianInactivePeriodText()
+    val dayText = value.toItalianScheduleDayText()
+    val timeText = value.toItalianScheduleTimeText()
+    val defaultText = listOfNotNull(dayText, timeText)
+        .joinToString(" ")
+        .takeIf { it.isNotBlank() }
+    val mainText = fromToText ?: clauseText ?: defaultText
+
+    if (notamOnlyText != null) {
+        return listOfNotNull(mainText, holidayText, notamOnlyText, inactiveText).joinToString("; ")
     }
-    val time = Regex("""\b(\d{2})(\d{2})-(\d{2})(\d{2})\b""").find(value)
-    val timeText = time?.let {
-        "dalle ${it.groupValues[1]}:${it.groupValues[2]} alle ${it.groupValues[3]}:${it.groupValues[4]} UTC"
-    } ?: when {
-        "H24" in value -> "24 ore su 24 UTC"
-        Regex("""\bSR(?:[+-]\d+)?-SS(?:[+-]\d+)?\b""").containsMatchIn(value) ->
-            "da alba a tramonto, secondo gli offset pubblicati"
-        else -> null
+    if (fromToText != null || clauseText != null || inactiveText != null) {
+        return listOfNotNull(mainText, holidayText, inactiveText).joinToString("; ")
     }
 
-    return listOfNotNull(dayText, timeText)
-        .joinToString(" ")
-        .ifBlank { value }
+    val separator = if (";" in value) "; " else " "
+    return listOfNotNull(defaultText, holidayText)
+        .joinToString(separator)
+        .takeIf { it.isNotBlank() }
 }
+
+private fun String?.readableScheduleText(): String? =
+    toItalianScheduleText() ?: cleanItalianUiTextOrNull()
+
+private fun String.toItalianFromToSchedule(): String? {
+    val match = FromToDayTimeRegex.find(this) ?: return null
+    val startDay = DayLabels[match.groupValues[1]]?.lowercase() ?: return null
+    val startTime = formatUtcHourMinute(match.groupValues[2], match.groupValues[3]) ?: return null
+    val endDay = DayLabels[match.groupValues[4]]?.lowercase() ?: return null
+    val endTime = formatUtcHourMinute(match.groupValues[5], match.groupValues[6]) ?: return null
+
+    return "Da $startDay $startTime UTC a $endDay $endTime UTC"
+}
+
+private fun String.toItalianNotamOnlySchedule(): String? {
+    val soloNoticeIndex = indexOf("ATTIVA SOLO CON PREAVVISO")
+    val announcedNoticeIndex = listOf(
+        indexOf("ANNOUNCED BY NOTAM"),
+        indexOf("ANNONCED BY NOTAM")
+    ).filter { it >= 0 }.minOrNull() ?: -1
+    val noticeIndex = listOf(soloNoticeIndex, announcedNoticeIndex)
+        .filter { it >= 0 }
+        .minOrNull()
+        ?: return null
+    if ("NOTAM" !in substring(noticeIndex)) return null
+
+    val prefix = substring(0, noticeIndex)
+        .substringAfterLast(";")
+        .substringAfterLast(".")
+        .removePrefix("INOLTRE")
+        .trim()
+
+    val dayClauses = if (TimeRangeRegex.containsMatchIn(prefix)) {
+        emptyList()
+    } else {
+        DayExpressionRegex.find(prefix)
+            ?.value
+            ?.let { formatDayExpression(it) }
+            ?.let { listOf(it) }
+            .orEmpty()
+    }
+    val timeClauses = TimeRangeRegex.findAll(prefix).mapNotNull { match ->
+        val day = prefix.substring(0, match.range.first)
+            .let { DayCodeRegex.findAll(it).lastOrNull()?.value }
+            ?.let { DayLabels[it] }
+            ?: return@mapNotNull null
+        val start = formatUtcHourMinute(match.groupValues[1], match.groupValues[2]) ?: return@mapNotNull null
+        val end = formatUtcHourMinute(match.groupValues[3], match.groupValues[4]) ?: return@mapNotNull null
+        "$day dalle $start alle $end UTC"
+    }.toList()
+    val holidayClause = if (Regex("""\bHOL\b""").containsMatchIn(prefix)) "festivi" else null
+    val subject = (timeClauses + dayClauses + listOfNotNull(holidayClause)).joinToItalianList() ?: return null
+
+    val noticeText = if (soloNoticeIndex >= 0 && soloNoticeIndex == noticeIndex) {
+        "attiva solo con preavviso NOTAM"
+    } else {
+        "attiva con preavviso NOTAM"
+    }
+
+    return "$subject: $noticeText"
+}
+
+private fun String.toItalianScheduleClauses(): String? {
+    val matches = DayClauseRegex.findAll(this).toList()
+    if (matches.isEmpty()) return toItalianDelimitedScheduleClauses()
+
+    val clauses = matches.mapIndexedNotNull { index, match ->
+        val dayText = formatDayExpression(match.groupValues[1]) ?: return@mapIndexedNotNull null
+        val nextStart = matches.getOrNull(index + 1)?.range?.first ?: length
+        val body = substring(match.range.last + 1, nextStart)
+        val timeText = body.toItalianScheduleTimeText() ?: return@mapIndexedNotNull null
+        "$dayText $timeText"
+    }
+
+    return clauses.takeIf { it.isNotEmpty() }?.joinToString("; ")
+}
+
+private fun String.toItalianDelimitedScheduleClauses(): String? {
+    val clauses = split(";").mapNotNull { segment ->
+        val dayMatch = DayExpressionRegex.find(segment) ?: return@mapNotNull null
+        val dayText = formatDayExpression(dayMatch.value) ?: return@mapNotNull null
+        val body = segment.substring(dayMatch.range.last + 1)
+        val timeText = body.toItalianScheduleTimeText() ?: return@mapNotNull null
+        "$dayText $timeText"
+    }
+
+    return clauses.takeIf { it.size > 1 }?.joinToString("; ")
+}
+
+private fun String.toItalianScheduleDayText(): String? {
+    if (Regex("""\b(DAILY|DLY|EVERY DAY)\b""").containsMatchIn(this)) return "Ogni giorno"
+    DayExpressionRegex.find(this)
+        ?.let { return formatDayExpression(it.value) }
+
+    return if (Regex("""\bHOL\b""").containsMatchIn(this) && toItalianHolidayText() != "festivi esclusi") {
+        "Festivi"
+    } else {
+        null
+    }
+}
+
+private fun formatDayExpression(value: String): String? {
+    val days = DayCodeRegex.findAll(value)
+        .map { it.value }
+        .distinct()
+        .toList()
+
+    if (days.isEmpty()) return null
+    if (StrictDayRangeRegex.matches(value.trim()) && days.size == 2) {
+        return formatDayRange(days[0], days[1])
+    }
+    if (days == WeekdayCodes) return "Da lunedì a venerdì"
+    if (days == WeekendCodes) return "Sabato e domenica"
+    if (days.size == 7) return "Ogni giorno"
+
+    return days.mapNotNull { DayLabels[it] }.joinToItalianList()
+}
+
+private fun String.toItalianScheduleTimeText(): String? {
+    if (Regex("""\bH24\b""").containsMatchIn(this)) return "24 ore su 24 UTC"
+    if (Regex("""\bHJ\b""").containsMatchIn(this)) return "da alba a tramonto"
+    if (Regex("""\bHN\b""").containsMatchIn(this)) return "da tramonto ad alba"
+    if (Regex("""\b(SR|SUNRISE)(?:[+-]\d+)?\s*-\s*(SS|SUNSET)(?:[+-]\d+)?\b""").containsMatchIn(this)) {
+        return "da alba a tramonto, secondo gli offset pubblicati"
+    }
+    if (Regex("""\b(SS|SUNSET)(?:[+-]\d+)?\s*-\s*(SR|SUNRISE)(?:[+-]\d+)?\b""").containsMatchIn(this)) {
+        return "da tramonto ad alba, secondo gli offset pubblicati"
+    }
+
+    val ranges = TimeRangeRegex
+        .findAll(this)
+        .mapNotNull { match ->
+            val start = formatUtcHourMinute(match.groupValues[1], match.groupValues[2])
+            val end = formatUtcHourMinute(match.groupValues[3], match.groupValues[4])
+            if (start != null && end != null) "dalle $start alle $end UTC" else null
+        }
+        .toList()
+
+    return ranges.takeIf { it.isNotEmpty() }?.joinToString(", ")
+}
+
+private fun String.toItalianHolidayText(): String? {
+    val hasHoliday = Regex("""\bHOL\b""").containsMatchIn(this)
+    if (!hasHoliday) return null
+
+    val excludesHoliday = Regex("""\b(EXC|EXCEPT)\s+HOL\b""").containsMatchIn(this) ||
+        Regex("""\bHOL\b(?:(?![.;:]).)*\b(ESCLUSI|ESCLUSO|EXCLUDED|EXCEPTED|EXC|EXCEPT)\b""")
+            .containsMatchIn(this)
+
+    return if (excludesHoliday) "festivi esclusi" else "festivi inclusi"
+}
+
+private fun String.toItalianInactivePeriodText(): String? {
+    val match = InactivePeriodRegex.find(this) ?: return null
+    val fromMonth = MonthLabels[match.groupValues[2]] ?: return null
+    val toMonth = MonthLabels[match.groupValues[4]] ?: return null
+
+    return "non attiva dal ${match.groupValues[1].toInt()} $fromMonth al ${match.groupValues[3].toInt()} $toMonth"
+}
+
+private fun String.withoutDuplicatedBilingualSchedule(): String {
+    val parts = split("/")
+    if (parts.size < 2) return this
+
+    val first = parts.first().trim()
+    val second = parts.drop(1).joinToString("/").trim()
+    val firstHasSchedule = DayCodeRegex.containsMatchIn(first) && TimeRangeRegex.containsMatchIn(first)
+    val secondHasSchedule = DayCodeRegex.containsMatchIn(second) && TimeRangeRegex.containsMatchIn(second)
+
+    return if (firstHasSchedule && secondHasSchedule) first else this
+}
+
+private fun String.normalizeBilingualScheduleMarkers(): String =
+    replace(Regex("""\bATTIVA\s*/\s*ACTIVE\b"""), "ATTIVA")
+        .replace(Regex("""\bNON\s+ATTIVA\s*:?\s*/\s*NOT\s+ACTIVE\s*:"""), "NON ATTIVA:")
+        .replace(Regex("""\bE\s*/\s*AND\b"""), "E")
+        .replace(Regex("""\bDA\s*/\s*FROM\b"""), "DA")
+        .replace(Regex("""\bA\s*/\s*TO\b"""), "A")
+        .replace(Regex("""\bESCLUSI\s*/\s*EXCLUDED\b"""), "ESCLUSI")
+        .replace(Regex("""\bESCLUSO\s*/\s*EXCLUDED\b"""), "ESCLUSO")
+        .replace(Regex("""\bINOLTRE\s*/\s*MOREOVER\b"""), "INOLTRE")
+        .replace(Regex("""\s*/\s*ACTIVE BY NOTAM\b"""), " NOTAM")
+
+private fun formatDayRange(startCode: String, endCode: String): String? {
+    val startIndex = DayOrder.indexOf(startCode)
+    val endIndex = DayOrder.indexOf(endCode)
+    if (startIndex == -1 || endIndex == -1) return null
+
+    val days = if (startIndex <= endIndex) {
+        DayOrder.subList(startIndex, endIndex + 1)
+    } else {
+        DayOrder.subList(startIndex, DayOrder.size) + DayOrder.subList(0, endIndex + 1)
+    }
+
+    return when (days) {
+        WeekdayCodes -> "Da lunedì a venerdì"
+        WeekendCodes -> "Sabato e domenica"
+        else -> "Da ${DayLabels.getValue(startCode).lowercase()} a ${DayLabels.getValue(endCode).lowercase()}"
+    }
+}
+
+private fun formatUtcHourMinute(hourText: String, minuteText: String): String? {
+    val hour = hourText.toIntOrNull() ?: return null
+    val minute = minuteText.toIntOrNull() ?: return null
+    if (minute !in 0..59) return null
+    if (hour !in 0..24 || hour == 24 && minute != 0) return null
+
+    return "${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}"
+}
+
+private fun List<String>.joinToItalianList(): String? =
+    when (size) {
+        0 -> null
+        1 -> first()
+        2 -> "${this[0]} e ${this[1].lowercase()}"
+        else -> first() + drop(1).dropLast(1).joinToString(
+            prefix = ", ",
+            separator = ", ",
+            transform = { it.lowercase() }
+        ) + " e ${last().lowercase()}"
+    }
 
 private fun String?.formatUtcDateForUi(): String? {
     if (isNullOrBlank()) return null
@@ -289,6 +521,48 @@ private fun String.normalizedForUiDedup(): String =
         .replace(Regex("[^a-z0-9àèéìòù]+"), " ")
         .replace(Regex("\\s+"), " ")
         .trim()
+
+private val DayOrder = listOf("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN")
+private val WeekdayCodes = DayOrder.take(5)
+private val WeekendCodes = DayOrder.takeLast(2)
+private val DayCodeRegex = Regex("""\b(MON|TUE|WED|THU|FRI|SAT|SUN)\b""")
+private val DayExpressionRegex = Regex("""\b(?:MON|TUE|WED|THU|FRI|SAT|SUN)(?:\s*(?:-|,|\s)\s*(?:MON|TUE|WED|THU|FRI|SAT|SUN))*\b""")
+private val DayClauseRegex = Regex("""\b((?:MON|TUE|WED|THU|FRI|SAT|SUN)(?:\s*(?:-|,|\s)\s*(?:MON|TUE|WED|THU|FRI|SAT|SUN))*)\s*:""")
+private val StrictDayRangeRegex = Regex("""^(MON|TUE|WED|THU|FRI|SAT|SUN)\s*-\s*(MON|TUE|WED|THU|FRI|SAT|SUN)$""")
+private val TimeRangeRegex = Regex("""\b(\d{2})(\d{2})\s*-\s*(\d{2})(\d{2})\b""")
+private val FromToDayTimeRegex = Regex("""\b(?:DA|FROM)\s+(MON|TUE|WED|THU|FRI|SAT|SUN)\s+(\d{2})(\d{2})\s+(?:A|TO)\s+(MON|TUE|WED|THU|FRI|SAT|SUN)\s+(\d{2})(\d{2})\b""")
+private val InactivePeriodRegex = Regex("""\bNON\s+ATTIVA\s*:?\s*(\d{1,2})\s+([A-Z]{3})\s*-\s*(\d{1,2})\s+([A-Z]{3})\b""")
+private val ParenthesizedTextRegex = Regex("""\([^)]*\)""")
+private val DayLabels = mapOf(
+    "MON" to "Lunedì",
+    "TUE" to "Martedì",
+    "WED" to "Mercoledì",
+    "THU" to "Giovedì",
+    "FRI" to "Venerdì",
+    "SAT" to "Sabato",
+    "SUN" to "Domenica"
+)
+private val MonthLabels = mapOf(
+    "JAN" to "gennaio",
+    "FEB" to "febbraio",
+    "MAR" to "marzo",
+    "APR" to "aprile",
+    "MAY" to "maggio",
+    "MAG" to "maggio",
+    "JUN" to "giugno",
+    "GIU" to "giugno",
+    "JUL" to "luglio",
+    "LUG" to "luglio",
+    "AUG" to "agosto",
+    "AGO" to "agosto",
+    "SEP" to "settembre",
+    "SET" to "settembre",
+    "OCT" to "ottobre",
+    "OTT" to "ottobre",
+    "NOV" to "novembre",
+    "DEC" to "dicembre",
+    "DIC" to "dicembre"
+)
 
 private val UiUtcFormatter: DateTimeFormatter =
     DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm 'UTC'").withZone(ZoneOffset.UTC)

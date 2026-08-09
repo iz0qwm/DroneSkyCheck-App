@@ -1397,7 +1397,7 @@ private fun ZoneInfoCard(
     warnings: List<Issue>,
     onAuthorizationRequest: () -> Unit
 ) {
-    var expanded by remember(zone.name, zone.type, index) { mutableStateOf(index == 0) }
+    var expanded by remember(zone.name, zone.type, index) { mutableStateOf(false) }
     val hasBlocker = blockers.any { it.zoneName == zone.name }
     val hasWarning = warnings.any { it.zoneName == zone.name }
     val isResponsible = zone.isVerdictSource == true ||

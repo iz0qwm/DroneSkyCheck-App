@@ -345,27 +345,28 @@ private fun updateAuthorizationDrawing(
     areaPoints: List<MapPoint>,
     areaClosed: Boolean
 ) {
-    style.getSourceAs<GeoJsonSource>(AUTH_TAKEOFF_SOURCE_ID)
-        ?.setGeoJson(takeoff?.toFeatureCollection() ?: emptyFeatureCollection())
+    style.setGeoJsonSourceIfAvailable(
+        AUTH_TAKEOFF_SOURCE_ID,
+        takeoff?.toFeatureCollection() ?: emptyFeatureCollection()
+    )
 
-    style.getSourceAs<GeoJsonSource>(AUTH_AREA_VERTICES_SOURCE_ID)
-        ?.setGeoJson(
-            FeatureCollection.fromFeatures(
-                areaPoints.map { Feature.fromGeometry(Point.fromLngLat(it.lon, it.lat)) }
-            )
+    style.setGeoJsonSourceIfAvailable(
+        AUTH_AREA_VERTICES_SOURCE_ID,
+        FeatureCollection.fromFeatures(
+            areaPoints.map { Feature.fromGeometry(Point.fromLngLat(it.lon, it.lat)) }
         )
+    )
 
-    style.getSourceAs<GeoJsonSource>(AUTH_AREA_LINE_SOURCE_ID)
-        ?.setGeoJson(areaPoints.toLineFeatureCollection(areaClosed))
+    style.setGeoJsonSourceIfAvailable(AUTH_AREA_LINE_SOURCE_ID, areaPoints.toLineFeatureCollection(areaClosed))
 
-    style.getSourceAs<GeoJsonSource>(AUTH_AREA_FILL_SOURCE_ID)
-        ?.setGeoJson(
-            if (areaClosed && areaPoints.size >= 3) {
-                areaPoints.toPolygonFeatureCollection()
-            } else {
-                emptyFeatureCollection()
-            }
-        )
+    style.setGeoJsonSourceIfAvailable(
+        AUTH_AREA_FILL_SOURCE_ID,
+        if (areaClosed && areaPoints.size >= 3) {
+            areaPoints.toPolygonFeatureCollection()
+        } else {
+            emptyFeatureCollection()
+        }
+    )
 }
 
 private fun updatePointMarkers(
@@ -373,10 +374,14 @@ private fun updatePointMarkers(
     selectedPoint: MapPoint?,
     userLocation: UserLocation?
 ) {
-    style.getSourceAs<GeoJsonSource>(SELECTED_POINT_SOURCE_ID)
-        ?.setGeoJson(selectedPoint?.toFeatureCollection() ?: emptyFeatureCollection())
-    style.getSourceAs<GeoJsonSource>(USER_LOCATION_SOURCE_ID)
-        ?.setGeoJson(userLocation?.toFeatureCollection() ?: emptyFeatureCollection())
+    style.setGeoJsonSourceIfAvailable(
+        SELECTED_POINT_SOURCE_ID,
+        selectedPoint?.toFeatureCollection() ?: emptyFeatureCollection()
+    )
+    style.setGeoJsonSourceIfAvailable(
+        USER_LOCATION_SOURCE_ID,
+        userLocation?.toFeatureCollection() ?: emptyFeatureCollection()
+    )
 }
 
 private fun centerOnUserLocation(map: MapLibreMap, userLocation: UserLocation) {
@@ -473,9 +478,8 @@ private fun loadDscGeoJsonSources(
                     )
                 }
                 MAIN_HANDLER.post {
-                    style.getSourceAs<GeoJsonSource>(layer.sourceId)
-                        ?.setGeoJson(featureCollection)
-                    if (layer.category in DIAGNOSTIC_CATEGORIES) {
+                    val updated = style.setGeoJsonSourceIfAvailable(layer.sourceId, featureCollection)
+                    if (updated && layer.category in DIAGNOSTIC_CATEGORIES) {
                         Log.d(LOG_TAG, "[layer-debug] source populated key=${layer.key}")
                     }
                 }
@@ -510,8 +514,7 @@ private fun loadDynamicZonesSources(
                         MAIN_HANDLER.post(onMapDataDegraded)
                     }
                     MAIN_HANDLER.post {
-                        style.getSourceAs<GeoJsonSource>(layer.sourceId)
-                            ?.setGeoJson(featureCollection)
+                        style.setGeoJsonSourceIfAvailable(layer.sourceId, featureCollection)
                     }
                     Log.d(
                         LOG_TAG,
@@ -562,6 +565,14 @@ private fun logLayerDefinition(layer: DscMapLayer) {
             "minZoom=${layer.minZoom}, url=${layer.url}"
     )
 }
+
+private fun Style.setGeoJsonSourceIfAvailable(sourceId: String, featureCollection: FeatureCollection): Boolean =
+    runCatching {
+        getSourceAs<GeoJsonSource>(sourceId)
+            ?.setGeoJson(featureCollection) != null
+    }.onFailure { error ->
+        Log.w(LOG_TAG, "Skipped GeoJSON update for source=$sourceId because the map style is not ready", error)
+    }.getOrDefault(false)
 
 private fun logFocusLayerState(
     mapView: MapView,

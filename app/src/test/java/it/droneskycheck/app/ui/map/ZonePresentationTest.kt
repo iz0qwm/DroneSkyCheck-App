@@ -57,6 +57,199 @@ class ZonePresentationTest {
     }
 
     @Test
+    fun temporalDetailsParsesBackendTimeRangeWithoutDay() {
+        val details = zone(
+            activeNow = true,
+            validity = ValidityInfo(
+                activeNow = true,
+                validFrom = null,
+                validTo = null,
+                schedule = "0700-1600",
+                interpretedSchedule = null,
+                nextActivation = null,
+                explanation = null,
+                future = null,
+                expired = null
+            )
+        ).temporalDetailsPresentation()
+
+        assertEquals("dalle 07:00 alle 16:00 UTC", details.activitySchedule)
+        assertEquals("0700-1600", details.originalSchedule)
+    }
+
+    @Test
+    fun temporalDetailsParsesWeekdaySchedulesWithMultipleRanges() {
+        val details = zone(
+            activeNow = false,
+            enr = enr(
+                schedule = ScheduleInfo(
+                    raw = "MON TUE WED THU FRI 0700-1200 1300-1700 EXC HOL",
+                    human = null,
+                    activeNow = false,
+                    explanation = null
+                )
+            )
+        ).temporalDetailsPresentation()
+
+        assertEquals(
+            "Da lunedì a venerdì dalle 07:00 alle 12:00 UTC, dalle 13:00 alle 17:00 UTC festivi esclusi",
+            details.activitySchedule
+        )
+    }
+
+    @Test
+    fun temporalDetailsIgnoresParenthesizedLocalTimesAndKeepsDayClauses() {
+        val details = zone(
+            activeNow = true,
+            enr = enr(
+                schedule = ScheduleInfo(
+                    raw = "MON-TUE-WED-FRI: 0730-1700 (0630-1600) THU: 0730-2200 (0630-2100) HOL ESCLUSI/EXCLUDED. ATTIVA/ACTIVE 1 SEP-30 JUN ORARI DIVERSI CON PREAVVISO A MEZZO NOTAM",
+                    human = null,
+                    activeNow = true,
+                    explanation = null
+                )
+            )
+        ).temporalDetailsPresentation()
+
+        assertEquals(
+            "Lunedì, martedì, mercoledì e venerdì dalle 07:30 alle 17:00 UTC; Giovedì dalle 07:30 alle 22:00 UTC; festivi esclusi",
+            details.activitySchedule
+        )
+    }
+
+    @Test
+    fun temporalDetailsIgnoresBilingualDuplicateAndExcludedHolidayText() {
+        val details = zone(
+            activeNow = true,
+            enr = enr(
+                schedule = ScheduleInfo(
+                    raw = "MON-FRI 0630-1800 (0530-1700), HOL E 20 GIUGNO ESCLUSI/MON-FRI 0630-1800 (0530-1700), HOL AND JUNE 20TH EXCLUDED",
+                    human = null,
+                    activeNow = true,
+                    explanation = null
+                )
+            )
+        ).temporalDetailsPresentation()
+
+        assertEquals(
+            "Da lunedì a venerdì dalle 06:30 alle 18:00 UTC festivi esclusi",
+            details.activitySchedule
+        )
+    }
+
+    @Test
+    fun temporalDetailsParsesFromDayTimeToDayTimeAndNotamOnlyClause() {
+        val details = zone(
+            activeNow = true,
+            enr = enr(
+                schedule = ScheduleInfo(
+                    raw = "ATTIVA/ACTIVE: 7 JAN-21 JUN E/AND 20 SEP-21 DIC DA/FROM SUN 2300 (2200) A/TO SAT 1200 (1100); HOL ESCLUSI/EXCLUDED. INOLTRE/MOREOVER SAT 1200-2300 (1100-2200) E/AND HOL: ATTIVA SOLO CON PREAVVISO A MEZZO/ACTIVE BY NOTAM",
+                    human = null,
+                    activeNow = true,
+                    explanation = null
+                )
+            )
+        ).temporalDetailsPresentation()
+
+        assertEquals(
+            "Da domenica 23:00 UTC a sabato 12:00 UTC; festivi esclusi; Sabato dalle 12:00 alle 23:00 UTC e festivi: attiva solo con preavviso NOTAM",
+            details.activitySchedule
+        )
+    }
+
+    @Test
+    fun temporalDetailsParsesAnnouncedByNotamDayClause() {
+        val details = zone(
+            activeNow = true,
+            enr = enr(
+                schedule = ScheduleInfo(
+                    raw = "FROM 1 SEP TO 30 JUN MON-FRI 0630-2200 (0530-2100); SAT ANNONCED BY NOTAM; HOL ESCLUSI/EXCLUDED",
+                    human = null,
+                    activeNow = true,
+                    explanation = null
+                )
+            )
+        ).temporalDetailsPresentation()
+
+        assertEquals(
+            "Da lunedì a venerdì dalle 06:30 alle 22:00 UTC; festivi esclusi; Sabato: attiva con preavviso NOTAM",
+            details.activitySchedule
+        )
+    }
+
+    @Test
+    fun temporalDetailsParsesDelimitedDaySchedulesAndInactivePeriod() {
+        val details = zone(
+            activeNow = true,
+            enr = enr(
+                schedule = ScheduleInfo(
+                    raw = "MON-THU 0700-1900; FRI 0700-1400; HOL EXCLUDED NON ATTIVA :/NOT ACTIVE: 21 JUN - 20 SEP",
+                    human = null,
+                    activeNow = true,
+                    explanation = null
+                )
+            )
+        ).temporalDetailsPresentation()
+
+        assertEquals(
+            "Da lunedì a giovedì dalle 07:00 alle 19:00 UTC; Venerdì dalle 07:00 alle 14:00 UTC; festivi esclusi; non attiva dal 21 giugno al 20 settembre",
+            details.activitySchedule
+        )
+    }
+
+    @Test
+    fun temporalDetailsParsesH24WithExcludedHolidays() {
+        val details = zone(
+            activeNow = true,
+            enr = enr(
+                schedule = ScheduleInfo(
+                    raw = "H24; HOL ESCLUSI/EXCLUDED",
+                    human = null,
+                    activeNow = true,
+                    explanation = null
+                )
+            )
+        ).temporalDetailsPresentation()
+
+        assertEquals("24 ore su 24 UTC; festivi esclusi", details.activitySchedule)
+    }
+
+    @Test
+    fun temporalDetailsParsesAeronauticalSunSchedule() {
+        val details = zone(
+            activeNow = true,
+            enr = enr(
+                schedule = ScheduleInfo(
+                    raw = "DAILY HJ",
+                    human = null,
+                    activeNow = true,
+                    explanation = null
+                )
+            )
+        ).temporalDetailsPresentation()
+
+        assertEquals("Ogni giorno da alba a tramonto", details.activitySchedule)
+    }
+
+    @Test
+    fun temporalDetailsFallsBackToBackendHumanScheduleWhenRawIsNotRecognized() {
+        val details = zone(
+            activeNow = true,
+            enr = enr(
+                schedule = ScheduleInfo(
+                    raw = "As notified by NOTAM",
+                    human = "Secondo NOTAM pubblicato",
+                    activeNow = true,
+                    explanation = null
+                )
+            )
+        ).temporalDetailsPresentation()
+
+        assertEquals("Secondo NOTAM pubblicato", details.activitySchedule)
+        assertEquals("As notified by NOTAM", details.originalSchedule)
+    }
+
+    @Test
     fun temporalDetailsExposeGraphicSchedules() {
         val details = zone(
             activeNow = false,
@@ -165,5 +358,32 @@ class ZonePresentationTest {
             enr = enr,
             authorizationRequired = null,
             activeNow = activeNow
+        )
+
+    private fun enr(
+        schedule: ScheduleInfo? = null,
+        weekSchedule: List<TemporalBarEntry> = emptyList(),
+        daySchedule: List<Boolean?> = emptyList()
+    ): EnrInfo =
+        EnrInfo(
+            code = "ENR 5.2",
+            name = null,
+            description = null,
+            limitText = null,
+            notes = null,
+            classification = null,
+            activationType = null,
+            operationMode = null,
+            operationCategory = null,
+            requiredLicense = null,
+            authorizationRequired = null,
+            schedule = schedule,
+            authority = null,
+            official = null,
+            validity = null,
+            explanation = null,
+            operationalMeaning = null,
+            weekSchedule = weekSchedule,
+            daySchedule = daySchedule
         )
 }
