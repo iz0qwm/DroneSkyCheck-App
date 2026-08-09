@@ -12,6 +12,12 @@ import android.os.Bundle
 import android.os.Looper
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -24,7 +30,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -43,6 +52,7 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.OutlinedButton
@@ -53,10 +63,12 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,7 +77,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -80,13 +94,20 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import it.droneskycheck.app.data.AuthorizationInfo
 import it.droneskycheck.app.data.AuthorizationAdditionalRequirement
 import it.droneskycheck.app.data.AuthorizationProcedure
+import it.droneskycheck.app.data.AuthorizationDraft
+import it.droneskycheck.app.data.AuthorizationOperationData
+import it.droneskycheck.app.data.AuthorizationWorkflowSteps
+import it.droneskycheck.app.data.AuthorizationZoneReference
 import it.droneskycheck.app.data.AuthorityInfo
+import it.droneskycheck.app.data.CreateAuthorizationDraftResult
 import it.droneskycheck.app.data.EnrInfo
 import it.droneskycheck.app.data.Issue
 import it.droneskycheck.app.data.KeyValueInfo
+import it.droneskycheck.app.data.LocalAuthorizationRepository
 import it.droneskycheck.app.data.NotamInfo
 import it.droneskycheck.app.data.OfficialInfo
 import it.droneskycheck.app.data.SupInfo
+import it.droneskycheck.app.data.TemporalBarEntry
 import it.droneskycheck.app.data.ValidityInfo
 import it.droneskycheck.app.data.ZoneCheckV3Response
 import it.droneskycheck.app.data.ZoneInfo
@@ -94,24 +115,47 @@ import it.droneskycheck.app.map.DscLayerCategory
 import it.droneskycheck.app.map.DscZoneMapColors
 import it.droneskycheck.app.map.DroneSkyMapView
 import it.droneskycheck.app.map.MapLayerIds
+import it.droneskycheck.app.ui.authorization.AuthorizationDraftSheet
+import it.droneskycheck.app.ui.profile.PilotProfileSheet
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Instant
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 @Composable
 fun MapScreen(
     viewModel: MapViewModel = viewModel()
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val authorizationRepository = remember(context) { LocalAuthorizationRepository(context.applicationContext) }
     val activity = context.findActivity()
     val uiState by viewModel.uiState.collectAsState()
     val visibleLayerCategories = uiState.layerVisibility
         .filterValues { it }
         .keys
     val permissionState = currentLocationPermissionState(context)
+    var isPilotProfileSheetVisible by remember { mutableStateOf(false) }
+    var currentDraft by remember { mutableStateOf<AuthorizationDraft?>(null) }
+    var isDraftSheetVisible by remember { mutableStateOf(false) }
+    var conflictingDraft by remember { mutableStateOf<AuthorizationDraft?>(null) }
+    var pendingConflictZone by remember { mutableStateOf<ZoneInfo?>(null) }
+    var draftError by remember { mutableStateOf<String?>(null) }
+    var planningWarning by remember { mutableStateOf<String?>(null) }
+    var isPlanningCardCompact by remember { mutableStateOf(true) }
+
+    suspend fun reloadActiveDraft() {
+        currentDraft = authorizationRepository.getActiveDraft()
+    }
+
+    LaunchedEffect(authorizationRepository) {
+        reloadActiveDraft()
+    }
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { grants ->
@@ -152,10 +196,47 @@ fun MapScreen(
         DroneSkyMapView(
             visibleLayerCategories = visibleLayerCategories,
             selectedPoint = uiState.selectedPoint,
+            authorizationTakeoff = currentDraft?.operationData?.takeoffMapPoint(),
+            authorizationAreaPoints = currentDraft?.operationData?.areaPoints.orEmpty().map { MapPoint(it.lat, it.lon) },
+            authorizationAreaClosed = currentDraft?.operationData?.areaClosed == true,
             userLocation = uiState.userLocation,
             shouldCenterOnUserLocation = uiState.shouldCenterOnUserLocation,
             onUserLocationCentered = viewModel::onUserLocationCentered,
-            onMapTapped = viewModel::onMapTapped,
+            onMapTapped = { selection ->
+                val draft = currentDraft
+                if (draft != null && draft.workflowStep != AuthorizationWorkflowSteps.Form) {
+                    when (draft.workflowStep) {
+                        AuthorizationWorkflowSteps.Takeoff -> {
+                            planningWarning = null
+                            coroutineScope.launch {
+                                currentDraft = authorizationRepository.setTakeoff(
+                                    id = draft.id,
+                                    lat = selection.point.lat,
+                                    lon = selection.point.lon
+                                )
+                            }
+                        }
+                        else -> {
+                            val warning = validateAreaPointSelection(draft, selection.zones)
+                            if (warning != null) {
+                                planningWarning = warning
+                            } else {
+                                planningWarning = null
+                                coroutineScope.launch {
+                                    currentDraft = authorizationRepository.addAreaPoint(
+                                        id = draft.id,
+                                        lat = selection.point.lat,
+                                        lon = selection.point.lon,
+                                        detectedZones = selection.zones.map { it.toAuthorizationZoneReference() }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    viewModel.onMapTapped(selection)
+                }
+            },
             onCameraIdle = viewModel::onCameraIdle,
             onMapDataDegraded = viewModel::onMapDataDegraded,
             modifier = Modifier.fillMaxSize()
@@ -169,6 +250,49 @@ fun MapScreen(
                 .padding(horizontal = 16.dp, vertical = 12.dp)
         )
 
+        currentDraft?.let { draft ->
+            ActiveAuthorizationBanner(
+                draft = draft,
+                onResume = { isDraftSheetVisible = true },
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
+                    .padding(top = 74.dp, start = 16.dp, end = 16.dp)
+            )
+        }
+
+        currentDraft?.takeIf { it.workflowStep != AuthorizationWorkflowSteps.Form }?.let { draft ->
+            PlanningWorkflowCard(
+                draft = draft,
+                compact = isPlanningCardCompact,
+                warning = planningWarning,
+                onToggleCompact = { isPlanningCardCompact = !isPlanningCardCompact },
+                onUndoPoint = {
+                    planningWarning = null
+                    coroutineScope.launch {
+                        currentDraft = authorizationRepository.undoAreaPoint(draft.id)
+                    }
+                },
+                onRestartArea = {
+                    planningWarning = null
+                    coroutineScope.launch {
+                        currentDraft = authorizationRepository.restartArea(draft.id)
+                    }
+                },
+                onFinishArea = {
+                    coroutineScope.launch {
+                        currentDraft = authorizationRepository.finishArea(draft.id)
+                        isDraftSheetVisible = true
+                    }
+                },
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
+                    .padding(16.dp)
+                    .widthIn(max = 340.dp)
+            )
+        }
+
         MapControlsToolbar(
             hiddenCount = uiState.layerVisibility.count { !it.value },
             isLocationEnabled = uiState.isUserLocationEnabled,
@@ -181,6 +305,7 @@ fun MapScreen(
                     else -> viewModel.onLocationPermissionExplanationRequested()
                 }
             },
+            onProfileClick = { isPilotProfileSheetVisible = true },
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .windowInsetsPadding(WindowInsets.safeDrawing)
@@ -217,6 +342,66 @@ fun MapScreen(
             )
         }
 
+        if (isPilotProfileSheetVisible) {
+            PilotProfileSheet(
+                onDismiss = { isPilotProfileSheetVisible = false }
+            )
+        }
+
+        if (isDraftSheetVisible) {
+            currentDraft?.let { draft ->
+            AuthorizationDraftSheet(
+                draft = draft,
+                onOpenProfile = {
+                    isDraftSheetVisible = false
+                    isPilotProfileSheetVisible = true
+                },
+                onCancelDraft = {
+                    coroutineScope.launch {
+                        authorizationRepository.deleteDraft(draft.id)
+                        currentDraft = null
+                        isDraftSheetVisible = false
+                    }
+                },
+                onDismiss = { isDraftSheetVisible = false }
+            )
+            }
+        }
+
+        conflictingDraft?.let { draft ->
+            ActiveDraftConflictDialog(
+                draft = draft,
+                onResume = {
+                    conflictingDraft = null
+                    currentDraft = draft
+                    isDraftSheetVisible = true
+                    viewModel.onZoneSheetDismissed()
+                },
+                onCancelAndCreate = {
+                    val selectedZone = pendingConflictZone
+                    if (selectedZone != null) {
+                        coroutineScope.launch {
+                            authorizationRepository.deleteDraft(draft.id)
+                            currentDraft = null
+                            conflictingDraft = null
+                            pendingConflictZone = null
+                            when (val result = authorizationRepository.createDraftFromZone(selectedZone)) {
+                                is CreateAuthorizationDraftResult.Created -> {
+                                    viewModel.onZoneSheetDismissed()
+                                    currentDraft = result.draft
+                                }
+                                else -> draftError = "Non riesco a creare la nuova richiesta."
+                            }
+                        }
+                    }
+                },
+                onDismiss = {
+                    conflictingDraft = null
+                    pendingConflictZone = null
+                }
+            )
+        }
+
         val selectedPoint = uiState.selectedPoint
         if (uiState.isZoneSheetVisible && selectedPoint != null) {
             ZoneBottomSheet(
@@ -225,53 +410,34 @@ fun MapScreen(
                 isLoading = uiState.isVerdictLoading,
                 verdict = uiState.verdict,
                 error = uiState.verdictError,
+                draftError = draftError,
                 onRetry = viewModel::onZoneCheckRetryRequested,
+                onAuthorizationRequest = { zoneInfo ->
+                    draftError = null
+                    coroutineScope.launch {
+                        when (val result = authorizationRepository.createDraftFromZone(
+                            zone = zoneInfo
+                        )) {
+                            is CreateAuthorizationDraftResult.Created -> {
+                                viewModel.onZoneSheetDismissed()
+                                currentDraft = result.draft
+                                isDraftSheetVisible = false
+                            }
+                            is CreateAuthorizationDraftResult.ProcedureSelectionRequired -> {
+                                draftError = "Sono disponibili piu procedure: ${result.procedures.joinToString(", ")}."
+                            }
+                            is CreateAuthorizationDraftResult.ActiveDraftConflict -> {
+                                conflictingDraft = result.activeDraft
+                                pendingConflictZone = zoneInfo
+                            }
+                            is CreateAuthorizationDraftResult.Unsupported -> {
+                                draftError = "Questa zona non puo creare una pratica locale: ${result.reason}."
+                            }
+                        }
+                    }
+                },
                 onDismiss = viewModel::onZoneSheetDismissed
             )
-        }
-    }
-}
-
-@Composable
-private fun LayerFilterFab(
-    hiddenCount: Int,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    FloatingActionButton(
-        onClick = onClick,
-        modifier = modifier,
-        containerColor = if (hiddenCount > 0) {
-            MaterialTheme.colorScheme.tertiaryContainer
-        } else {
-            MaterialTheme.colorScheme.surface
-        },
-        contentColor = if (hiddenCount > 0) {
-            MaterialTheme.colorScheme.onTertiaryContainer
-        } else {
-            MaterialTheme.colorScheme.onSurface
-        }
-    ) {
-        Box(contentAlignment = Alignment.Center) {
-            LayerStackIcon(modifier = Modifier.size(28.dp))
-            if (hiddenCount > 0) {
-                Surface(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .size(18.dp),
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.error,
-                    contentColor = MaterialTheme.colorScheme.onError
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(
-                            text = hiddenCount.toString(),
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            }
         }
     }
 }
@@ -304,58 +470,220 @@ private fun MapControlsToolbar(
     hasUserLocation: Boolean,
     onLayersClick: () -> Unit,
     onLocationClick: () -> Unit,
+    onProfileClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Column(
-        modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-        horizontalAlignment = Alignment.End
+    var expanded by remember { mutableStateOf(false) }
+    val actionEnter = fadeIn() + scaleIn(transformOrigin = TransformOrigin(1f, 1f))
+    val actionExit = fadeOut() + scaleOut(transformOrigin = TransformOrigin(1f, 1f))
+
+    Box(
+        modifier = modifier.size(width = 336.dp, height = 336.dp),
+        contentAlignment = Alignment.BottomEnd
     ) {
-        LocationFab(
-            isEnabled = isLocationEnabled,
-            hasFix = hasUserLocation,
-            onClick = onLocationClick
-        )
-        LayerFilterFab(
-            hiddenCount = hiddenCount,
-            onClick = onLayersClick
+        AnimatedVisibility(
+            visible = expanded,
+            enter = actionEnter,
+            exit = actionExit,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .offset(y = (-72).dp)
+        ) {
+            MapActionFab(
+                label = "Zone",
+                direction = MapActionDirection.Up,
+                onClick = {
+                    expanded = false
+                    onLayersClick()
+                }
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    LayerStackIcon(modifier = Modifier.size(24.dp))
+                    if (hiddenCount > 0) {
+                        Surface(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .size(16.dp),
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.error,
+                            contentColor = MaterialTheme.colorScheme.onError
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = hiddenCount.toString(),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        AnimatedVisibility(
+            visible = expanded,
+            enter = actionEnter,
+            exit = actionExit,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .offset(y = (-136).dp)
+        ) {
+            MapActionFab(
+                label = "Posizione",
+                direction = MapActionDirection.Up,
+                containerColor = if (isLocationEnabled) {
+                    MaterialTheme.colorScheme.primaryContainer
+                } else {
+                    MaterialTheme.colorScheme.surface
+                },
+                contentColor = if (isLocationEnabled) {
+                    MaterialTheme.colorScheme.onPrimaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
+                onClick = {
+                    expanded = false
+                    onLocationClick()
+                }
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    LocationTargetIcon(modifier = Modifier.size(24.dp))
+                    if (isLocationEnabled && !hasUserLocation) {
+                        Surface(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .size(9.dp),
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.tertiary
+                        ) {}
+                    }
+                }
+            }
+        }
+
+        AnimatedVisibility(
+            visible = expanded,
+            enter = actionEnter,
+            exit = actionExit,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .offset(x = (-72).dp)
+        ) {
+            MapActionFab(
+                label = "Pilota",
+                direction = MapActionDirection.Left,
+                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                onClick = {
+                    expanded = false
+                    onProfileClick()
+                }
+            ) {
+                PilotProfileIcon(modifier = Modifier.size(24.dp))
+            }
+        }
+
+        FloatingActionButton(
+            onClick = { expanded = !expanded },
+            containerColor = MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .graphicsLayer {
+                    shadowElevation = 10.dp.toPx()
+                }
+        ) {
+            ExpandCornerIcon(
+                expanded = expanded,
+                modifier = Modifier.size(30.dp)
+            )
+        }
+    }
+}
+
+private enum class MapActionDirection {
+    Up,
+    Left
+}
+
+@Composable
+private fun MapActionFab(
+    label: String,
+    direction: MapActionDirection,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    containerColor: Color = MaterialTheme.colorScheme.surface,
+    contentColor: Color = MaterialTheme.colorScheme.onSurface,
+    icon: @Composable () -> Unit
+) {
+    when (direction) {
+        MapActionDirection.Up -> {
+            Row(
+                modifier = modifier,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                MapActionLabel(label)
+                MapActionButton(
+                    onClick = onClick,
+                    containerColor = containerColor,
+                    contentColor = contentColor,
+                    icon = icon
+                )
+            }
+        }
+        MapActionDirection.Left -> {
+            Column(
+                modifier = modifier,
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                MapActionLabel(label)
+                MapActionButton(
+                    onClick = onClick,
+                    containerColor = containerColor,
+                    contentColor = contentColor,
+                    icon = icon
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MapActionLabel(label: String) {
+    Surface(
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        tonalElevation = 4.dp,
+        shadowElevation = 4.dp
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1
         )
     }
 }
 
 @Composable
-private fun LocationFab(
-    isEnabled: Boolean,
-    hasFix: Boolean,
+private fun MapActionButton(
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    containerColor: Color,
+    contentColor: Color,
+    icon: @Composable () -> Unit
 ) {
     FloatingActionButton(
         onClick = onClick,
-        modifier = modifier,
-        containerColor = if (isEnabled) {
-            MaterialTheme.colorScheme.primaryContainer
-        } else {
-            MaterialTheme.colorScheme.surface
-        },
-        contentColor = if (isEnabled) {
-            MaterialTheme.colorScheme.onPrimaryContainer
-        } else {
-            MaterialTheme.colorScheme.onSurface
-        }
+        modifier = Modifier.size(48.dp),
+        containerColor = containerColor,
+        contentColor = contentColor
     ) {
-        Box(contentAlignment = Alignment.Center) {
-            LocationTargetIcon(modifier = Modifier.size(28.dp))
-            if (isEnabled && !hasFix) {
-                Surface(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .size(10.dp),
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.tertiary
-                ) {}
-            }
-        }
+        icon()
     }
 }
 
@@ -380,6 +708,76 @@ private fun LocationTargetIcon(modifier: Modifier = Modifier) {
         drawLine(color, Offset(center.x, size.height * 0.75f), Offset(center.x, size.height - 1.dp.toPx()), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
         drawLine(color, Offset(1.dp.toPx(), center.y), Offset(size.width * 0.25f, center.y), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
         drawLine(color, Offset(size.width * 0.75f, center.y), Offset(size.width - 1.dp.toPx(), center.y), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
+    }
+}
+
+@Composable
+private fun PilotProfileIcon(modifier: Modifier = Modifier) {
+    val color = LocalContentColor.current
+    Canvas(modifier = modifier) {
+        val stroke = Stroke(width = 2.2.dp.toPx(), cap = StrokeCap.Round)
+        val centerX = size.width / 2f
+        drawCircle(
+            color = color,
+            radius = size.minDimension * 0.17f,
+            center = Offset(centerX, size.height * 0.32f),
+            style = stroke
+        )
+        drawArc(
+            color = color,
+            startAngle = 205f,
+            sweepAngle = 130f,
+            useCenter = false,
+            topLeft = Offset(size.width * 0.22f, size.height * 0.46f),
+            size = Size(size.width * 0.56f, size.height * 0.44f),
+            style = stroke
+        )
+        drawLine(
+            color = color,
+            start = Offset(size.width * 0.28f, size.height * 0.72f),
+            end = Offset(size.width * 0.72f, size.height * 0.72f),
+            strokeWidth = 2.2.dp.toPx(),
+            cap = StrokeCap.Round
+        )
+    }
+}
+
+@Composable
+private fun ExpandCornerIcon(
+    expanded: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val color = LocalContentColor.current
+    Canvas(modifier = modifier) {
+        val strokeWidth = 2.6.dp.toPx()
+        if (expanded) {
+            drawLine(
+                color = color,
+                start = Offset(size.width * 0.28f, size.height * 0.28f),
+                end = Offset(size.width * 0.72f, size.height * 0.72f),
+                strokeWidth = strokeWidth,
+                cap = StrokeCap.Round
+            )
+            drawLine(
+                color = color,
+                start = Offset(size.width * 0.72f, size.height * 0.28f),
+                end = Offset(size.width * 0.28f, size.height * 0.72f),
+                strokeWidth = strokeWidth,
+                cap = StrokeCap.Round
+            )
+            return@Canvas
+        }
+
+        val origin = Offset(size.width * 0.68f, size.height * 0.68f)
+        val upEnd = Offset(origin.x, size.height * 0.18f)
+        val leftEnd = Offset(size.width * 0.18f, origin.y)
+        drawCircle(color = color.copy(alpha = 0.22f), radius = size.minDimension * 0.34f, center = origin)
+        drawLine(color, origin, upEnd, strokeWidth = strokeWidth, cap = StrokeCap.Round)
+        drawLine(color, origin, leftEnd, strokeWidth = strokeWidth, cap = StrokeCap.Round)
+        drawLine(color, upEnd, Offset(upEnd.x - size.width * 0.12f, upEnd.y + size.height * 0.13f), strokeWidth = strokeWidth, cap = StrokeCap.Round)
+        drawLine(color, upEnd, Offset(upEnd.x + size.width * 0.12f, upEnd.y + size.height * 0.13f), strokeWidth = strokeWidth, cap = StrokeCap.Round)
+        drawLine(color, leftEnd, Offset(leftEnd.x + size.width * 0.13f, leftEnd.y - size.height * 0.12f), strokeWidth = strokeWidth, cap = StrokeCap.Round)
+        drawLine(color, leftEnd, Offset(leftEnd.x + size.width * 0.13f, leftEnd.y + size.height * 0.12f), strokeWidth = strokeWidth, cap = StrokeCap.Round)
     }
 }
 
@@ -595,7 +993,7 @@ private fun MapTitlePill(
 ) {
     val degraded = !statusMessage.isNullOrBlank()
     Surface(
-        modifier = modifier.widthIn(max = 280.dp),
+        modifier = modifier.widthIn(max = 300.dp),
         shape = MaterialTheme.shapes.large,
         color = if (degraded) {
             MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.94f)
@@ -636,6 +1034,184 @@ private fun MapTitlePill(
     }
 }
 
+@Composable
+private fun ActiveAuthorizationBanner(
+    draft: AuthorizationDraft,
+    onResume: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier
+            .widthIn(max = 360.dp)
+            .clickable(onClick = onResume),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.96f),
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        tonalElevation = 8.dp,
+        shadowElevation = 6.dp
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 11.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                text = "${draft.procedureType} - Richiesta in corso",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = listOf(draft.zoneName, draft.workflowStep.toWorkflowLabel())
+                    .filter { it.isNotBlank() }
+                    .joinToString(" - "),
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+private fun PlanningWorkflowCard(
+    draft: AuthorizationDraft,
+    compact: Boolean,
+    warning: String?,
+    onToggleCompact: () -> Unit,
+    onUndoPoint: () -> Unit,
+    onRestartArea: () -> Unit,
+    onFinishArea: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val operation = draft.operationData
+    val takeoff = operation.takeoffMapPoint()
+    val areaCount = operation.areaPoints.size
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)),
+        shape = MaterialTheme.shapes.large,
+        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = if (draft.workflowStep == AuthorizationWorkflowSteps.Takeoff) {
+                    "1. Punto di decollo"
+                } else {
+                    "2. Area operativa"
+                },
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = if (draft.workflowStep == AuthorizationWorkflowSteps.Takeoff) {
+                    "Tocca sulla mappa il punto di decollo."
+                } else {
+                    "Tocca la mappa per aggiungere i vertici dell'area. Minimo 3 punti."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            DraftMapLine("Decollo", takeoff?.formatForPlanning() ?: "Da selezionare")
+            DraftMapLine("Vertici area", "$areaCount / 3 minimi")
+            warning?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+            TextButton(
+                onClick = onToggleCompact,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(if (compact) "Mostra comandi" else "Riduci")
+            }
+            if (!compact) {
+                if (operation.zoneAnalysisSummary.isNotBlank()) {
+                    DraftMapLine("Analisi", operation.zoneAnalysisSummary)
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onUndoPoint,
+                        enabled = areaCount > 0,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Undo")
+                    }
+                    OutlinedButton(
+                        onClick = onRestartArea,
+                        enabled = takeoff != null || areaCount > 0,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Ricomincia")
+                    }
+                }
+                Button(
+                    onClick = onFinishArea,
+                    enabled = areaCount >= 3,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Termina area")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActiveDraftConflictDialog(
+    draft: AuthorizationDraft,
+    onResume: () -> Unit,
+    onCancelAndCreate: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Richiesta gia in corso") },
+        text = {
+            Text(
+                "Hai gia una richiesta ${draft.procedureType} per ${draft.zoneName.ifBlank { "un'altra zona" }}. " +
+                    "DSC FREE mantiene una sola richiesta attiva alla volta."
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onResume) {
+                Text("Riprendi")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancelAndCreate) {
+                Text("Annulla e crea nuova")
+            }
+        }
+    )
+}
+
+@Composable
+private fun DraftMapLine(label: String, value: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ZoneBottomSheet(
@@ -644,7 +1220,9 @@ private fun ZoneBottomSheet(
     isLoading: Boolean,
     verdict: ZoneCheckV3Response?,
     error: String?,
+    draftError: String?,
     onRetry: () -> Unit,
+    onAuthorizationRequest: (ZoneInfo) -> Unit,
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -665,12 +1243,7 @@ private fun ZoneBottomSheet(
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
             if (isLoading) {
-                CircularProgressIndicator()
-                Text(
-                    text = "Verifica operativa in corso",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
+                OperationalCheckLoadingCard(point = point, zone = zone)
             }
 
             verdict?.let { response ->
@@ -689,6 +1262,13 @@ private fun ZoneBottomSheet(
                         text = "In questo punto sono presenti piu zone sovrapposte: controlla i dettagli qui sotto.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                draftError?.let { message ->
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error
                     )
                 }
                 HorizontalDivider()
@@ -710,7 +1290,8 @@ private fun ZoneBottomSheet(
                             index = index,
                             verdict = response,
                             blockers = response.blockers,
-                            warnings = response.warnings
+                            warnings = response.warnings,
+                            onAuthorizationRequest = { onAuthorizationRequest(zoneInfo) }
                         )
                     }
                 }
@@ -732,20 +1313,77 @@ private fun ZoneBottomSheet(
                 }
             }
 
-            if (verdict == null) {
+            if (verdict == null && !isLoading) {
                 zone?.let { tappedZone ->
-                    ZoneOptionalDetail("Zona selezionata", tappedZone.name.cleanZoneName())
+                    ZoneOptionalDetail("Area selezionata", tappedZone.name.cleanZoneName())
                     ZoneOptionalDetail("Categoria", tappedZone.userCategoryTitle())
-                    ZoneOptionalDetail("Requisito", tappedZone.restriction?.toUserText())
+                    ZoneOptionalDetail("Anteprima quota", tappedZone.previewAltitudeText())
                 }
             }
 
-            ZoneDetail(
-                label = "Punto interrogato",
-                value = "${point.lat.formatCoordinate()}, ${point.lon.formatCoordinate()}"
-            )
+            if (!isLoading) {
+                ZoneDetail(
+                    label = "Punto controllato",
+                    value = "${point.lat.formatCoordinate()}, ${point.lon.formatCoordinate()}"
+                )
+            }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun OperationalCheckLoadingCard(point: MapPoint, zone: DemoZone?) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        contentColor = MaterialTheme.colorScheme.onSurface
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.5.dp)
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = "Sto consultando Drone Sky Check",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "Recupero regole, NOTAM e orari per questo punto.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            zone?.let {
+                Text(
+                    text = it.name.cleanZoneName(),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = it.previewAltitudeText(),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Text(
+                text = "Punto ${point.lat.formatCoordinate()}, ${point.lon.formatCoordinate()}",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -756,7 +1394,8 @@ private fun ZoneInfoCard(
     index: Int,
     verdict: ZoneCheckV3Response,
     blockers: List<Issue>,
-    warnings: List<Issue>
+    warnings: List<Issue>,
+    onAuthorizationRequest: () -> Unit
 ) {
     var expanded by remember(zone.name, zone.type, index) { mutableStateOf(index == 0) }
     val hasBlocker = blockers.any { it.zoneName == zone.name }
@@ -813,6 +1452,9 @@ private fun ZoneInfoCard(
                 }
             }
 
+            ZonePrimaryStatusCard(zone)
+            ActivityScheduleHighlight(zone)
+
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     zone.limitMetersAgl?.takeUnless { zone.isInactiveNow() }?.let {
@@ -831,12 +1473,13 @@ private fun ZoneInfoCard(
             }
 
             if (expanded) {
+                TemporalDetailsPanel(zone)
                 ZoneNarrativeSection(zone)
                 OfficialSection(zone.official)
                 NotamSection(zone.notams)
                 EnrSection(zone.enr)
                 SupSection(zone.sup)
-                AuthorizationSection(zone.authorization)
+                AuthorizationSection(zone.authorization, onAuthorizationRequest)
                 AuthoritySection(zone.authority)
                 ZoneOptionalDetail("Descrizione", zone.description?.cleanUserText())
                 zone.blockers.filterRelevantFor(zone).takeIf { it.isNotEmpty() }?.let {
@@ -849,6 +1492,268 @@ private fun ZoneInfoCard(
         }
     }
 }
+
+@Composable
+private fun ZonePrimaryStatusCard(zone: ZoneInfo) {
+    val status = zone.primaryStatusPresentation() ?: return
+    val colors = MaterialTheme.colorScheme
+    val altitudeColor = dscAltitudeColor(zone.limitMetersAgl ?: 120)
+    val containerColor = when (status.emphasis) {
+        ZoneStatusEmphasis.Active -> altitudeColor
+        ZoneStatusEmphasis.Inactive -> InactiveZonePillColor
+        ZoneStatusEmphasis.Unknown -> colors.tertiaryContainer
+    }
+    val contentColor = when (status.emphasis) {
+        ZoneStatusEmphasis.Active -> readableContentColor(containerColor)
+        ZoneStatusEmphasis.Inactive -> Color.White
+        ZoneStatusEmphasis.Unknown -> colors.onTertiaryContainer
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.small,
+        color = containerColor,
+        contentColor = contentColor
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            Text(
+                text = "STATO",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = contentColor.copy(alpha = 0.82f)
+            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(9.dp)
+                        .background(contentColor, CircleShape)
+                )
+                Text(
+                    text = status.label.uppercase(Locale.ROOT),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActivityScheduleHighlight(zone: ZoneInfo) {
+    val schedule = zone.activityScheduleLabel() ?: return
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            Text(
+                text = "Orari di attività",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = schedule,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+    }
+}
+
+@Composable
+private fun TemporalDetailsPanel(zone: ZoneInfo) {
+    val details = zone.temporalDetailsPresentation()
+    if (!details.hasContent) return
+
+    var expanded by remember(zone.id, zone.name) { mutableStateOf(false) }
+
+    OfficialAccordion(
+        title = "Dettagli temporali",
+        expanded = expanded,
+        onToggle = { expanded = !expanded }
+    ) {
+        TemporalWeekScheduleBar(details.weekSchedule)
+        TemporalDayScheduleBar(details.daySchedule)
+        ZoneOptionalDetail("Stato attuale", details.status)
+        ZoneOptionalDetail("Orari di attività", details.activitySchedule)
+        ZoneOptionalDetail("Dato originale", details.originalSchedule)
+        ZoneOptionalDetail("Validità", details.validity)
+        ZoneOptionalDetail("Prossima attivazione", details.nextActivation)
+        ZoneOptionalDetail("Nota", details.explanation)
+    }
+}
+
+@Composable
+private fun TemporalWeekScheduleBar(entries: List<TemporalBarEntry>) {
+    val week = entries.take(7)
+    if (week.isEmpty()) return
+
+    val labels = listOf("L", "M", "M", "G", "V", "S", "D")
+    val todayIndex = remember { LocalDate.now().dayOfWeek.value - 1 }
+
+    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        Text(
+            text = "Settimana",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            week.forEachIndexed { index, entry ->
+                Column(
+                    modifier = Modifier.weight(1f),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    Text(
+                        text = labels.getOrElse(index) { "" },
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = if (index == todayIndex) FontWeight.Bold else FontWeight.Normal,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    TemporalEntryBar(entry)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TemporalDayScheduleBar(entries: List<Boolean?>) {
+    val day = entries.take(24)
+    if (day.isEmpty()) return
+
+    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        Text(
+            text = "Giornata UTC",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(9.dp),
+            horizontalArrangement = Arrangement.spacedBy(1.dp)
+        ) {
+            day.forEach { active ->
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .background(temporalStateColor(active), MaterialTheme.shapes.extraSmall)
+                )
+            }
+        }
+        Row(modifier = Modifier.fillMaxWidth()) {
+            listOf("00", "06", "12", "18", "24").forEachIndexed { index, label ->
+                Text(
+                    text = label,
+                    modifier = Modifier.weight(if (index == 4) 0.35f else 1f),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TemporalEntryBar(entry: TemporalBarEntry) {
+    val segments = entry.segments
+        .filter { it.end > it.start }
+        .sortedBy { it.start }
+
+    if (segments.isNotEmpty()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(11.dp)
+                .background(TemporalInactiveColor, MaterialTheme.shapes.extraSmall)
+        ) {
+            var cursor = 0f
+            segments.forEach { segment ->
+                val inactiveWeight = (segment.start - cursor).coerceAtLeast(0f)
+                if (inactiveWeight > 0f) {
+                    Box(
+                        modifier = Modifier
+                            .weight(inactiveWeight)
+                            .fillMaxHeight()
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .weight((segment.end - segment.start).coerceAtLeast(0.01f))
+                        .fillMaxHeight()
+                        .background(TemporalActiveColor)
+                )
+                cursor = segment.end
+            }
+            val tail = (1f - cursor).coerceAtLeast(0f)
+            if (tail > 0f) {
+                Box(
+                    modifier = Modifier
+                        .weight(tail)
+                        .fillMaxHeight()
+                )
+            }
+        }
+        return
+    }
+
+    val ratio = entry.activeRatio?.coerceIn(0f, 1f)
+    if (ratio != null && ratio > 0f && ratio < 1f) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(11.dp)
+                .background(TemporalInactiveColor, MaterialTheme.shapes.extraSmall)
+        ) {
+            Box(
+                modifier = Modifier
+                    .weight(ratio)
+                    .fillMaxHeight()
+                    .background(TemporalActiveColor)
+            )
+            Box(
+                modifier = Modifier
+                    .weight(1f - ratio)
+                    .fillMaxHeight()
+            )
+        }
+        return
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(11.dp)
+            .background(
+                color = temporalStateColor(ratio?.let { it >= 1f } ?: entry.active),
+                shape = MaterialTheme.shapes.extraSmall
+            )
+    )
+}
+
+private fun temporalStateColor(active: Boolean?): Color =
+    when (active) {
+        true -> TemporalActiveColor
+        false -> TemporalInactiveColor
+        null -> TemporalUnknownColor
+    }
 
 @Composable
 private fun ZoneNarrativeSection(zone: ZoneInfo) {
@@ -1007,11 +1912,12 @@ private fun OfficialTextBox(
 private fun ValiditySection(validity: ValidityInfo?) {
     if (validity == null || !validity.hasContent()) return
 
-    ZoneSection(title = "Validita e orari") {
+    ZoneSection(title = "Validità e orari") {
         ZoneOptionalDetail("Da", validity.validFrom.formatNotamUtcDate())
         ZoneOptionalDetail("A", validity.validTo.formatNotamUtcDate())
         ZoneOptionalDetail("Schedule", validity.schedule)
         ZoneOptionalDetail("Schedule interpretata", validity.interpretedSchedule)
+        ZoneOptionalDetail("Prossima attivazione", validity.nextActivation.formatNotamUtcDate())
     }
 }
 
@@ -1023,31 +1929,22 @@ private fun NotamSection(notams: List<NotamInfo>) {
     ZoneSection(title = "NOTAM") {
         usefulNotams.forEachIndexed { index, notam ->
             if (index > 0) HorizontalDivider()
+            val presentation = notam.presentation()
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
-                    text = notam.code.orEmpty(),
+                    text = presentation.code,
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold
                 )
-                ZoneOptionalDetail("Stato", notam.validity?.statusLabel())
+                NotamSummaryCard(presentation)
                 ZoneOptionalDetail("FIR", notam.fir)
-                ZoneOptionalDetail("Localita", notam.location)
+                ZoneOptionalDetail("Località", notam.location)
                 ZoneOptionalDetail("Zona", notam.zoneReference)
-                ZoneOptionalDetail("Attivita", notam.activityType)
-                ZoneOptionalDetail("Impatto", notam.severity?.toUserText())
-                ZoneOptionalDetail("Inizio schedulazione del NOTAM", notam.validity?.validFrom.formatNotamUtcDate())
-                ZoneOptionalDetail("Fine schedulazione del NOTAM", notam.validity?.validTo.formatNotamUtcDate())
-                ZoneOptionalDetail(
-                    "Orari",
-                    notam.schedule?.human
-                        ?: notam.validity?.interpretedSchedule
-                        ?: notam.validity?.schedule.toItalianNotamSchedule()
-                )
-                ZoneOptionalDetail("Spiegazione DSC", notam.explanation.distinctFrom(notam.schedule?.human))
-                ZoneOptionalDetail("Significato operativo", notam.operationalMeaning)
-                ZoneOptionalDetail("Motivo bloccante", notam.blockingReason)
+                ZoneOptionalDetail("Orari", presentation.activitySchedule)
+                ZoneOptionalDetail("Validità", presentation.validity)
+                ZoneOptionalDetail("Stato operativo", presentation.operationalStatus)
                 OfficialSection(
-                    official = notam.official,
+                    official = presentation.official,
                     title = "Testo NOTAM ufficiale",
                     compactUntilOpened = true,
                     openLabel = "Apri testo ufficiale",
@@ -1064,6 +1961,43 @@ private fun NotamSection(notams: List<NotamInfo>) {
 }
 
 @Composable
+private fun NotamSummaryCard(presentation: NotamPresentation) {
+    val isManual = presentation.statusLabel.equals("Verifica necessaria", ignoreCase = true)
+    val containerColor = if (isManual) {
+        MaterialTheme.colorScheme.errorContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerLow
+    }
+    val contentColor = if (isManual) {
+        MaterialTheme.colorScheme.onErrorContainer
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.small,
+        color = containerColor,
+        contentColor = contentColor
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                text = presentation.statusLabel,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = presentation.body,
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+    }
+}
+
+@Composable
 private fun EnrSection(enr: EnrInfo?) {
     if (enr == null || !enr.hasContent()) return
 
@@ -1071,7 +2005,7 @@ private fun EnrSection(enr: EnrInfo?) {
         ZoneOptionalDetail("Nome", enr.name)
         ZoneOptionalDetail("Stato", enr.validity?.statusLabel())
         ZoneOptionalDetail("Descrizione", enr.description.usableUserText())
-        ZoneOptionalDetail("Orari di attivita", enr.schedule?.human ?: enr.validity?.schedule)
+        ZoneOptionalDetail("Orari di attività", enr.schedule?.human ?: enr.validity?.schedule)
         ZoneOptionalDetail("Limiti", enr.limitText.usableUserText())
         ZoneOptionalDetail("Note", enr.notes.usableUserText())
         ZoneOptionalDetail("Attivazione", enr.activationType?.toUserText())
@@ -1106,7 +2040,11 @@ private fun SupSection(sup: SupInfo?) {
         ZoneOptionalDetail("Spiegazione", sup.explanation)
         ZoneOptionalDetail("Significato operativo", sup.operationalMeaning)
         ValiditySection(sup.validity)
-        AuthorizationSection(sup.authorization)
+        AuthorizationSection(
+            authorization = sup.authorization,
+            onAuthorizationRequest = {},
+            allowDraftCreation = false
+        )
         AuthoritySection(sup.authority)
         OfficialSection(sup.official, title = "Testo ufficiale SUP")
         if (sup.blockers.isNotEmpty()) ZoneOptionalDetail("Blocker", sup.blockers.joinIssues())
@@ -1115,22 +2053,40 @@ private fun SupSection(sup: SupInfo?) {
 }
 
 @Composable
-private fun AuthorizationSection(authorization: AuthorizationInfo?) {
+private fun AuthorizationSection(
+    authorization: AuthorizationInfo?,
+    onAuthorizationRequest: () -> Unit,
+    allowDraftCreation: Boolean = true
+) {
     if (authorization == null || !authorization.hasContent()) return
+    val manualCheck = authorization.manualCheckSummary()
 
     ZoneSection(title = "Autorizzazioni") {
         AuthorizationBadges(authorization)
-        ZoneOptionalDetail("Richiesta", authorization.requiredText())
-        ZoneOptionalDetail("Stato", authorization.resolutionStatus.formatResolutionStatus())
-        ZoneOptionalDetail("Applicabilita", authorization.applicability.formatApplicability())
+        if (manualCheck != null) {
+            ZoneOptionalDetail("Stato operativo", manualCheck.first)
+            ZoneOptionalDetail("Spiegazione", manualCheck.second)
+        } else {
+            ZoneOptionalDetail("Richiesta", authorization.requiredText())
+            ZoneOptionalDetail("Stato", authorization.resolutionStatus.formatResolutionStatus())
+        }
+        ZoneOptionalDetail("Applicabilità", authorization.applicability.formatApplicability())
         ZoneOptionalDetail("Procedure", authorization.procedures.formatProcedures())
         ZoneOptionalDetail("Requisiti aggiuntivi", authorization.additionalRequirements.formatAdditionalRequirements())
         ZoneOptionalDetail("Requisito", authorization.requirement.usableAuthorizationText())
         ZoneOptionalDetail("Operazioni", authorization.operationSummary())
         ZoneOptionalDetail("Attestato di competenza minimo richiesto", authorization.requiredLicense.formatRequiredLicense())
-        ZoneOptionalDetail("Spiegazione", authorization.explanation)
+        if (manualCheck == null) ZoneOptionalDetail("Spiegazione", authorization.explanation)
         ZoneOptionalDetail("Motivi", authorization.reasonCodes.formatReasonCodes())
         ZoneOptionalDetail("Blocchi", authorization.blockingReasons.mapNotNull { it.code }.formatReasonCodes())
+        if (authorization.procedures.isNotEmpty() || authorization.additionalRequirements.isNotEmpty()) {
+            Button(
+                onClick = onAuthorizationRequest,
+                enabled = allowDraftCreation && authorization.canCreateLocalDraft()
+            ) {
+                Text("Richiedi autorizzazione")
+            }
+        }
     }
 }
 
@@ -1332,6 +2288,13 @@ private fun AuthorizationInfo.hasContent(): Boolean =
         requiredLicense.formatRequiredLicense() != null ||
         !explanation.isNullOrBlank()
 
+private fun AuthorizationInfo.canCreateLocalDraft(): Boolean =
+    resolutionStatus == "RESOLVED" &&
+        procedures.any {
+            it.type.equals("ATM05", ignoreCase = true) ||
+                it.type.equals("ATM09", ignoreCase = true)
+        }
+
 private fun AuthorityInfo.hasContent(): Boolean =
     !name.isNullOrBlank() ||
         !code.isNullOrBlank() ||
@@ -1381,13 +2344,13 @@ private fun ValidityInfo.statusLabel(): String? =
     }
 
 private fun Boolean.formatBoolean(): String =
-    if (this) "Si" else "No"
+    if (this) "Sì" else "No"
 
 private fun AuthorizationInfo.requiredText(): String? =
     when {
         procedures.isNotEmpty() || additionalRequirements.isNotEmpty() ->
-            "Negli orari di attivita della zona e necessario richiedere l'autorizzazione."
-        required == true -> "Si"
+            "Negli orari di attività della zona è necessario richiedere l'autorizzazione."
+        required == true -> "Sì"
         resolutionStatus.equals("MANUAL_CHECK", ignoreCase = true) -> "Verifica manuale necessaria"
         resolutionStatus.equals("BLOCKED", ignoreCase = true) -> "Non gestibile automaticamente"
         else -> null
@@ -1403,7 +2366,7 @@ private fun String?.formatResolutionStatus(): String? =
 
 private fun String?.formatApplicability(): String? =
     when (this?.uppercase()) {
-        "WHEN_ACTIVE" -> "Quando la zona e attiva"
+        "WHEN_ACTIVE" -> "Quando la zona è attiva"
         "NONE" -> "Nessuna"
         else -> this
     }
@@ -1443,7 +2406,7 @@ private fun authorizationBadgeColor(type: String): Color =
 
 private fun EnrInfo.authorizationRequiredText(): String? =
     if (authorizationRequired == true) {
-        "Negli orari di attivita della zona e necessario richiedere l'autorizzazione."
+        "Negli orari di attività della zona è necessario richiedere l'autorizzazione."
     } else {
         null
     }
@@ -1628,6 +2591,11 @@ private fun dscAltitudeColor(limit: Int): Color =
         else -> OpenVerdictColor
     }
 
+private fun readableContentColor(background: Color): Color {
+    val luminance = 0.299f * background.red + 0.587f * background.green + 0.114f * background.blue
+    return if (luminance > 0.58f) Color.Black else Color.White
+}
+
 private fun it.droneskycheck.app.map.Rgba.toComposeColor(): Color =
     Color(red / 255f, green / 255f, blue / 255f, 1f)
 
@@ -1639,6 +2607,19 @@ private fun ZoneInfo.userCategoryTitle(): String? =
 
 private fun DemoZone.userCategoryTitle(): String? =
     MapLayerIds.categoryForFeatureType(type)?.title
+
+private fun DemoZone.previewAltitudeText(): String {
+    val isAirfield = type.contains("AVIOSUP", ignoreCase = true) ||
+        name.contains("AVIOSUP", ignoreCase = true) ||
+        userCategoryTitle()?.contains("aviosuperficie", ignoreCase = true) == true
+    val prefix = if (isAirfield) "Aviosuperficie: " else ""
+
+    return when {
+        lowerLimit <= 0 -> "${prefix}prima indicazione: quota 0 m AGL. Confermo regole e orari con DSC."
+        lowerLimit in 1..119 -> "${prefix}prima indicazione: fino a $lowerLimit m AGL. Confermo regole e orari con DSC."
+        else -> "${prefix}nessun limite locale sotto 120 m AGL. Controllo comunque regole e orari con DSC."
+    }
+}
 
 private fun ZoneInfo.zoneLimitLabel(): String? =
     when {
@@ -1809,6 +2790,85 @@ private fun String?.formatRequiredLicense(): String? {
         .ifBlank { null }
 }
 
+private fun AuthorizationOperationData.takeoffMapPoint(): MapPoint? {
+    val lat = takeoffLat
+    val lon = takeoffLon
+    return if (lat != null && lon != null && lat.isFinite() && lon.isFinite()) {
+        MapPoint(lat, lon)
+    } else {
+        null
+    }
+}
+
+private fun validateAreaPointSelection(
+    draft: AuthorizationDraft,
+    zones: List<DemoZone>
+): String? {
+    if (zones.isEmpty()) {
+        return "Punto non aggiunto: la mappa non conferma che sia dentro la zona della richiesta."
+    }
+
+    if (zones.none { it.matchesDraftZone(draft) }) {
+        return "Punto non aggiunto: deve restare dentro ${draft.zoneName.ifBlank { "la zona richiesta" }}."
+    }
+
+    val blockingZeroZone = zones.firstOrNull { zone ->
+        zone.lowerLimit <= 0 && !zone.matchesDraftZone(draft)
+    }
+    if (blockingZeroZone != null) {
+        return "Punto non aggiunto: qui c'e' anche ${blockingZeroZone.name}, altra zona 0 m."
+    }
+
+    return null
+}
+
+private fun DemoZone.toAuthorizationZoneReference(): AuthorizationZoneReference =
+    AuthorizationZoneReference(
+        id = id,
+        name = name,
+        type = type,
+        lowerLimitMeters = lowerLimit,
+        upperLimitMeters = upperLimit
+    )
+
+private fun DemoZone.matchesDraftZone(draft: AuthorizationDraft): Boolean {
+    val zone = JSONObject(draft.zoneSnapshotJson)
+    return id.matchesZoneIdentity(zone.optString("id")) ||
+        name.matchesZoneIdentity(zone.optString("name"))
+}
+
+private fun String.matchesZoneIdentity(other: String): Boolean {
+    val self = normalizeZoneIdentity()
+    val target = other.normalizeZoneIdentity()
+    return self.isNotBlank() &&
+        target.isNotBlank() &&
+        (
+            self == target ||
+                (self.length >= 4 && target.contains(self)) ||
+                (target.length >= 4 && self.contains(target))
+            )
+}
+
+private fun String.normalizeZoneIdentity(): String =
+    trim()
+        .lowercase(Locale.ROOT)
+        .replace(Regex("\\bli\\s+"), "li")
+        .replace(Regex("[^a-z0-9]+"), " ")
+        .replace(Regex("\\s+"), " ")
+        .trim()
+
+private fun MapPoint.formatForPlanning(): String =
+    "${lat.formatCoordinate()} ${lon.formatCoordinate()}"
+
+private fun String.toWorkflowLabel(): String =
+    when (this) {
+        AuthorizationWorkflowSteps.Takeoff -> "seleziona decollo"
+        AuthorizationWorkflowSteps.Area -> "disegna area"
+        AuthorizationWorkflowSteps.Analysis -> "analisi area"
+        AuthorizationWorkflowSteps.Form -> "compilazione"
+        else -> this
+    }
+
 private fun AuthorityInfo.formatRequestContacts(): String? {
     val chunks = listOfNotNull(name, contact, source)
     val objects = chunks.mapNotNull { it.parseJsonObjectOrNull() }
@@ -1853,15 +2913,15 @@ private fun String?.toItalianNotamSchedule(): String? {
     val value = trim().uppercase().replace(Regex("\\s+"), " ")
     val dayText = when {
         "DAILY" in value -> "Ogni giorno"
-        Regex("\\bMON-FRI\\b").containsMatchIn(value) -> "Da lunedi a venerdi"
-        Regex("\\bMON-THU\\b").containsMatchIn(value) -> "Da lunedi a giovedi"
+        Regex("\\bMON-FRI\\b").containsMatchIn(value) -> "Da lunedì a venerdì"
+        Regex("\\bMON-THU\\b").containsMatchIn(value) -> "Da lunedì a giovedì"
         Regex("\\bSAT\\b").containsMatchIn(value) -> "Sabato"
         Regex("\\bSUN\\b").containsMatchIn(value) -> "Domenica"
-        Regex("\\bFRI\\b").containsMatchIn(value) -> "Venerdi"
-        Regex("\\bTHU\\b").containsMatchIn(value) -> "Giovedi"
-        Regex("\\bWED\\b").containsMatchIn(value) -> "Mercoledi"
-        Regex("\\bTUE\\b").containsMatchIn(value) -> "Martedi"
-        Regex("\\bMON\\b").containsMatchIn(value) -> "Lunedi"
+        Regex("\\bFRI\\b").containsMatchIn(value) -> "Venerdì"
+        Regex("\\bTHU\\b").containsMatchIn(value) -> "Giovedì"
+        Regex("\\bWED\\b").containsMatchIn(value) -> "Mercoledì"
+        Regex("\\bTUE\\b").containsMatchIn(value) -> "Martedì"
+        Regex("\\bMON\\b").containsMatchIn(value) -> "Lunedì"
         else -> null
     }
     val time = Regex("""\b(\d{2})(\d{2})-(\d{2})(\d{2})\b""").find(value)
@@ -2058,4 +3118,7 @@ private val NotamUtcFormatter: DateTimeFormatter =
     DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm 'UTC'").withZone(ZoneOffset.UTC)
 private val OpenVerdictColor = Color(46, 125, 50)
 private val InactiveZonePillColor = Color(46, 125, 50)
+private val TemporalActiveColor = Color(198, 40, 40)
+private val TemporalInactiveColor = Color(46, 125, 50)
+private val TemporalUnknownColor = Color(144, 164, 174)
 private const val CoordinateDecimals = 5

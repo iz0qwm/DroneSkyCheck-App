@@ -58,12 +58,17 @@ import org.maplibre.android.style.layers.PropertyFactory.visibility
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.geojson.Feature
 import org.maplibre.geojson.FeatureCollection
+import org.maplibre.geojson.LineString
 import org.maplibre.geojson.Point
+import org.maplibre.geojson.Polygon
 
 @Composable
 fun DroneSkyMapView(
     visibleLayerCategories: Set<DscLayerCategory>,
     selectedPoint: MapPoint?,
+    authorizationTakeoff: MapPoint?,
+    authorizationAreaPoints: List<MapPoint>,
+    authorizationAreaClosed: Boolean,
     userLocation: UserLocation?,
     shouldCenterOnUserLocation: Boolean,
     onUserLocationCentered: () -> Unit,
@@ -135,6 +140,7 @@ fun DroneSkyMapView(
                         onMapDataDegraded = onMapDataDegraded
                     )
                     updatePointMarkers(style, selectedPoint, userLocation)
+                    updateAuthorizationDrawing(style, authorizationTakeoff, authorizationAreaPoints, authorizationAreaClosed)
                     if (shouldCenterOnUserLocation && userLocation != null) {
                         centerOnUserLocation(map, userLocation)
                         onUserLocationCentered()
@@ -180,15 +186,18 @@ private fun configureMap(
         logFocusLayerState(mapView, map, it, visibleLayerCategories, map.cameraPosition.zoom)
 
         map.addOnMapClickListener { latLng ->
-            val selectedZone = map.queryRenderedFeatures(
+            val zones = map.queryRenderedFeatures(
                 touchAreaForLatLng(map, latLng),
                 *interactiveLayerIds()
-            ).firstOrNull()?.let(::featureToDemoZone)
+            ).map(::featureToDemoZone)
+                .distinctBy { zone -> zone.identityKey() }
+            val selectedZone = zones.firstOrNull()
 
             onMapTapped(
                 MapTapSelection(
                     point = MapPoint(lat = latLng.latitude, lon = latLng.longitude),
-                    zone = selectedZone
+                    zone = selectedZone,
+                    zones = zones
                 )
             )
             true
@@ -227,6 +236,10 @@ private fun configureMap(
 private fun addPointMarkerLayers(style: Style) {
     style.addSource(GeoJsonSource(SELECTED_POINT_SOURCE_ID, emptyFeatureCollection()))
     style.addSource(GeoJsonSource(USER_LOCATION_SOURCE_ID, emptyFeatureCollection()))
+    style.addSource(GeoJsonSource(AUTH_TAKEOFF_SOURCE_ID, emptyFeatureCollection()))
+    style.addSource(GeoJsonSource(AUTH_AREA_VERTICES_SOURCE_ID, emptyFeatureCollection()))
+    style.addSource(GeoJsonSource(AUTH_AREA_LINE_SOURCE_ID, emptyFeatureCollection()))
+    style.addSource(GeoJsonSource(AUTH_AREA_FILL_SOURCE_ID, emptyFeatureCollection()))
 
     style.addLayer(
         CircleLayer(SELECTED_POINT_RING_LAYER_ID, SELECTED_POINT_SOURCE_ID)
@@ -249,6 +262,49 @@ private fun addPointMarkerLayers(style: Style) {
             )
     )
 
+    style.addLayer(
+        FillLayer(AUTH_AREA_FILL_LAYER_ID, AUTH_AREA_FILL_SOURCE_ID)
+            .withProperties(
+                fillColor("#00bcd4"),
+                fillOpacity(0.18f)
+            )
+    )
+    style.addLayer(
+        LineLayer(AUTH_AREA_LINE_LAYER_ID, AUTH_AREA_LINE_SOURCE_ID)
+            .withProperties(
+                lineColor("#00bcd4"),
+                lineWidth(3.0f),
+                lineOpacity(0.92f)
+            )
+    )
+    style.addLayer(
+        CircleLayer(AUTH_AREA_VERTICES_LAYER_ID, AUTH_AREA_VERTICES_SOURCE_ID)
+            .withProperties(
+                circleRadius(6.0f),
+                circleColor("#00bcd4"),
+                circleStrokeColor("#ffffff"),
+                circleStrokeWidth(2.0f)
+            )
+    )
+    style.addLayer(
+        CircleLayer(AUTH_TAKEOFF_RING_LAYER_ID, AUTH_TAKEOFF_SOURCE_ID)
+            .withProperties(
+                circleRadius(16.0f),
+                circleColor("#1b5e20"),
+                circleOpacity(0.22f),
+                circleStrokeColor("#ffffff"),
+                circleStrokeWidth(2.5f)
+            )
+    )
+    style.addLayer(
+        CircleLayer(AUTH_TAKEOFF_DOT_LAYER_ID, AUTH_TAKEOFF_SOURCE_ID)
+            .withProperties(
+                circleRadius(6.0f),
+                circleColor("#1b5e20"),
+                circleStrokeColor("#ffffff"),
+                circleStrokeWidth(2.0f)
+            )
+    )
     style.addLayer(
         CircleLayer(USER_LOCATION_ACCURACY_LAYER_ID, USER_LOCATION_SOURCE_ID)
             .withProperties(
@@ -281,6 +337,35 @@ private fun addPointMarkerLayers(style: Style) {
                 circleBlur(0.2f)
             )
     )
+}
+
+private fun updateAuthorizationDrawing(
+    style: Style,
+    takeoff: MapPoint?,
+    areaPoints: List<MapPoint>,
+    areaClosed: Boolean
+) {
+    style.getSourceAs<GeoJsonSource>(AUTH_TAKEOFF_SOURCE_ID)
+        ?.setGeoJson(takeoff?.toFeatureCollection() ?: emptyFeatureCollection())
+
+    style.getSourceAs<GeoJsonSource>(AUTH_AREA_VERTICES_SOURCE_ID)
+        ?.setGeoJson(
+            FeatureCollection.fromFeatures(
+                areaPoints.map { Feature.fromGeometry(Point.fromLngLat(it.lon, it.lat)) }
+            )
+        )
+
+    style.getSourceAs<GeoJsonSource>(AUTH_AREA_LINE_SOURCE_ID)
+        ?.setGeoJson(areaPoints.toLineFeatureCollection(areaClosed))
+
+    style.getSourceAs<GeoJsonSource>(AUTH_AREA_FILL_SOURCE_ID)
+        ?.setGeoJson(
+            if (areaClosed && areaPoints.size >= 3) {
+                areaPoints.toPolygonFeatureCollection()
+            } else {
+                emptyFeatureCollection()
+            }
+        )
 }
 
 private fun updatePointMarkers(
@@ -581,13 +666,22 @@ private fun featureToDemoZone(feature: Feature): DemoZone {
         restriction = properties?.stringValue("restriction"),
         lowerLimit = properties?.intValue("lowerLimit")
             ?: properties?.intValue("lowerlimit")
+            ?: properties?.intValue("lowerLimitAGL")
+            ?: properties?.intValue("limitMetersAgl")
+            ?: properties?.intValue("maxAltitudeMetersAgl")
             ?: 120,
         upperLimit = properties?.intValue("upperLimit")
-            ?: properties?.intValue("upperlimit"),
+            ?: properties?.intValue("upperlimit")
+            ?: properties?.intValue("upperLimitAGL"),
         description = properties?.stringValue("description")
             ?: properties?.stringValue("message")
     )
 }
+
+private fun DemoZone.identityKey(): String =
+    listOf(id, name, type)
+        .joinToString("|")
+        .lowercase()
 
 private fun emptyFeatureCollection(): FeatureCollection =
     FeatureCollection.fromFeatures(emptyList())
@@ -596,6 +690,23 @@ private fun MapPoint.toFeatureCollection(): FeatureCollection =
     FeatureCollection.fromFeature(
         Feature.fromGeometry(Point.fromLngLat(lon, lat))
     )
+
+private fun List<MapPoint>.toLineFeatureCollection(areaClosed: Boolean): FeatureCollection {
+    if (size < 2) return emptyFeatureCollection()
+    val coordinates = map { Point.fromLngLat(it.lon, it.lat) }
+        .let { points -> if (areaClosed && size >= 3) points + points.first() else points }
+    return FeatureCollection.fromFeature(
+        Feature.fromGeometry(LineString.fromLngLats(coordinates))
+    )
+}
+
+private fun List<MapPoint>.toPolygonFeatureCollection(): FeatureCollection {
+    val ring = map { Point.fromLngLat(it.lon, it.lat) }
+        .let { points -> points + points.first() }
+    return FeatureCollection.fromFeature(
+        Feature.fromGeometry(Polygon.fromLngLats(listOf(ring)))
+    )
+}
 
 private fun UserLocation.toFeatureCollection(): FeatureCollection {
     val feature = Feature.fromGeometry(Point.fromLngLat(point.lon, point.lat))
@@ -685,6 +796,15 @@ private const val SELECTED_POINT_SOURCE_ID = "dsc-selected-point-source"
 private const val SELECTED_POINT_RING_LAYER_ID = "dsc-selected-point-ring"
 private const val SELECTED_POINT_DOT_LAYER_ID = "dsc-selected-point-dot"
 private const val USER_LOCATION_SOURCE_ID = "dsc-user-location-source"
+private const val AUTH_TAKEOFF_SOURCE_ID = "dsc-auth-takeoff-source"
+private const val AUTH_TAKEOFF_RING_LAYER_ID = "dsc-auth-takeoff-ring"
+private const val AUTH_TAKEOFF_DOT_LAYER_ID = "dsc-auth-takeoff-dot"
+private const val AUTH_AREA_VERTICES_SOURCE_ID = "dsc-auth-area-vertices-source"
+private const val AUTH_AREA_VERTICES_LAYER_ID = "dsc-auth-area-vertices"
+private const val AUTH_AREA_LINE_SOURCE_ID = "dsc-auth-area-line-source"
+private const val AUTH_AREA_LINE_LAYER_ID = "dsc-auth-area-line"
+private const val AUTH_AREA_FILL_SOURCE_ID = "dsc-auth-area-fill-source"
+private const val AUTH_AREA_FILL_LAYER_ID = "dsc-auth-area-fill"
 private const val USER_LOCATION_ACCURACY_LAYER_ID = "dsc-user-location-accuracy"
 private const val USER_LOCATION_DOT_LAYER_ID = "dsc-user-location-dot"
 private const val USER_LOCATION_PULSE_LAYER_ID = "dsc-user-location-pulse"

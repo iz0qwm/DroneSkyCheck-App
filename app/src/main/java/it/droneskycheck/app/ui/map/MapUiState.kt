@@ -24,7 +24,8 @@ data class MapUiState(
 
 data class MapTapSelection(
     val point: MapPoint,
-    val zone: DemoZone?
+    val zone: DemoZone?,
+    val zones: List<DemoZone> = zone?.let(::listOf).orEmpty()
 )
 
 data class MapPoint(

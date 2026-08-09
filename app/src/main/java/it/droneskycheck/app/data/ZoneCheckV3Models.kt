@@ -105,6 +105,7 @@ data class ValidityInfo(
     val validTo: String?,
     val schedule: String?,
     val interpretedSchedule: String?,
+    val nextActivation: String? = null,
     val explanation: String?,
     val future: Boolean?,
     val expired: Boolean?
@@ -115,6 +116,17 @@ data class ScheduleInfo(
     val human: String?,
     val activeNow: Boolean?,
     val explanation: String?
+)
+
+data class TemporalBarEntry(
+    val active: Boolean?,
+    val activeRatio: Float? = null,
+    val segments: List<TemporalBarSegment> = emptyList()
+)
+
+data class TemporalBarSegment(
+    val start: Float,
+    val end: Float
 )
 
 data class AuthorizationInfo(
@@ -192,7 +204,9 @@ data class EnrInfo(
     val official: OfficialInfo?,
     val validity: ValidityInfo?,
     val explanation: String?,
-    val operationalMeaning: String?
+    val operationalMeaning: String?,
+    val weekSchedule: List<TemporalBarEntry> = emptyList(),
+    val daySchedule: List<Boolean?> = emptyList()
 )
 
 data class SupInfo(

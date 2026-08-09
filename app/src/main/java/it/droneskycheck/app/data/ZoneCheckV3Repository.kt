@@ -185,7 +185,9 @@ private fun JSONObject.toEnrInfo(): EnrInfo =
             ?: toOfficialInfoFromInlineFields(),
         validity = optJSONObject("validity")?.toValidityInfo() ?: toValidityInfo(),
         explanation = optFirstString("explanation"),
-        operationalMeaning = optFirstString("operationalMeaning", "meaning")
+        operationalMeaning = optFirstString("operationalMeaning", "meaning"),
+        weekSchedule = optArray("weekSchedule").toTemporalBarEntries(),
+        daySchedule = optArray("daySchedule").toNullableBooleanList()
     )
 
 private fun JSONObject.toSupInfo(): SupInfo =
@@ -271,6 +273,7 @@ private fun JSONObject.toValidityInfo(): ValidityInfo =
         validTo = optFirstString("validTo", "to", "C"),
         schedule = optFirstString("schedule", "originalSchedule", "D"),
         interpretedSchedule = optFirstString("interpretedSchedule", "scheduleExplanation"),
+        nextActivation = optFirstString("nextActivation", "nextActiveAt", "nextActivationAt"),
         explanation = optFirstString("explanation", "stateExplanation"),
         future = optFirstBoolean("future", "isFuture"),
         expired = optFirstBoolean("expired", "isExpired")
@@ -382,6 +385,45 @@ private fun JSONArray?.toStringList(): List<String> =
         value?.toString()?.takeIf { it.isNotBlank() }
     }
 
+private fun JSONArray?.toNullableBooleanList(): List<Boolean?> {
+    if (this == null) return emptyList()
+    return (0 until length()).map { index ->
+        when (val value = opt(index)) {
+            is Boolean -> value
+            is Number -> value.toDouble() > 0.0
+            is JSONObject -> value.optFirstBoolean("active", "enabled")
+                ?: value.optFirstDouble("activeRatio", "ratio")?.let { it > 0.0 }
+            else -> null
+        }
+    }
+}
+
+private fun JSONArray?.toTemporalBarEntries(): List<TemporalBarEntry> {
+    if (this == null) return emptyList()
+    return (0 until length()).map { index ->
+        when (val value = opt(index)) {
+            is Boolean -> TemporalBarEntry(active = value, activeRatio = if (value) 1f else 0f)
+            is Number -> value.toDouble().coerceIn(0.0, 1.0).let {
+                TemporalBarEntry(active = it >= 1.0, activeRatio = it.toFloat())
+            }
+            is JSONObject -> {
+                val ratio = value.optFirstDouble("activeRatio", "ratio")?.coerceIn(0.0, 1.0)
+                TemporalBarEntry(
+                    active = value.optFirstBoolean("active", "enabled") ?: ratio?.let { it >= 1.0 },
+                    activeRatio = ratio?.toFloat(),
+                    segments = value.optArray("segments").toObjectList { segment ->
+                        TemporalBarSegment(
+                            start = (segment.optFirstDouble("start") ?: 0.0).coerceIn(0.0, 1.0).toFloat(),
+                            end = (segment.optFirstDouble("end") ?: 0.0).coerceIn(0.0, 1.0).toFloat()
+                        )
+                    }
+                )
+            }
+            else -> TemporalBarEntry(active = null)
+        }
+    }
+}
+
 private fun <T> JSONArray?.toMixedList(transform: (Any) -> T?): List<T> {
     if (this == null) return emptyList()
     return (0 until length()).mapNotNull { index ->
@@ -415,5 +457,14 @@ private fun JSONObject.optFirstBoolean(vararg names: String): Boolean? =
             optString(name).equals("true", ignoreCase = true) -> true
             optString(name).equals("false", ignoreCase = true) -> false
             else -> null
+        }
+    }
+
+private fun JSONObject.optFirstDouble(vararg names: String): Double? =
+    names.firstNotNullOfOrNull { name ->
+        when {
+            !has(name) || isNull(name) -> null
+            opt(name) is Number -> optDouble(name)
+            else -> optString(name).toDoubleOrNull()
         }
     }

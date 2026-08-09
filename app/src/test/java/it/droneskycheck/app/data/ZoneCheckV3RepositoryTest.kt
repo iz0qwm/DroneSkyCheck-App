@@ -65,6 +65,7 @@ class ZoneCheckV3RepositoryTest {
                         "validFrom": "2026-08-08T07:00:00Z",
                         "validTo": "2026-08-08T16:00:00Z",
                         "schedule": "0700-1600",
+                        "nextActivation": "2026-08-09T07:00:00Z",
                         "explanation": "Attiva nella finestra pubblicata."
                       },
                       "authorization": {
@@ -107,7 +108,9 @@ class ZoneCheckV3RepositoryTest {
                         "validity": {
                           "activeNow": true,
                           "schedule": "As notified by NOTAM"
-                        }
+                        },
+                        "weekSchedule": [true, true, true, true, true, false, false],
+                        "daySchedule": [false, false, false, false, false, false, false, true, true, true, true, true, true, true, true, true, false, false, false, false, false, false, false, false]
                       },
                       "sup": {
                         "reference": "SUP 12/26",
@@ -145,6 +148,7 @@ class ZoneCheckV3RepositoryTest {
         assertEquals("AREA ACT FOR SPECIAL AIR ACTIVITY.", zone.official?.sourceText)
         assertEquals("LIXX/QRTCA/IV/BO/W/000/015/4401N00819E005", zone.official?.qLine)
         assertEquals("0700-1600", zone.validity?.schedule)
+        assertEquals("2026-08-09T07:00:00Z", zone.validity?.nextActivation)
         assertTrue(zone.validity?.activeNow == true)
         assertEquals("Specific", zone.authorization?.requiredLicense)
         assertEquals("W1234/26", notam.code)
@@ -153,6 +157,11 @@ class ZoneCheckV3RepositoryTest {
         assertFalse(notam.validity?.expired == true)
         assertEquals("ENR SOURCE TEXT", zone.enr?.official?.sourceText)
         assertEquals("As notified by NOTAM", zone.enr?.validity?.schedule)
+        assertEquals(7, zone.enr?.weekSchedule?.size)
+        assertEquals(true, zone.enr?.weekSchedule?.first()?.active)
+        assertEquals(24, zone.enr?.daySchedule?.size)
+        assertEquals(false, zone.enr?.daySchedule?.first())
+        assertEquals(true, zone.enr?.daySchedule?.get(7))
         assertEquals("SUP SOURCE TEXT", zone.sup?.official?.sourceText)
     }
 
