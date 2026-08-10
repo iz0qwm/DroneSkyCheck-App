@@ -103,6 +103,12 @@ private fun JSONObject.toZoneInfo(): ZoneInfo {
     val authority = optJSONObject("authority")
     val validity = optJSONObject("validity")?.toValidityInfo()
     val authorization = optJSONObject("authorization").toAuthorizationInfo()
+    val enrichedObject = optJSONObject("enriched") ?: optJSONObject("enrichedData")
+    val sup = optJSONObject("sup")?.toSupInfo()
+    val uasGeographicalZone = optJSONObject("uasGeographicalZone")?.toUasGeographicalZoneInfo()
+    val enr = optJSONObject("enr")?.toEnrInfo()
+        ?: enrichedObject?.takeIf { it.hasInlineEnrContent() }?.toEnrInfo()
+        ?: takeIf { hasInlineEnrContent() }?.toEnrInfo()
     val official = (optJSONObject("official") ?: optJSONObject("source") ?: optJSONObject("raw"))
         ?.toOfficialInfo()
         ?: toOfficialInfoFromInlineFields()
@@ -124,7 +130,10 @@ private fun JSONObject.toZoneInfo(): ZoneInfo {
             ?: optFirstInt("limitMetersAgl", "maxAltitudeMetersAgl", "maxAltitude", "upperLimit"),
         verticalLimits = (optJSONObject("verticalLimits") ?: uasLimit)?.toVerticalLimits(),
         description = info?.optFirstString("description")
-            ?: optFirstString("description"),
+            ?: optFirstString("description", "descrizione")
+            ?: enr?.description
+            ?: sup?.combinedDescription()
+            ?: uasGeographicalZone?.combinedDescription(),
         official = official,
         info = info?.toZoneNarrative(),
         validity = validity,
@@ -132,8 +141,9 @@ private fun JSONObject.toZoneInfo(): ZoneInfo {
         authority = authority?.toAuthorityInfo(),
         operationalStatus = optFirstString("operationalStatus", "status", "state"),
         notams = optArray("notams", "notam").toObjectList { it.toNotamInfo() },
-        enr = optJSONObject("enr")?.toEnrInfo(),
-        sup = optJSONObject("sup")?.toSupInfo(),
+        enr = enr,
+        sup = sup,
+        uasGeographicalZone = uasGeographicalZone,
         blockers = optArray("blockers").toIssueList(),
         warnings = optArray("warnings").toIssueList(),
         enriched = optEnrichedData(),
@@ -166,36 +176,56 @@ private fun JSONObject.toNotamInfo(): NotamInfo =
         warnings = optArray("warnings").toIssueList()
     )
 
-private fun JSONObject.toEnrInfo(): EnrInfo =
-    EnrInfo(
-        code = optFirstString("code", "reference", "id"),
-        name = optFirstString("name", "title"),
-        description = optFirstString("description", "desc"),
-        limitText = optFirstString("limitText"),
-        notes = optFirstString("notes"),
-        classification = optFirstString("classification", "type"),
-        activationType = optFirstString("activationType"),
+private fun JSONObject.toEnrInfo(): EnrInfo {
+    val enrichment = optJSONObject("enrichment")
+    val classification = optFirstString("classification", "type")
+        ?: enrichment?.optFirstString("classification", "type")
+        ?: enrichment?.optFirstString("enrType")?.let { "ENR $it" }
+
+    return EnrInfo(
+        code = optFirstString("code", "reference", "id", "aip", "enrRef")
+            ?: enrichment?.optFirstString("code", "reference", "id", "aip", "enrRef"),
+        name = optFirstString("name", "title")
+            ?: enrichment?.optFirstString("name", "title", "aip"),
+        description = optFirstString("description", "descrizione", "desc")
+            ?: enrichment?.optFirstString("description", "descrizione", "desc"),
+        limitText = optFirstString("limitText") ?: enrichment?.optFirstString("limitText"),
+        notes = optFirstString("notes") ?: enrichment?.optFirstString("notes", "note"),
+        classification = classification,
+        activationType = optFirstString("activationType") ?: enrichment?.optFirstString("activationType"),
+        operationMode = optFirstString("operationMode") ?: enrichment?.optFirstString("operationMode"),
+        operationCategory = optFirstString("operationCategory") ?: enrichment?.optFirstString("operationCategory"),
+        requiredLicense = optFirstString("requiredLicense") ?: enrichment?.optFirstString("requiredLicense"),
+        authorizationRequired = optFirstBoolean("authorizationRequired") ?: enrichment?.optFirstBoolean("authorizationRequired"),
+        schedule = optJSONObject("schedule")?.toScheduleInfo() ?: enrichment?.optJSONObject("schedule")?.toScheduleInfo(),
+        authority = (optJSONObject("authority") ?: enrichment?.optJSONObject("authority"))?.toAuthorityInfo(),
+        official = (optJSONObject("official") ?: optJSONObject("source"))?.toOfficialInfo()
+            ?: toOfficialInfoFromInlineFields(),
+        validity = optJSONObject("validity")?.toValidityInfo()
+            ?: enrichment?.optJSONObject("validity")?.toValidityInfo()
+            ?: toValidityInfo(),
+        explanation = optFirstString("explanation") ?: enrichment?.optFirstString("explanation"),
+        operationalMeaning = optFirstString("operationalMeaning", "meaning")
+            ?: enrichment?.optFirstString("operationalMeaning", "meaning"),
+        weekSchedule = optArray("weekSchedule").toTemporalBarEntries(),
+        daySchedule = optArray("daySchedule").toNullableBooleanList()
+    )
+}
+
+private fun JSONObject.hasInlineEnrContent(): Boolean =
+    optFirstString("descrizione", "aip", "enrType", "enrRef") != null ||
+        optFirstString("sourceFile")?.contains("ENR", ignoreCase = true) == true
+
+private fun JSONObject.toSupInfo(): SupInfo =
+    SupInfo(
+        title = optFirstString("title", "name", "sup"),
+        reference = optFirstString("reference", "code", "id", "sup"),
+        generality = optFirstString("generality", "general", "generalita"),
+        description = optFirstString("description", "descrizione", "summary"),
         operationMode = optFirstString("operationMode"),
         operationCategory = optFirstString("operationCategory"),
         requiredLicense = optFirstString("requiredLicense"),
         authorizationRequired = optFirstBoolean("authorizationRequired"),
-        schedule = optJSONObject("schedule")?.toScheduleInfo(),
-        authority = optJSONObject("authority")?.toAuthorityInfo(),
-        official = (optJSONObject("official") ?: optJSONObject("source"))?.toOfficialInfo()
-            ?: toOfficialInfoFromInlineFields(),
-        validity = optJSONObject("validity")?.toValidityInfo() ?: toValidityInfo(),
-        explanation = optFirstString("explanation"),
-        operationalMeaning = optFirstString("operationalMeaning", "meaning"),
-        weekSchedule = optArray("weekSchedule").toTemporalBarEntries(),
-        daySchedule = optArray("daySchedule").toNullableBooleanList()
-    )
-
-private fun JSONObject.toSupInfo(): SupInfo =
-    SupInfo(
-        title = optFirstString("title", "name"),
-        reference = optFirstString("reference", "code", "id"),
-        generality = optFirstString("generality", "general"),
-        description = optFirstString("description", "summary"),
         authority = optJSONObject("authority")?.toAuthorityInfo(),
         official = (optJSONObject("official") ?: optJSONObject("source"))?.toOfficialInfo()
             ?: toOfficialInfoFromInlineFields(),
@@ -206,6 +236,26 @@ private fun JSONObject.toSupInfo(): SupInfo =
         blockers = optArray("blockers").toIssueList(),
         warnings = optArray("warnings").toIssueList()
     )
+
+private fun JSONObject.toUasGeographicalZoneInfo(): UasGeographicalZoneInfo =
+    UasGeographicalZoneInfo(
+        id = optFirstString("id", "uassec", "name", "title"),
+        generality = optFirstString("generality", "general", "generalita"),
+        description = optFirstString("description", "descrizione", "summary"),
+        schedule = optFirstString("schedule", "orariRaw"),
+        operationMode = optFirstString("operationMode"),
+        operationCategory = optFirstString("operationCategory"),
+        requiredLicense = optFirstString("requiredLicense"),
+        authorizationRequired = optFirstBoolean("authorizationRequired"),
+        authority = optJSONObject("authority")?.toAuthorityInfo(),
+        confidence = optFirstString("confidence")
+    )
+
+private fun SupInfo.combinedDescription(): String? =
+    listOf(generality, description).joinDistinctNonBlank()
+
+private fun UasGeographicalZoneInfo.combinedDescription(): String? =
+    listOf(generality, description).joinDistinctNonBlank()
 
 private fun JSONObject.toZoneNarrative(): ZoneNarrative =
     ZoneNarrative(
@@ -258,13 +308,28 @@ private fun JSONObject.toAuthorizationBlockingReason(): AuthorizationBlockingRea
         code = optFirstString("code")
     )
 
-private fun JSONObject.toAuthorityInfo(): AuthorityInfo =
-    AuthorityInfo(
-        name = optFirstString("name", "authority"),
-        code = optFirstString("code"),
-        contact = optFirstString("contact", "email", "phone"),
-        source = optFirstString("source", "sourceReference")
+private fun JSONObject.toAuthorityInfo(): AuthorityInfo {
+    val authorityObjects = authorityObjects()
+    val emails = authorityObjects
+        .flatMap { it.optAuthorityEmails() }
+        .distinctBy { it.lowercase() }
+    val note = authorityObjects.firstCleanString("note", "notes")
+    val name = authorityObjects.firstCleanString("name")
+        ?: authorityObjects.firstCleanString("authority")
+        ?: note
+    val contact = emails.joinToString(", ")
+        .ifBlank { authorityObjects.firstCleanString("contact", "phone", "email").orEmpty() }
+        .ifBlank { null }
+
+    return AuthorityInfo(
+        name = name,
+        code = authorityObjects.firstCleanString("code"),
+        contact = contact,
+        source = authorityObjects.firstCleanString("source", "sourceReference"),
+        emails = emails,
+        note = note
     )
+}
 
 private fun JSONObject.toValidityInfo(): ValidityInfo =
     ValidityInfo(
@@ -374,6 +439,64 @@ private fun JSONObject.optArray(vararg names: String): JSONArray? =
             else -> null
         }
     }
+
+private fun JSONObject.authorityObjects(): List<JSONObject> =
+    buildList {
+        add(this@authorityObjects)
+        listOf("authority", "contact", "email").forEach { key ->
+            when (val value = opt(key)) {
+                is JSONObject -> add(value)
+                is String -> value.toJsonObjectOrNull()?.let { add(it) }
+            }
+        }
+    }
+
+private fun List<JSONObject>.firstCleanString(vararg names: String): String? =
+    firstNotNullOfOrNull { json ->
+        names.firstNotNullOfOrNull { name -> json.optCleanString(name) }
+    }
+
+private fun JSONObject.optCleanString(name: String): String? {
+    if (!has(name) || isNull(name)) return null
+    val value = opt(name)
+    if (value is JSONObject || value is JSONArray) return null
+    val text = value?.toString()?.trim().orEmpty()
+    if (text.isBlank() || text.toJsonObjectOrNull() != null) return null
+    return text
+}
+
+private fun JSONObject.optAuthorityEmails(): List<String> =
+    buildList {
+        listOf("emails", "email", "pec", "pecs").forEach { name ->
+            when (val value = opt(name)) {
+                is JSONArray -> {
+                    for (index in 0 until value.length()) {
+                        when (val item = value.opt(index)) {
+                            is JSONObject -> addAll(item.optAuthorityEmails())
+                            else -> add(item?.toString().orEmpty())
+                        }
+                    }
+                }
+                is JSONObject -> addAll(value.optAuthorityEmails())
+                is String -> add(value)
+            }
+        }
+    }
+        .flatMap { it.split(',', ';') }
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .distinctBy { it.lowercase() }
+
+private fun String.toJsonObjectOrNull(): JSONObject? =
+    trim()
+        .takeIf { it.startsWith("{") && it.endsWith("}") }
+        ?.let { runCatching { JSONObject(it) }.getOrNull() }
+
+private fun List<String?>.joinDistinctNonBlank(): String? =
+    mapNotNull { it?.trim()?.takeIf(String::isNotBlank) }
+        .distinctBy { it.lowercase() }
+        .joinToString("\n\n")
+        .takeIf { it.isNotBlank() }
 
 private fun <T> JSONArray?.toObjectList(transform: (JSONObject) -> T): List<T> =
     this.toMixedList { value ->

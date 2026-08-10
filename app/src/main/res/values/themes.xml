@@ -1,5 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <style name="Theme.DroneSkyCheck" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.DroneSkyCheck" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/dsc_startup_background</item>
+    </style>
+
+    <style name="Theme.DroneSkyCheck.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/dsc_startup_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/logo_alto_no_sfondo_512</item>
+        <item name="postSplashScreenTheme">@style/Theme.DroneSkyCheck</item>
+    </style>
 </resources>

@@ -3,7 +3,6 @@ package it.droneskycheck.app.ui.authorization
 import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -12,6 +11,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -20,6 +21,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -33,6 +35,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
+import it.droneskycheck.app.data.AuthorizationDateRules
+import it.droneskycheck.app.data.AuthorizationDateWarning
 import it.droneskycheck.app.data.AuthorizationDraft
 import it.droneskycheck.app.data.AuthorizationPdfGenerator
 import it.droneskycheck.app.data.AuthorizationReadinessEvaluator
@@ -40,6 +44,10 @@ import it.droneskycheck.app.data.AuthorizationRequestData
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.text.SimpleDateFormat
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 import java.util.Date
 import java.util.Locale
 
@@ -60,6 +68,8 @@ fun AuthorizationDraftSheet(
     var isSaving by remember { mutableStateOf(false) }
     var isGenerating by remember { mutableStateOf(false) }
     var actionMessage by remember { mutableStateOf<String?>(null) }
+    var activeDatePicker by remember { mutableStateOf<DatePickerTarget?>(null) }
+    var leadTimeWarning by remember { mutableStateOf<AuthorizationDateWarning?>(null) }
     var form by remember(draft.id, draft.updatedAt) { mutableStateOf(draft.requestData) }
 
     LaunchedEffect(draft.id, draft.updatedAt) {
@@ -73,7 +83,10 @@ fun AuthorizationDraftSheet(
     val drone = JSONObject(localDraft.droneSnapshotJson)
     val operation = localDraft.operationData
     val readiness = AuthorizationReadinessEvaluator.evaluate(localDraft)
-    val canGenerate = localDraft.missingFields.isEmpty() && readiness.canGeneratePdf && !isGenerating
+    val startDate = form.operationStartDate.toLocalDateOrNull()
+    val endDate = form.operationEndDate.toLocalDateOrNull()
+    val dateError = AuthorizationDateRules.validateDateRange(startDate, endDate)
+    val canGenerate = localDraft.missingFields.isEmpty() && readiness.canGeneratePdf && dateError == null && !isGenerating
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -112,7 +125,6 @@ fun AuthorizationDraftSheet(
             DraftSection("Area operativa") {
                 DraftLine("Zona interessata", zone.optString("name"))
                 DraftLine("Codice zona", zone.optString("code"))
-                DraftLine("Tipo zona", listOf(zone.optString("family"), zone.optString("type")).filter { it.isNotBlank() }.joinToString(" / "))
                 DraftLine("Punto di decollo", form.takeoff)
                 DraftLine("Superficie / poligono", "${operation.areaPoints.size} vertici confermati")
                 DraftLine("Altezza richiesta", form.verticalUpper)
@@ -122,6 +134,13 @@ fun AuthorizationDraftSheet(
                     form.airportDistanceNm.takeIf { it.isNotBlank() }?.let { "$it NM" }
                 ).filterNotNull().joinToString(" / "))
                 DraftLine("Analisi", operation.zoneAnalysisSummary)
+            }
+
+            DraftSection("Invio richiesta") {
+                val authority = zone.optJSONObject("authority")
+                DraftLine("Destinatario", authority.formatAuthorityRecipient())
+                DraftLine("Fonte", authority?.optString("source"))
+                DraftLine("CC", "protocollo@pec.enac.gov.it; mobilita.innovativa@enac.gov.it; aeroporti.spazioaereo@enac.gov.it")
             }
 
             DraftSection("Dati pilota") {
@@ -148,22 +167,25 @@ fun AuthorizationDraftSheet(
                     onValueChange = { form = form.copy(activityType = it) },
                     label = "Tipo attivita"
                 )
-                DraftTextField(
-                    value = form.operationStartDateTime,
-                    onValueChange = { form = form.copy(operationStartDateTime = it) },
+                DraftDateField(
                     label = "Inizio operazioni",
-                    placeholder = "2026-08-10T09:00"
+                    value = startDate,
+                    onClick = { activeDatePicker = DatePickerTarget.OperationStart }
                 )
-                DraftTextField(
-                    value = form.operationEndDateTime,
-                    onValueChange = { form = form.copy(operationEndDateTime = it) },
+                DraftDateField(
                     label = "Fine operazioni",
-                    placeholder = "2026-08-10T11:00"
+                    value = endDate,
+                    onClick = { activeDatePicker = DatePickerTarget.OperationEnd }
                 )
                 DraftTextField(
                     value = form.stampNumber,
                     onValueChange = { form = form.copy(stampNumber = it) },
-                    label = "Marca da bollo"
+                    label = "Numero marca da bollo elettronica"
+                )
+                DraftDateField(
+                    label = "Data marca da bollo elettronica",
+                    value = form.stampDate.toLocalDateOrNull(),
+                    onClick = { activeDatePicker = DatePickerTarget.StampDate }
                 )
                 DraftTextField(
                     value = form.notes,
@@ -186,10 +208,17 @@ fun AuthorizationDraftSheet(
                             isSaving = false
                         }
                     },
-                    enabled = !isSaving,
+                    enabled = !isSaving && dateError == null,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(if (isSaving) "Salvataggio..." else "Salva dati pratica")
+                }
+                dateError?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error
+                    )
                 }
             }
 
@@ -289,6 +318,58 @@ fun AuthorizationDraftSheet(
             dismissButton = {
                 TextButton(onClick = { showCancelConfirm = false }) {
                     Text("Mantieni")
+                }
+            }
+        )
+    }
+
+    activeDatePicker?.let { target ->
+        AuthorizationDatePickerDialog(
+            target = target,
+            selectedDate = when (target) {
+                DatePickerTarget.OperationStart -> startDate
+                DatePickerTarget.OperationEnd -> endDate
+                DatePickerTarget.StampDate -> form.stampDate.toLocalDateOrNull()
+            },
+            onDismiss = { activeDatePicker = null },
+            onDateSelected = { date ->
+                form = when (target) {
+                    DatePickerTarget.OperationStart -> form.copy(
+                        operationStartDate = date.toString(),
+                        operationStartDateTime = ""
+                    )
+                    DatePickerTarget.OperationEnd -> form.copy(
+                        operationEndDate = date.toString(),
+                        operationEndDateTime = ""
+                    )
+                    DatePickerTarget.StampDate -> form.copy(stampDate = date.toString())
+                }
+                activeDatePicker = null
+                if (target == DatePickerTarget.OperationStart) {
+                    leadTimeWarning = AuthorizationDateRules.leadTimeWarning(localDraft.procedureType, date)
+                }
+            }
+        )
+    }
+
+    leadTimeWarning?.let { warning ->
+        AlertDialog(
+            onDismissRequest = { leadTimeWarning = null },
+            title = { Text(warning.title) },
+            text = { Text(warning.body) },
+            confirmButton = {
+                TextButton(onClick = { leadTimeWarning = null }) {
+                    Text("Continua comunque")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        leadTimeWarning = null
+                        activeDatePicker = DatePickerTarget.OperationStart
+                    }
+                ) {
+                    Text("Modifica data")
                 }
             }
         )
@@ -437,6 +518,75 @@ private fun DraftTextField(
 }
 
 @Composable
+private fun DraftDateField(
+    label: String,
+    value: LocalDate?,
+    onClick: () -> Unit
+) {
+    OutlinedButton(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = value?.formatItalianDate() ?: "Seleziona data",
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AuthorizationDatePickerDialog(
+    target: DatePickerTarget,
+    selectedDate: LocalDate?,
+    onDismiss: () -> Unit,
+    onDateSelected: (LocalDate) -> Unit
+) {
+    val state = rememberDatePickerState(
+        initialSelectedDateMillis = selectedDate?.toUtcMillis()
+    )
+
+    DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    state.selectedDateMillis?.toLocalDateFromUtc()?.let(onDateSelected)
+                },
+                enabled = state.selectedDateMillis != null
+            ) {
+                Text("Conferma")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Annulla")
+            }
+        }
+    ) {
+        Column {
+            Text(
+                text = target.label,
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(start = 24.dp, top = 18.dp, end = 24.dp)
+            )
+            DatePicker(state = state)
+        }
+    }
+}
+
+@Composable
 private fun MessageBlock(title: String, body: String, isBlocking: Boolean) {
     Surface(
         color = if (isBlocking) {
@@ -472,3 +622,62 @@ private fun AuthorizationDraft.procedureDescription(): String =
 
 private fun formatTimestamp(value: Long): String =
     SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.ITALY).format(Date(value))
+
+private enum class DatePickerTarget(val label: String) {
+    OperationStart("Inizio operazioni"),
+    OperationEnd("Fine operazioni"),
+    StampDate("Data marca da bollo elettronica")
+}
+
+private fun String.toLocalDateOrNull(): LocalDate? =
+    takeIf { it.isNotBlank() }?.let {
+        runCatching { LocalDate.parse(it.take(10)) }.getOrNull()
+    }
+
+private fun LocalDate.formatItalianDate(): String =
+    format(DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.ITALY))
+
+private fun LocalDate.toUtcMillis(): Long =
+    atStartOfDay().toInstant(ZoneOffset.UTC).toEpochMilli()
+
+private fun Long.toLocalDateFromUtc(): LocalDate =
+    Instant.ofEpochMilli(this).atZone(ZoneOffset.UTC).toLocalDate()
+
+private fun org.json.JSONArray?.toStringList(): List<String> {
+    if (this == null) return emptyList()
+    return (0 until length()).mapNotNull { index ->
+        optString(index).takeIf { it.isNotBlank() }
+    }
+}
+
+private fun JSONObject?.formatAuthorityRecipient(): String? {
+    if (this == null) return null
+    val emails = normalizedAuthorityEmails()
+    val label = normalizedAuthorityLabel()
+    if (emails.isEmpty()) return label
+    return listOfNotNull(label, emails.joinToString(", "))
+        .filter { it.isNotBlank() }
+        .joinToString(": ")
+}
+
+private fun JSONObject.normalizedAuthorityEmails(): List<String> =
+    buildList {
+        optJSONArray("emails").toStringList().forEach { add(it) }
+        optString("contact").parseAuthorityJson()?.optJSONArray("emails").toStringList().forEach { add(it) }
+    }
+        .flatMap { it.split(',', ';') }
+        .map { it.trim() }
+        .filter { it.isNotBlank() && !it.startsWith("{") }
+        .distinctBy { it.lowercase() }
+
+private fun JSONObject.normalizedAuthorityLabel(): String? {
+    val nested = optString("contact").parseAuthorityJson()
+    return optString("note").takeIf { it.isNotBlank() }
+        ?: optString("name").takeIf { it.isNotBlank() && !it.startsWith("{") }
+        ?: nested?.optString("note")?.takeIf { it.isNotBlank() }
+}
+
+private fun String.parseAuthorityJson(): JSONObject? =
+    trim()
+        .takeIf { it.startsWith("{") && it.endsWith("}") }
+        ?.let { runCatching { JSONObject(it) }.getOrNull() }

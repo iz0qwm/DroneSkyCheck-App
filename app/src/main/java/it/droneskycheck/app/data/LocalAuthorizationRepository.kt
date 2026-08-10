@@ -476,8 +476,9 @@ private fun buildZoneSnapshot(
     zone: ZoneInfo,
     procedureType: String,
     procedure: AuthorizationProcedure?
-): JSONObject =
-    JSONObject()
+): JSONObject {
+    val authority = zone.bestAuthority()
+    return JSONObject()
         .put("id", zone.id)
         .put("name", zone.name)
         .put("code", zone.code)
@@ -489,7 +490,7 @@ private fun buildZoneSnapshot(
         .put("reasonCode", procedure?.reasonCode ?: zone.authorization?.reasonCodes?.firstOrNull().orEmpty())
         .put("reasonCodes", JSONArray(zone.authorization?.reasonCodes.orEmpty()))
         .put("requiredOperationCategory", zone.requiredOperationCategory())
-        .put("operationCategory", zone.authorization?.operationCategory ?: zone.enr?.operationCategory ?: zone.sup?.authorization?.operationCategory)
+        .put("operationCategory", zone.authorization?.operationCategory ?: zone.enr?.operationCategory ?: zone.sup?.operationCategory ?: zone.sup?.authorization?.operationCategory ?: zone.uasGeographicalZone?.operationCategory)
         .put("applicability", zone.authorization?.applicability)
         .put("resolutionStatus", zone.authorization?.resolutionStatus)
         .put("limitMetersAgl", zone.limitMetersAgl)
@@ -498,16 +499,37 @@ private fun buildZoneSnapshot(
         .put("verticalLowerMetersAgl", zone.verticalLimits?.lowerMetersAgl)
         .put("verticalUpperMetersAgl", zone.verticalLimits?.upperMetersAgl)
         .put("authority", JSONObject()
-            .put("name", zone.authority?.name)
-            .put("code", zone.authority?.code)
-            .put("contact", zone.authority?.contact)
-            .put("source", zone.authority?.source)
+            .put("name", authority?.name)
+            .put("code", authority?.code)
+            .put("contact", authority?.displayContact())
+            .put("emails", JSONArray(authority?.emails.orEmpty()))
+            .put("note", authority?.note)
+            .put("source", authority?.source)
         )
+}
+
+private fun ZoneInfo.bestAuthority(): AuthorityInfo? =
+    listOfNotNull(authority, enr?.authority, sup?.authority, uasGeographicalZone?.authority)
+        .firstOrNull { it.hasUsableContact() }
+        ?: listOfNotNull(authority, enr?.authority, sup?.authority, uasGeographicalZone?.authority).firstOrNull()
+
+private fun AuthorityInfo.hasUsableContact(): Boolean =
+    emails.isNotEmpty() || !contact.isNullOrBlank() || !name.isNullOrBlank() || !note.isNullOrBlank()
+
+private fun AuthorityInfo.displayContact(): String =
+    emails.joinToString(", ").ifBlank { contact.orEmpty().takeUnless { it.isJsonObjectText() }.orEmpty() }
+
+private fun String.isJsonObjectText(): Boolean {
+    val trimmed = trim()
+    return trimmed.startsWith("{") && trimmed.endsWith("}")
+}
 
 private fun ZoneInfo.requiredOperationCategory(): String {
     val direct = authorization?.operationCategory
         ?: enr?.operationCategory
+        ?: sup?.operationCategory
         ?: sup?.authorization?.operationCategory
+        ?: uasGeographicalZone?.operationCategory
     direct?.uppercase(Locale.ROOT)?.let {
         return when (it) {
             "SPECIFIC_REQUIRED", "SPECIFIC" -> "SPECIFIC"

@@ -217,6 +217,195 @@ class ZoneCheckV3RepositoryTest {
     }
 
     @Test
+    fun parserPreservesEnrAuthorityEmails() {
+        val response = parseZoneCheckV3Response(overlapJson(
+            status = "NO_FLY",
+            limit = 0,
+            zones = """
+              {
+                "identity": { "id": "lip244", "name": "LI P244" },
+                "classification": { "type": "ATM09_PRISON", "family": "PROHIBITED" },
+                "authorization": {
+                  "applicability": "WHEN_ACTIVE",
+                  "resolutionStatus": "RESOLVED",
+                  "procedures": [{ "type": "ATM05", "version": 1, "label": "ATM05" }]
+                },
+                "enr": {
+                  "descrizione": "Proibito tutto il traffico aereo al di sotto di 2500 ft AMSL.",
+                  "operationMode": "OPEN",
+                  "operationCategory": "OPEN",
+                  "authorizationRequired": true,
+                  "authority": {
+                    "emails": ["protocollo.prefrm@pec.interno.it"],
+                    "note": "Prefettura di Roma"
+                  }
+                }
+              }
+            """.trimIndent()
+        ))
+
+        val authority = response.zones.single().enr?.authority
+
+        assertEquals(listOf("protocollo.prefrm@pec.interno.it"), authority?.emails)
+        assertEquals("protocollo.prefrm@pec.interno.it", authority?.contact)
+        assertEquals("Prefettura di Roma", authority?.name)
+        assertEquals("Proibito tutto il traffico aereo al di sotto di 2500 ft AMSL.", response.zones.single().enr?.description)
+    }
+
+    @Test
+    fun parserPromotesEnrichedEnrDescriptionToZoneDetails() {
+        val description = "Proibito tutto il traffico aereo al di sotto di 2500 ft AMSL."
+        val response = parseZoneCheckV3Response(overlapJson(
+            status = "NO_FLY",
+            limit = 0,
+            zones = """
+              {
+                "identity": { "id": "lip244", "name": "LI P244" },
+                "classification": { "type": "ATM09_PRISON", "family": "PROHIBITED" },
+                "authorization": {
+                  "applicability": "WHEN_ACTIVE",
+                  "resolutionStatus": "RESOLVED",
+                  "procedures": [{ "type": "ATM05", "version": 1, "label": "ATM05" }]
+                },
+                "enriched": {
+                  "aip": "LI P244",
+                  "enrType": "5.1.1",
+                  "descrizione": "$description",
+                  "sourceFile": "ENR_5.1.1.html",
+                  "operationMode": "OPEN",
+                  "operationCategory": "OPEN",
+                  "requiredLicense": ["A1/A3"],
+                  "authorizationRequired": true,
+                  "authority": {
+                    "emails": ["protocollo.prefrm@pec.interno.it"],
+                    "note": "Prefettura di Roma"
+                  }
+                }
+              }
+            """.trimIndent()
+        ))
+
+        val zone = response.zones.single()
+
+        assertEquals(description, zone.enr?.description)
+        assertEquals(description, zone.description)
+        assertEquals(listOf("protocollo.prefrm@pec.interno.it"), zone.enr?.authority?.emails)
+        assertEquals("Prefettura di Roma", zone.enr?.authority?.name)
+    }
+
+    @Test
+    fun parserReadsNestedEnrEnrichmentDescriptionToZoneDetails() {
+        val description = "1) Proibito tutto il traffico aereo al di sotto di 2500 ft AMSL."
+        val response = parseZoneCheckV3Response(overlapJson(
+            status = "NO_FLY",
+            limit = 0,
+            zones = """
+              {
+                "identity": { "id": "lip244", "name": "LI P244 - ROMA" },
+                "classification": { "type": "ATM09_PRISON", "family": "PROHIBITED" },
+                "authorization": {
+                  "applicability": "WHEN_ACTIVE",
+                  "resolutionStatus": "RESOLVED",
+                  "procedures": [{ "type": "ATM05", "version": 1, "label": "ATM05" }]
+                },
+                "authority": {
+                  "emails": ["protocollo.prefrm@pec.interno.it"],
+                  "note": "Prefettura di Roma"
+                },
+                "info": {
+                  "summary": "LIP244 LI P244 - ROMA"
+                },
+                "enr": {
+                  "hasEnr": false,
+                  "enrichment": {
+                    "aip": "LI P244",
+                    "enrType": "5.1.1",
+                    "descrizione": "$description",
+                    "sourceFile": "ENR_5.1.1.html",
+                    "operationMode": "OPEN",
+                    "operationCategory": "OPEN",
+                    "requiredLicense": ["A1/A3"],
+                    "authorizationRequired": true,
+                    "authority": {
+                      "emails": ["protocollo.prefrm@pec.interno.it"],
+                      "note": "Prefettura di Roma"
+                    }
+                  }
+                }
+              }
+            """.trimIndent()
+        ))
+
+        val zone = response.zones.single()
+
+        assertEquals(description, zone.enr?.description)
+        assertEquals(description, zone.description)
+        assertEquals("ENR 5.1.1", zone.enr?.classification)
+        assertEquals(listOf("protocollo.prefrm@pec.interno.it"), zone.enr?.authority?.emails)
+    }
+
+    @Test
+    fun parserReadsUasGeographicalZoneEnrichedDescriptionAndAuthority() {
+        val response = parseZoneCheckV3Response(overlapJson(
+            status = "NO_FLY",
+            limit = 0,
+            zones = """
+              {
+                "identity": { "id": "uasgz-test", "name": "UAS GZ SEC018 - Settala" },
+                "classification": { "type": "UAS_GZ", "family": "PROHIBITED" },
+                "uasGeographicalZone": {
+                  "id": "UAS GZ SEC018 - Settala",
+                  "generalita": "Sono vietate le operazioni UAS.",
+                  "description": "Consultare la lettera di istituzione della zona geografica.",
+                  "operationMode": "OPEN_POSSIBLE",
+                  "operationCategory": "OPEN_WITH_AUTH",
+                  "requiredLicense": ["A1/A3"],
+                  "authorizationRequired": true,
+                  "authority": {
+                    "emails": ["security@pec.snam.it"],
+                    "note": "Centrali di stoccaggio SNAM"
+                  }
+                }
+              }
+            """.trimIndent()
+        ))
+
+        val zone = response.zones.single()
+
+        assertEquals("Sono vietate le operazioni UAS.\n\nConsultare la lettera di istituzione della zona geografica.", zone.description)
+        assertEquals(listOf("security@pec.snam.it"), zone.uasGeographicalZone?.authority?.emails)
+        assertEquals("OPEN_WITH_AUTH", zone.uasGeographicalZone?.operationCategory)
+    }
+
+    @Test
+    fun parserUnwrapsNestedAuthorityEmailObject() {
+        val response = parseZoneCheckV3Response(overlapJson(
+            status = "NO_FLY",
+            limit = 0,
+            zones = """
+              {
+                "identity": { "id": "sup-test", "name": "SUP fixture" },
+                "classification": { "type": "P_SUP", "family": "SUP" },
+                "sup": {
+                  "authority": {
+                    "authority": {
+                      "emails": ["sup@example.test"],
+                      "note": "Ente SUP"
+                    }
+                  }
+                }
+              }
+            """.trimIndent()
+        ))
+
+        val authority = response.zones.single().sup?.authority
+
+        assertEquals(listOf("sup@example.test"), authority?.emails)
+        assertEquals("sup@example.test", authority?.contact)
+        assertEquals("Ente SUP", authority?.name)
+    }
+
+    @Test
     fun parserKeepsGlobalNoFlyWhenInactiveEnrOverlapsActiveZeroMeterZone() {
         val response = parseZoneCheckV3Response(overlapJson(
             status = "NO_FLY",

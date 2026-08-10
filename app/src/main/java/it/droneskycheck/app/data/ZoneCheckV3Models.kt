@@ -46,6 +46,7 @@ data class ZoneInfo(
     val notams: List<NotamInfo> = emptyList(),
     val enr: EnrInfo? = null,
     val sup: SupInfo? = null,
+    val uasGeographicalZone: UasGeographicalZoneInfo? = null,
     val blockers: List<Issue> = emptyList(),
     val warnings: List<Issue> = emptyList(),
     val enriched: List<KeyValueInfo> = emptyList(),
@@ -166,7 +167,9 @@ data class AuthorityInfo(
     val name: String?,
     val code: String?,
     val contact: String?,
-    val source: String?
+    val source: String?,
+    val emails: List<String> = emptyList(),
+    val note: String? = null
 )
 
 data class NotamInfo(
@@ -214,6 +217,10 @@ data class SupInfo(
     val reference: String?,
     val generality: String?,
     val description: String?,
+    val operationMode: String?,
+    val operationCategory: String?,
+    val requiredLicense: String?,
+    val authorizationRequired: Boolean?,
     val authority: AuthorityInfo?,
     val official: OfficialInfo?,
     val validity: ValidityInfo?,
@@ -222,6 +229,19 @@ data class SupInfo(
     val operationalMeaning: String?,
     val blockers: List<Issue> = emptyList(),
     val warnings: List<Issue> = emptyList()
+)
+
+data class UasGeographicalZoneInfo(
+    val id: String?,
+    val generality: String?,
+    val description: String?,
+    val schedule: String?,
+    val operationMode: String?,
+    val operationCategory: String?,
+    val requiredLicense: String?,
+    val authorizationRequired: Boolean?,
+    val authority: AuthorityInfo?,
+    val confidence: String?
 )
 
 data class KeyValueInfo(

@@ -108,6 +108,7 @@ import it.droneskycheck.app.data.NotamInfo
 import it.droneskycheck.app.data.OfficialInfo
 import it.droneskycheck.app.data.SupInfo
 import it.droneskycheck.app.data.TemporalBarEntry
+import it.droneskycheck.app.data.UasGeographicalZoneInfo
 import it.droneskycheck.app.data.ValidityInfo
 import it.droneskycheck.app.data.ZoneCheckV3Response
 import it.droneskycheck.app.data.ZoneInfo
@@ -1484,9 +1485,9 @@ private fun ZoneInfoCard(
                 NotamSection(zone.notams)
                 EnrSection(zone.enr)
                 SupSection(zone.sup)
+                UasGeographicalZoneSection(zone.uasGeographicalZone)
                 AuthorizationSection(zone.authorization, onAuthorizationRequest)
                 AuthoritySection(zone.authority)
-                ZoneOptionalDetail("Descrizione", zone.description?.cleanUserText())
                 zone.blockers.filterRelevantFor(zone).takeIf { it.isNotEmpty() }?.let {
                     ZoneOptionalDetail("Attenzione", it.joinIssues())
                 }
@@ -1763,7 +1764,8 @@ private fun temporalStateColor(active: Boolean?): Color =
 @Composable
 private fun ZoneNarrativeSection(zone: ZoneInfo) {
     val narrative = zone.info
-    if (narrative?.summary.isNullOrBlank() &&
+    val description = zone.primaryDescription()
+    if (description.isNullOrBlank() &&
         narrative?.explanation.isNullOrBlank() &&
         narrative?.operationalMeaning.isNullOrBlank()
     ) {
@@ -1771,7 +1773,7 @@ private fun ZoneNarrativeSection(zone: ZoneInfo) {
     }
 
     ZoneSection(title = "Situazione operativa") {
-        ZoneOptionalDetail("Sintesi", narrative?.summary)
+        ZoneOptionalDetail("Descrizione", description)
         ZoneOptionalDetail("Spiegazione DSC", narrative?.explanation)
         ZoneOptionalDetail("Significato operativo", narrative?.operationalMeaning)
     }
@@ -2008,8 +2010,8 @@ private fun EnrSection(enr: EnrInfo?) {
 
     ZoneSection(title = "ENR") {
         ZoneOptionalDetail("Nome", enr.name)
+        ZoneOptionalDetail("Riferimento", enr.classification)
         ZoneOptionalDetail("Stato", enr.validity?.statusLabel())
-        ZoneOptionalDetail("Descrizione", enr.description.usableUserText())
         ZoneOptionalDetail("Orari di attività", enr.schedule?.human ?: enr.validity?.schedule)
         ZoneOptionalDetail("Limiti", enr.limitText.usableUserText())
         ZoneOptionalDetail("Note", enr.notes.usableUserText())
@@ -2019,7 +2021,6 @@ private fun EnrSection(enr: EnrInfo?) {
         ZoneOptionalDetail("Autorizzazione", enr.authorizationRequiredText())
         ZoneOptionalDetail("Spiegazione", enr.explanation.distinctFrom(enr.schedule?.human))
         ZoneOptionalDetail("Significato operativo", enr.operationalMeaning)
-        AuthoritySection(enr.authority)
         OfficialSection(
             official = enr.official,
             title = "Dettagli ufficiali",
@@ -2040,8 +2041,8 @@ private fun SupSection(sup: SupInfo?) {
     ZoneSection(title = "SUP") {
         ZoneOptionalDetail("Titolo", sup.title)
         ZoneOptionalDetail("Riferimento", sup.reference)
-        ZoneOptionalDetail("Generalita", sup.generality)
-        ZoneOptionalDetail("Descrizione", sup.description)
+        ZoneOptionalDetail("Attestato di competenza minimo richiesto", sup.requiredLicense.formatRequiredLicense())
+        ZoneOptionalDetail("Autorizzazione", sup.authorizationRequired.authorizationRequiredText())
         ZoneOptionalDetail("Spiegazione", sup.explanation)
         ZoneOptionalDetail("Significato operativo", sup.operationalMeaning)
         ValiditySection(sup.validity)
@@ -2050,10 +2051,21 @@ private fun SupSection(sup: SupInfo?) {
             onAuthorizationRequest = {},
             allowDraftCreation = false
         )
-        AuthoritySection(sup.authority)
         OfficialSection(sup.official, title = "Testo ufficiale SUP")
         if (sup.blockers.isNotEmpty()) ZoneOptionalDetail("Blocker", sup.blockers.joinIssues())
         if (sup.warnings.isNotEmpty()) ZoneOptionalDetail("Warning", sup.warnings.joinIssues())
+    }
+}
+
+@Composable
+private fun UasGeographicalZoneSection(uasGeographicalZone: UasGeographicalZoneInfo?) {
+    if (uasGeographicalZone == null || !uasGeographicalZone.hasContent()) return
+
+    ZoneSection(title = "Zona geografica UAS") {
+        ZoneOptionalDetail("Nome", uasGeographicalZone.id)
+        ZoneOptionalDetail("Orari di attività", uasGeographicalZone.schedule)
+        ZoneOptionalDetail("Attestato di competenza minimo richiesto", uasGeographicalZone.requiredLicense.formatRequiredLicense())
+        ZoneOptionalDetail("Autorizzazione", uasGeographicalZone.authorizationRequired.authorizationRequiredText())
     }
 }
 
@@ -2073,16 +2085,12 @@ private fun AuthorizationSection(
             ZoneOptionalDetail("Spiegazione", manualCheck.second)
         } else {
             ZoneOptionalDetail("Richiesta", authorization.requiredText())
-            ZoneOptionalDetail("Stato", authorization.resolutionStatus.formatResolutionStatus())
         }
-        ZoneOptionalDetail("Applicabilità", authorization.applicability.formatApplicability())
-        ZoneOptionalDetail("Procedure", authorization.procedures.formatProcedures())
         ZoneOptionalDetail("Requisiti aggiuntivi", authorization.additionalRequirements.formatAdditionalRequirements())
         ZoneOptionalDetail("Requisito", authorization.requirement.usableAuthorizationText())
         ZoneOptionalDetail("Operazioni", authorization.operationSummary())
         ZoneOptionalDetail("Attestato di competenza minimo richiesto", authorization.requiredLicense.formatRequiredLicense())
         if (manualCheck == null) ZoneOptionalDetail("Spiegazione", authorization.explanation)
-        ZoneOptionalDetail("Motivi", authorization.reasonCodes.formatReasonCodes())
         ZoneOptionalDetail("Blocchi", authorization.blockingReasons.mapNotNull { it.code }.formatReasonCodes())
         if (authorization.procedures.isNotEmpty() || authorization.additionalRequirements.isNotEmpty()) {
             Button(
@@ -2304,6 +2312,8 @@ private fun AuthorityInfo.hasContent(): Boolean =
     !name.isNullOrBlank() ||
         !code.isNullOrBlank() ||
         !contact.isNullOrBlank() ||
+        emails.isNotEmpty() ||
+        !note.isNullOrBlank() ||
         !source.isNullOrBlank()
 
 private fun EnrInfo.hasContent(): Boolean =
@@ -2330,6 +2340,10 @@ private fun SupInfo.hasContent(): Boolean =
         !reference.isNullOrBlank() ||
         !generality.isNullOrBlank() ||
         !description.isNullOrBlank() ||
+        !operationMode.isNullOrBlank() ||
+        !operationCategory.isNullOrBlank() ||
+        !requiredLicense.isNullOrBlank() ||
+        authorizationRequired != null ||
         authority?.hasContent() == true ||
         official?.hasContent() == true ||
         validity?.hasContent() == true ||
@@ -2338,6 +2352,31 @@ private fun SupInfo.hasContent(): Boolean =
         !operationalMeaning.isNullOrBlank() ||
         blockers.isNotEmpty() ||
         warnings.isNotEmpty()
+
+private fun UasGeographicalZoneInfo.hasContent(): Boolean =
+    !id.isNullOrBlank() ||
+        !generality.isNullOrBlank() ||
+        !description.isNullOrBlank() ||
+        !schedule.isNullOrBlank() ||
+        !operationMode.isNullOrBlank() ||
+        !operationCategory.isNullOrBlank() ||
+        !requiredLicense.isNullOrBlank() ||
+        authorizationRequired != null ||
+        authority?.hasContent() == true
+
+private fun ZoneInfo.primaryDescription(): String? =
+    listOf(
+        enr?.description,
+        sup?.generality,
+        sup?.description,
+        uasGeographicalZone?.generality,
+        uasGeographicalZone?.description,
+        description
+    )
+        .mapNotNull { it.usableUserText() }
+        .distinctBy { it.lowercase() }
+        .joinToString("\n\n")
+        .takeIf { it.isNotBlank() }
 
 private fun ValidityInfo.statusLabel(): String? =
     when {
@@ -2411,6 +2450,13 @@ private fun authorizationBadgeColor(type: String): Color =
 
 private fun EnrInfo.authorizationRequiredText(): String? =
     if (authorizationRequired == true) {
+        "Negli orari di attività della zona è necessario richiedere l'autorizzazione."
+    } else {
+        null
+    }
+
+private fun Boolean?.authorizationRequiredText(): String? =
+    if (this == true) {
         "Negli orari di attività della zona è necessario richiedere l'autorizzazione."
     } else {
         null
@@ -2877,9 +2923,11 @@ private fun String.toWorkflowLabel(): String =
 private fun AuthorityInfo.formatRequestContacts(): String? {
     val chunks = listOfNotNull(name, contact, source)
     val objects = chunks.mapNotNull { it.parseJsonObjectOrNull() }
-    val note = objects.firstNotNullOfOrNull { it.optNullableText("note") }
+    val note = note
+        ?: objects.firstNotNullOfOrNull { it.optNullableText("note") }
         ?: name?.takeUnless { it.trim().startsWith("{") }
-    val emails = objects.flatMap { it.optStringList("emails") } +
+    val emails = emails +
+        objects.flatMap { it.optStringList("emails") } +
         listOfNotNull(contact?.takeIf { "@" in it && !it.trim().startsWith("{") })
 
     if (note.isNullOrBlank() && emails.isEmpty()) return null

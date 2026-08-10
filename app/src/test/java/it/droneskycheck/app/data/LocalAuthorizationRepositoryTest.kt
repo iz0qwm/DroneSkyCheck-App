@@ -33,6 +33,22 @@ class LocalAuthorizationRepositoryTest {
     }
 
     @Test
+    fun draftUsesEnrAuthorityEmailsWhenPrimaryAuthorityIsMissing() = runBlocking {
+        val repository = seededRepository()
+        val zone = atmZone("ATM05").copy(
+            authority = null,
+            enr = enrWithAuthorityEmail("protocollo.prefrm@pec.interno.it", "Prefettura di Roma")
+        )
+
+        val draft = (repository.createDraftFromZone(zone, lat = 41.9, lon = 12.5) as CreateAuthorizationDraftResult.Created).draft
+        val authority = JSONObject(draft.zoneSnapshotJson).getJSONObject("authority")
+
+        assertEquals("protocollo.prefrm@pec.interno.it", authority.getJSONArray("emails").getString(0))
+        assertEquals("protocollo.prefrm@pec.interno.it", authority.getString("contact"))
+        assertEquals("Prefettura di Roma", authority.getString("name"))
+    }
+
+    @Test
     fun rejectsManualCheck() = runBlocking {
         val repository = seededRepository()
 
@@ -520,6 +536,34 @@ class LocalAuthorizationRepositoryTest {
                 reasonCodes = listOf("PROTECTED_AREA_ENTE_PARCO"),
                 resolverVersion = 1
             )
+        )
+
+    private fun enrWithAuthorityEmail(email: String, note: String): EnrInfo =
+        EnrInfo(
+            code = "LI P244",
+            name = "LI P244",
+            description = null,
+            limitText = null,
+            notes = null,
+            classification = null,
+            activationType = null,
+            operationMode = "OPEN",
+            operationCategory = "OPEN",
+            requiredLicense = "A1/A3",
+            authorizationRequired = true,
+            schedule = null,
+            authority = AuthorityInfo(
+                name = note,
+                code = null,
+                contact = email,
+                source = "enr_enriched",
+                emails = listOf(email),
+                note = note
+            ),
+            official = null,
+            validity = null,
+            explanation = null,
+            operationalMeaning = null
         )
 
     private fun completeRequestData(): AuthorizationRequestData =

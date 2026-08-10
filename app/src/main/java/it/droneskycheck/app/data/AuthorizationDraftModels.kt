@@ -200,6 +200,8 @@ data class AuthorizationRequestData(
     val areaDescription: String = "",
     val verticalLower: String = "0 m (GND)",
     val verticalUpper: String = "",
+    val operationStartDate: String = "",
+    val operationEndDate: String = "",
     val operationStartDateTime: String = "",
     val operationEndDateTime: String = "",
     val stampNumber: String = "",
@@ -229,6 +231,8 @@ data class AuthorizationRequestData(
             .put("areaDescription", areaDescription)
             .put("verticalLower", verticalLower)
             .put("verticalUpper", verticalUpper)
+            .put("operationStartDate", operationStartDate)
+            .put("operationEndDate", operationEndDate)
             .put("operationStartDateTime", operationStartDateTime)
             .put("operationEndDateTime", operationEndDateTime)
             .put("stampNumber", stampNumber)
@@ -261,6 +265,10 @@ data class AuthorizationRequestData(
                 areaDescription = json.optString("areaDescription"),
                 verticalLower = json.optString("verticalLower", "0 m (GND)"),
                 verticalUpper = json.optString("verticalUpper"),
+                operationStartDate = json.optString("operationStartDate")
+                    .ifBlank { json.optString("operationStartDateTime").take(10) },
+                operationEndDate = json.optString("operationEndDate")
+                    .ifBlank { json.optString("operationEndDateTime").take(10) },
                 operationStartDateTime = json.optString("operationStartDateTime"),
                 operationEndDateTime = json.optString("operationEndDateTime"),
                 stampNumber = json.optString("stampNumber"),

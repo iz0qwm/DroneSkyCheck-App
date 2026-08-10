@@ -5,8 +5,7 @@ import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.interactive.form.PDAcroForm
 import java.io.File
-import java.net.HttpURLConnection
-import java.net.URL
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -16,47 +15,32 @@ class AuthorizationPdfGenerator(
 ) {
     suspend fun generate(draft: AuthorizationDraft): File {
         PDFBoxResourceLoader.init(context)
-        val templateBytes = downloadTemplate(draft.procedureType)
-        val outputDir = File(context.cacheDir, "generated-pdfs").also { it.mkdirs() }
+        val templateBytes = context.assets.open(templateAssetPath(draft.procedureType)).use { it.readBytes() }
+        val outputDir = File(context.cacheDir, "authorizations").also { it.mkdirs() }
         val output = File(outputDir, "${draft.procedureType}_${System.currentTimeMillis()}.pdf")
 
-        PDDocument.load(templateBytes).use { document ->
-            val form = document.documentCatalog.acroForm ?: PDAcroForm(document).also {
-                document.documentCatalog.acroForm = it
-            }
-            val pdfData = AuthorizationPdfData.fromDraft(draft)
-            fillFields(form, fieldMapFor(draft.procedureType), pdfData, draft.procedureType)
-            document.save(output)
-        }
+        writeFilledPdf(templateBytes, draft, output)
 
         return output
     }
 
-    private fun downloadTemplate(procedureType: String): ByteArray {
-        val fileName = when (procedureType.uppercase(Locale.ROOT)) {
-            "ATM09" -> "mod-atm09-editabile.pdf"
-            else -> "mod-atm05-editabile.pdf"
-        }
-        val connection = (URL("$TemplateBaseUrl/$fileName").openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = TimeoutMillis
-            readTimeout = TimeoutMillis
-            setRequestProperty("Accept", "application/pdf")
-        }
-
-        return try {
-            if (connection.responseCode !in 200..299) {
-                throw IllegalStateException("Template PDF HTTP ${connection.responseCode}")
+    companion object {
+        fun templateAssetPath(procedureType: String): String =
+            when (procedureType.uppercase(Locale.ROOT)) {
+                "ATM09" -> "pdf/mod-atm09-editabile.pdf"
+                else -> "pdf/mod-atm05-editabile.pdf"
             }
-            connection.inputStream.use { it.readBytes() }
-        } finally {
-            connection.disconnect()
-        }
     }
+}
 
-    private companion object {
-        const val TemplateBaseUrl = "https://solarmonitor.kwos.org/pdf"
-        const val TimeoutMillis = 15_000
+fun writeFilledPdf(templateBytes: ByteArray, draft: AuthorizationDraft, output: File) {
+    PDDocument.load(templateBytes).use { document ->
+        val form = document.documentCatalog.acroForm ?: PDAcroForm(document).also {
+            document.documentCatalog.acroForm = it
+        }
+        val pdfData = AuthorizationPdfData.fromDraft(draft)
+        fillFields(form, fieldMapFor(draft.procedureType), pdfData, draft.procedureType)
+        document.save(output)
     }
 }
 
@@ -95,7 +79,7 @@ private data class AuthorizationPdfData(
                 .ifBlank { request.airportName }
 
             return AuthorizationPdfData(
-                to = authority?.optString("contact").orEmpty(),
+                to = authority.normalizedAuthorityEmails().joinToString(", "),
                 cc = "protocollo@pec.enac.gov.it; mobilita.innovativa@enac.gov.it; aeroporti.spazioaereo@enac.gov.it",
                 requester = request.requester.ifBlank { request.name },
                 phone = request.phone,
@@ -112,14 +96,14 @@ private data class AuthorizationPdfData(
                 airportDistanceNm = request.airportDistanceNm,
                 airportDistanceKm = request.airportDistanceKm,
                 dateTimeActivity = formatDateTimeRange(
-                    request.operationStartDateTime,
-                    request.operationEndDateTime
+                    request.operationStartDate.ifBlank { request.operationStartDateTime.take(10) },
+                    request.operationEndDate.ifBlank { request.operationEndDateTime.take(10) }
                 ),
                 note = request.notes.ifBlank {
                     "Il volo verra effettuato mantenendo sempre il contatto visivo con il drone (VLOS)."
                 },
                 stampNumber = request.stampNumber,
-                stampDate = request.stampDate.ifBlank { stampDateFrom(request.operationStartDateTime) },
+                stampDate = formatDateForPdf(request.stampDate),
                 points = operation.areaPoints
             )
         }
@@ -132,6 +116,18 @@ private fun fillFields(
     data: AuthorizationPdfData,
     procedureType: String
 ) {
+    authorizationPdfFieldValues(data, procedureType).forEach { (key, value) ->
+        form.setText(fieldMap, key, value)
+    }
+}
+
+fun authorizationPdfFieldValues(draft: AuthorizationDraft): Map<String, String> =
+    authorizationPdfFieldValues(AuthorizationPdfData.fromDraft(draft), draft.procedureType)
+
+private fun authorizationPdfFieldValues(
+    data: AuthorizationPdfData,
+    procedureType: String
+): Map<String, String> {
     val isAtm05 = procedureType.equals("ATM05", ignoreCase = true)
     val isAtm09 = procedureType.equals("ATM09", ignoreCase = true)
     val areaDescription = when {
@@ -144,26 +140,28 @@ private fun fillFields(
         else -> wrapPdfText(data.note)
     }
 
-    form.setText(fieldMap, "to", data.to)
-    form.setText(fieldMap, "cc", data.cc)
-    form.setText(fieldMap, "requester", data.requester)
-    form.setText(fieldMap, "phone", data.phone)
-    form.setText(fieldMap, "email", data.email)
-    form.setText(fieldMap, "activityType", data.activityType)
-    form.setText(fieldMap, "aircraftType", data.aircraftType)
-    form.setText(fieldMap, "takeoff", data.takeoff)
-    form.setText(fieldMap, "landing", data.landing)
-    form.setText(fieldMap, "areaDescription", areaDescription)
-    form.setText(fieldMap, "zoneName", data.zoneName)
-    form.setText(fieldMap, "verticalLower", data.verticalLower)
-    form.setText(fieldMap, "verticalUpper", data.verticalUpper)
-    form.setText(fieldMap, "airport_name", data.airportName)
-    form.setText(fieldMap, "airport_distance_NM", data.airportDistanceNm)
-    form.setText(fieldMap, "airport_distance_KM", data.airportDistanceKm)
-    form.setText(fieldMap, "dateTime_activity", data.dateTimeActivity)
-    form.setText(fieldMap, "note", note)
-    form.setText(fieldMap, "stampNumber", data.stampNumber)
-    form.setText(fieldMap, "stampDate", data.stampDate)
+    val values = linkedMapOf(
+        "to" to data.to,
+        "cc" to data.cc,
+        "requester" to data.requester,
+        "phone" to data.phone,
+        "email" to data.email,
+        "activityType" to data.activityType,
+        "aircraftType" to data.aircraftType,
+        "takeoff" to data.takeoff,
+        "landing" to data.landing,
+        "areaDescription" to areaDescription,
+        "zoneName" to data.zoneName,
+        "verticalLower" to data.verticalLower,
+        "verticalUpper" to data.verticalUpper,
+        "airport_name" to data.airportName,
+        "airport_distance_NM" to data.airportDistanceNm,
+        "airport_distance_KM" to data.airportDistanceKm,
+        "dateTime_activity" to data.dateTimeActivity,
+        "note" to note,
+        "stampNumber" to data.stampNumber,
+        "stampDate" to data.stampDate
+    )
 
     data.points.take(12).forEachIndexed { index, point ->
         val fieldIndex = if (index % 2 == 0) {
@@ -171,12 +169,11 @@ private fun fillFields(
         } else {
             index / 2 + 7
         }
-        form.setText(
-            fieldMap,
-            "limits_point${fieldIndex}_coord",
+        values["limits_point${fieldIndex}_coord"] =
             "${point.lat.toDms(isLat = true)} ${point.lon.toDms(isLat = false)}"
-        )
     }
+
+    return values
 }
 
 private fun PDAcroForm.setText(fieldMap: Map<String, String>, key: String, value: String) {
@@ -230,17 +227,18 @@ private val Atm09FieldMap = Atm05FieldMap
 
 private fun formatDateTimeRange(start: String, end: String): String {
     val parts = mutableListOf<String>()
-    if (start.isNotBlank()) parts += "Dal ${formatDateTimeForPdf(start)}"
-    if (end.isNotBlank()) parts += "Al ${formatDateTimeForPdf(end)}"
+    if (start.isNotBlank()) parts += "Dal ${formatDateForPdf(start)}"
+    if (end.isNotBlank()) parts += "Al ${formatDateForPdf(end)}"
     return parts.joinToString("\n")
 }
 
-private fun formatDateTimeForPdf(value: String): String =
-    parseLocalDateTime(value)?.format(DateTimeFormatter.ofPattern("dd/MM/yyyy 'ore' HH:mm", Locale.ITALY))
+private fun formatDateForPdf(value: String): String =
+    parseLocalDate(value)?.format(DateTimeFormatter.ofPattern("dd/MM/yyyy", Locale.ITALY))
+        ?: parseLocalDateTime(value)?.format(DateTimeFormatter.ofPattern("dd/MM/yyyy", Locale.ITALY))
         ?: value
 
-private fun stampDateFrom(value: String): String =
-    parseLocalDateTime(value)?.format(DateTimeFormatter.ofPattern("dd/MM/yyyy", Locale.ITALY)).orEmpty()
+private fun parseLocalDate(value: String): LocalDate? =
+    runCatching { LocalDate.parse(value) }.getOrNull()
 
 private fun parseLocalDateTime(value: String): LocalDateTime? =
     runCatching { LocalDateTime.parse(value) }.getOrNull()
@@ -274,3 +272,28 @@ private fun Double.toDms(isLat: Boolean): String {
     val sec = (minFloat - min) * 60.0
     return String.format(Locale.US, "%d deg %d'%.2f\" %s", deg, min, sec, dir)
 }
+
+private fun org.json.JSONArray?.toStringList(): List<String> {
+    if (this == null) return emptyList()
+    return (0 until length()).mapNotNull { index ->
+        optString(index).takeIf { it.isNotBlank() }
+    }
+}
+
+private fun org.json.JSONObject?.normalizedAuthorityEmails(): List<String> {
+    if (this == null) return emptyList()
+    return buildList {
+        optJSONArray("emails").toStringList().forEach { add(it) }
+        optString("contact").parseAuthorityJson()?.optJSONArray("emails").toStringList().forEach { add(it) }
+        optString("contact").takeIf { it.isNotBlank() && !it.trim().startsWith("{") }?.let { add(it) }
+    }
+        .flatMap { it.split(',', ';') }
+        .map { it.trim() }
+        .filter { it.isNotBlank() && !it.startsWith("{") }
+        .distinctBy { it.lowercase() }
+}
+
+private fun String.parseAuthorityJson(): org.json.JSONObject? =
+    trim()
+        .takeIf { it.startsWith("{") && it.endsWith("}") }
+        ?.let { runCatching { org.json.JSONObject(it) }.getOrNull() }
