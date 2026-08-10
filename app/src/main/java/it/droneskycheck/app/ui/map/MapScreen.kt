@@ -356,6 +356,11 @@ fun MapScreen(
                     isDraftSheetVisible = false
                     isPilotProfileSheetVisible = true
                 },
+                onSaveRequestData = { requestData ->
+                    authorizationRepository.updateRequestData(draft.id, requestData).also { updated ->
+                        if (updated != null) currentDraft = updated
+                    }
+                },
                 onCancelDraft = {
                     coroutineScope.launch {
                         authorizationRepository.deleteDraft(draft.id)

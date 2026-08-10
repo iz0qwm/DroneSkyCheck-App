@@ -488,6 +488,8 @@ private fun buildZoneSnapshot(
         .put("procedureVersion", procedure?.version ?: 1)
         .put("reasonCode", procedure?.reasonCode ?: zone.authorization?.reasonCodes?.firstOrNull().orEmpty())
         .put("reasonCodes", JSONArray(zone.authorization?.reasonCodes.orEmpty()))
+        .put("requiredOperationCategory", zone.requiredOperationCategory())
+        .put("operationCategory", zone.authorization?.operationCategory ?: zone.enr?.operationCategory ?: zone.sup?.authorization?.operationCategory)
         .put("applicability", zone.authorization?.applicability)
         .put("resolutionStatus", zone.authorization?.resolutionStatus)
         .put("limitMetersAgl", zone.limitMetersAgl)
@@ -501,6 +503,26 @@ private fun buildZoneSnapshot(
             .put("contact", zone.authority?.contact)
             .put("source", zone.authority?.source)
         )
+
+private fun ZoneInfo.requiredOperationCategory(): String {
+    val direct = authorization?.operationCategory
+        ?: enr?.operationCategory
+        ?: sup?.authorization?.operationCategory
+    direct?.uppercase(Locale.ROOT)?.let {
+        return when (it) {
+            "SPECIFIC_REQUIRED", "SPECIFIC" -> "SPECIFIC"
+            "OPEN_WITH_AUTH", "OPEN_AUTH", "OPEN" -> "OPEN"
+            else -> it
+        }
+    }
+
+    val reasonCodes = authorization?.reasonCodes.orEmpty().map { it.uppercase(Locale.ROOT) }
+    return when {
+        reasonCodes.any { it.contains("SPECIFIC_REQUIRED") } -> "SPECIFIC"
+        reasonCodes.any { it.contains("OPEN_AUTH") || it == "OPEN_AUTH" } -> "OPEN"
+        else -> ""
+    }
+}
 
 private fun buildPilotSnapshot(profile: LocalPilotProfile?): JSONObject =
     JSONObject()
