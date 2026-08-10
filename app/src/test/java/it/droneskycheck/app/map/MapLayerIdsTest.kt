@@ -43,9 +43,7 @@ class MapLayerIdsTest {
             "split/ATM09_PARKS.geojson",
             "split/ATM09_PRISON.geojson",
             "split/ATM09_RESTRICTED.geojson",
-            "split/NFZ_PARKS.geojson",
             "split/Other.geojson",
-            "split/P.geojson",
             "split/P_NOTAM.geojson",
             "split/P_NOTAM_DFLIGHT.geojson",
             "split/P_NOTAM_FAA.geojson",
@@ -119,12 +117,20 @@ class MapLayerIdsTest {
     }
 
     @Test
-    fun legacyProtectedAndNfzDatasetsAreNotControlledByParksToggle() {
+    fun noLegacyOtherNfzDatasetsAreLoaded() {
         val otherNfzPaths = MapLayerIds.STATIC_LAYERS
             .filter { it.category == DscLayerCategory.OtherNfz }
             .map { it.relativePath }
             .toSet()
 
-        assertEquals(setOf("split/NFZ_PARKS.geojson", "split/P.geojson"), otherNfzPaths)
+        assertEquals(emptySet<String>(), otherNfzPaths)
+    }
+
+    @Test
+    fun deprecatedLegacyDatasetsAreNeverLoaded() {
+        val loadedPaths = MapLayerIds.STATIC_LAYERS.map { it.relativePath }.toSet()
+
+        assertFalse("split/P.geojson" in loadedPaths)
+        assertFalse("split/NFZ_PARKS.geojson" in loadedPaths)
     }
 }

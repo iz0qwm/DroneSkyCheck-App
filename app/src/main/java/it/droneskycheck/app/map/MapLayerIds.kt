@@ -5,8 +5,6 @@ object MapLayerIds {
     const val KWOS_DATA_BASE_URL = "https://www.kwos.org/appoggio/droni/DroneSkyCheck"
 
     val STATIC_LAYERS = listOf(
-        DscMapLayer("nfz-parks", "split/NFZ_PARKS.geojson", DscLayerCategory.OtherNfz, "NFZ parks", minZoom = 5.0f),
-        DscMapLayer("p", "split/P.geojson", DscLayerCategory.OtherNfz, "Protected areas", minZoom = 5.0f),
         DscMapLayer("p-parks-enr", "split/P_PARKS_ENR_561.geojson", DscLayerCategory.Parks, "Parks ENR 5.6.1", minZoom = 5.0f, zeroLimitOpacity = 0.05f),
         DscMapLayer("p-parks", "split/P_PARKS.geojson", DscLayerCategory.Parks, "Parks NFZ", minZoom = 5.0f, zeroLimitOpacity = 0.08f),
         DscMapLayer("atm09-parks", "split/ATM09_PARKS.geojson", DscLayerCategory.Parks, "ATM09 parks", minZoom = 6.0f, zeroLimitOpacity = 0.05f),
