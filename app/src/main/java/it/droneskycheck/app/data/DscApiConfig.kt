@@ -2,6 +2,7 @@ package it.droneskycheck.app.data
 
 object DscApiConfig {
     const val ZoneCheckV3Url = "https://appzonecheckv3-32dg4v266a-uc.a.run.app/appZoneCheckV3"
+    const val LegalTimelineUrl = "https://applegaltimeline-32dg4v266a-uc.a.run.app/appLegalTimeline"
     const val WeatherForecastUrl = "https://appweatherforecast-32dg4v266a-uc.a.run.app/appWeatherForecast"
     const val ZonesUrl = "https://zones-32dg4v266a-uc.a.run.app/zones"
     const val ApiKey = "dsc_458K1Rv56n3Y43ZaBsEdrXQPx5BrF4fs"

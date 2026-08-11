@@ -183,7 +183,6 @@ private fun configureMap(
             onMapDataDegraded
         )
         applyLayerVisibility(it, visibleLayerCategories)
-        logFocusLayerState(mapView, map, it, visibleLayerCategories, map.cameraPosition.zoom)
 
         map.addOnMapClickListener { latLng ->
             val zones = map.queryRenderedFeatures(
@@ -212,10 +211,6 @@ private fun configureMap(
                 east = bounds.longitudeEast,
                 west = bounds.longitudeWest
             )
-            Log.d(
-                LOG_TAG,
-                "camera idle zoom=${cameraBounds.zoom}, bbox=${cameraBounds.bbox}"
-            )
             onCameraIdle(cameraBounds)
             map.getStyle { style ->
                 loadDynamicZonesSources(
@@ -225,11 +220,8 @@ private fun configureMap(
                     visibleLayerCategories,
                     onMapDataDegraded
                 )
-                logFocusLayerState(mapView, map, style, visibleLayerCategories, cameraBounds.zoom)
             }
         }
-
-        Log.d(LOG_TAG, "Loaded DSC static GeoJSON layers from ${MapLayerIds.KWOS_DATA_BASE_URL}")
     }
 }
 
@@ -396,7 +388,6 @@ private fun centerOnUserLocation(map: MapLibreMap, userLocation: UserLocation) {
 
 private fun addDscLayers(style: Style) {
     MapLayerIds.STATIC_LAYERS.forEach { layer ->
-        logLayerDefinition(layer)
         style.addSource(GeoJsonSource(layer.sourceId))
         style.addLayer(
                 FillLayer(
@@ -460,31 +451,18 @@ private fun loadDscGeoJsonSources(
 ) {
     MapLayerIds.STATIC_LAYERS.forEach { layer ->
         DSC_GEOJSON_EXECUTOR.execute {
-            val startedAt = System.currentTimeMillis()
             runCatching {
                 val cached = geoJsonRepository.get(layer.url, layer.key)
                 cached to FeatureCollection.fromJson(cached.body)
             }.onSuccess { (cached, featureCollection) ->
-                val elapsedMs = System.currentTimeMillis() - startedAt
                 if (cached.degraded) {
                     MAIN_HANDLER.post(onMapDataDegraded)
                 }
-                if (layer.category in DIAGNOSTIC_CATEGORIES) {
-                    Log.d(
-                        LOG_TAG,
-                        "[layer-debug] fetch key=${layer.key}, bytes=${cached.body.length}, " +
-                            "features=${featureCollection.features()?.size ?: 0}, " +
-                            "degraded=${cached.degraded}, elapsedMs=$elapsedMs"
-                    )
-                }
                 MAIN_HANDLER.post {
-                    val updated = style.setGeoJsonSourceIfAvailable(layer.sourceId, featureCollection)
-                    if (updated && layer.category in DIAGNOSTIC_CATEGORIES) {
-                        Log.d(LOG_TAG, "[layer-debug] source populated key=${layer.key}")
-                    }
+                    style.setGeoJsonSourceIfAvailable(layer.sourceId, featureCollection)
                 }
             }.onFailure { error ->
-                Log.w(LOG_TAG, "[layer-debug] fetch failed key=${layer.key}, url=${layer.url}", error)
+                Log.w(LOG_TAG, "GeoJSON fetch failed key=${layer.key}, url=${layer.url}", error)
             }
         }
     }
@@ -516,12 +494,6 @@ private fun loadDynamicZonesSources(
                     MAIN_HANDLER.post {
                         style.setGeoJsonSourceIfAvailable(layer.sourceId, featureCollection)
                     }
-                    Log.d(
-                        LOG_TAG,
-                        "[zones-api] loaded type=${layer.zonesType}, bbox=${cameraBounds.bbox}, " +
-                            "bytes=${cached.body.length}, features=${featureCollection.features()?.size ?: 0}, " +
-                            "degraded=${cached.degraded}"
-                    )
                 }.onFailure { error ->
                     Log.w(LOG_TAG, "[zones-api] fetch failed type=${layer.zonesType}", error)
                 }
@@ -555,17 +527,6 @@ private fun applyLayerVisibility(style: Style, visibleLayerCategories: Set<DscLa
     }
 }
 
-private fun logLayerDefinition(layer: DscMapLayer) {
-    if (layer.category !in DIAGNOSTIC_CATEGORIES) return
-
-    Log.d(
-        LOG_TAG,
-        "[layer-debug] define key=${layer.key}, category=${layer.category.name}, " +
-            "source=${layer.sourceId}, fill=${layer.fillLayerId}, line=${layer.lineLayerId}, " +
-            "minZoom=${layer.minZoom}, url=${layer.url}"
-    )
-}
-
 private fun Style.setGeoJsonSourceIfAvailable(sourceId: String, featureCollection: FeatureCollection): Boolean =
     runCatching {
         getSourceAs<GeoJsonSource>(sourceId)
@@ -573,65 +534,6 @@ private fun Style.setGeoJsonSourceIfAvailable(sourceId: String, featureCollectio
     }.onFailure { error ->
         Log.w(LOG_TAG, "Skipped GeoJSON update for source=$sourceId because the map style is not ready", error)
     }.getOrDefault(false)
-
-private fun logFocusLayerState(
-    mapView: MapView,
-    map: MapLibreMap,
-    style: Style,
-    visibleLayerCategories: Set<DscLayerCategory>,
-    zoom: Double
-) {
-    MapLayerIds.STATIC_LAYERS
-        .filter { it.category in DIAGNOSTIC_CATEGORIES }
-        .forEach { layer ->
-            val visibleCategory = layer.category in visibleLayerCategories
-            val meetsMinZoom = zoom >= layer.minZoom
-            val fillLayerPresent = style.getLayer(layer.fillLayerId) != null
-            val lineLayerPresent = style.getLayer(layer.lineLayerId) != null
-            val zebraLayerPresent = !layer.usesZebraPattern || style.getLayer(layer.zebraLayerId) != null
-            val sourceFeatureCount = countSourceFeatures(style, layer)
-            val renderedFeatureCount = countRenderedFeatures(mapView, map, layer)
-
-            Log.d(
-                LOG_TAG,
-                "[layer-debug] state key=${layer.key}, category=${layer.category.name}, " +
-                    "visibleCategory=$visibleCategory, zoom=${"%.2f".format(zoom)}, " +
-                    "minZoom=${layer.minZoom}, meetsMinZoom=$meetsMinZoom, " +
-                    "fillLayer=$fillLayerPresent, lineLayer=$lineLayerPresent, " +
-                    "zebraLayer=$zebraLayerPresent, sourceFeatures=$sourceFeatureCount, " +
-                    "renderedFeatures=$renderedFeatureCount"
-            )
-        }
-}
-
-private fun countSourceFeatures(style: Style, layer: DscMapLayer): Int? =
-    runCatching {
-        style.getSourceAs<GeoJsonSource>(layer.sourceId)
-            ?.querySourceFeatures(Expression.literal(true))
-            ?.size
-    }.onFailure { error ->
-        Log.w(LOG_TAG, "[layer-debug] source feature query failed for ${layer.key}", error)
-    }.getOrNull()
-
-private fun countRenderedFeatures(
-    mapView: MapView,
-    map: MapLibreMap,
-    layer: DscMapLayer
-): Int? {
-    val width = mapView.width
-    val height = mapView.height
-    if (width <= 0 || height <= 0) return null
-
-    return runCatching {
-        map.queryRenderedFeatures(
-            RectF(0f, 0f, width.toFloat(), height.toFloat()),
-            layer.fillLayerId,
-            layer.lineLayerId
-        ).size
-    }.onFailure { error ->
-        Log.w(LOG_TAG, "[layer-debug] rendered feature query failed for ${layer.key}", error)
-    }.getOrNull()
-}
 
 private fun <T : Layer> T.withZoomRange(layer: DscMapLayer): T {
     minZoom = layer.minZoom
@@ -825,9 +727,5 @@ private const val NOTAM_ZEBRA_STEP_PX = 8
 private const val NOTAM_ZEBRA_STROKE_PX = 2.5f
 private const val NOTAM_ZEBRA_OPACITY = 0.22f
 private const val LOG_TAG = "DroneSkyMap"
-private val DIAGNOSTIC_CATEGORIES = setOf(
-    DscLayerCategory.Airports,
-    DscLayerCategory.Aviosuperfici
-)
 private val MAIN_HANDLER = Handler(Looper.getMainLooper())
 private val DSC_GEOJSON_EXECUTOR = Executors.newFixedThreadPool(3)

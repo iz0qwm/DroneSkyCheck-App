@@ -13,6 +13,7 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -21,6 +22,7 @@ import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -35,6 +37,22 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Badge
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.FlightTakeoff
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -46,6 +64,8 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -69,8 +89,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -291,6 +313,11 @@ fun PilotProfileSheet(
     var notice by rememberSaveable { mutableStateOf("") }
     var pendingDelete by remember { mutableStateOf<DeleteTarget?>(null) }
     var photoCropUri by rememberSaveable { mutableStateOf<String?>(null) }
+    var personalExpanded by rememberSaveable { mutableStateOf(true) }
+    var certificatesExpanded by rememberSaveable { mutableStateOf(true) }
+    var operatorExpanded by rememberSaveable { mutableStateOf(true) }
+    var dronesExpanded by rememberSaveable { mutableStateOf(true) }
+    var draftsExpanded by rememberSaveable { mutableStateOf(false) }
 
     fun reload() {
         scope.launch {
@@ -480,6 +507,8 @@ fun PilotProfileSheet(
                     }
                     PersonalDataCard(
                         profile = snapshot.profile,
+                        expanded = personalExpanded,
+                        onExpandedChange = { personalExpanded = it },
                         onEdit = {
                             profileDraft = snapshot.profile ?: LocalPilotProfile()
                             showEditor(ProfileEditor.Pilot)
@@ -487,6 +516,8 @@ fun PilotProfileSheet(
                     )
                     CertificatesSection(
                         certificates = snapshot.certificates,
+                        expanded = certificatesExpanded,
+                        onExpandedChange = { certificatesExpanded = it },
                         onAdd = {
                             certificateDraft = LocalPilotCertificate(categories = CertificateOptions.first().value)
                             showEditor(ProfileEditor.Certificate)
@@ -505,6 +536,8 @@ fun PilotProfileSheet(
                     )
                     OperatorSection(
                         operator = snapshot.operator,
+                        expanded = operatorExpanded,
+                        onExpandedChange = { operatorExpanded = it },
                         onEdit = {
                             operatorDraft = snapshot.operator ?: LocalUasOperator(
                                 name = snapshot.profile?.displayName.orEmpty(),
@@ -516,6 +549,8 @@ fun PilotProfileSheet(
                     DroneFleetSection(
                         drones = snapshot.drones,
                         selectedDrone = snapshot.selectedDrone,
+                        expanded = dronesExpanded,
+                        onExpandedChange = { dronesExpanded = it },
                         onAdd = {
                             droneDraft = LocalDrone(classLabel = "C1", isSelected = snapshot.drones.isEmpty())
                             showEditor(ProfileEditor.Drone)
@@ -539,12 +574,23 @@ fun PilotProfileSheet(
                             }
                         }
                     )
-                    AuthorizationDraftsCard(drafts, onRefresh = { reload() })
-                    TextButton(
+                    AuthorizationDraftsCard(
+                        drafts = drafts,
+                        expanded = draftsExpanded,
+                        onExpandedChange = { draftsExpanded = it },
+                        onRefresh = { reload() }
+                    )
+                    OutlinedButton(
                         onClick = { reload() },
                         modifier = Modifier.align(Alignment.End)
                     ) {
-                        Text("Ricarica dati locali")
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Ricarica")
                     }
                 }
             }
@@ -595,10 +641,22 @@ private fun PilotHeader(
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton(onClick = onPickPhoto) {
+                    Icon(
+                        imageVector = Icons.Default.PhotoCamera,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
                     Text(if (profile?.profilePhoto.isNullOrBlank()) "Aggiungi foto" else "Cambia foto")
                 }
                 Button(onClick = onEdit) {
-                    Text("Modifica profilo")
+                    Icon(
+                        imageVector = Icons.Default.Edit,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Modifica")
                 }
             }
         }
@@ -665,9 +723,20 @@ private fun NoticeBanner(text: String) {
 @Composable
 private fun PersonalDataCard(
     profile: LocalPilotProfile?,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
     onEdit: () -> Unit
 ) {
-    ProfileCard(title = "Dati personali", actionLabel = if (profile == null) "Completa" else "Modifica", onAction = onEdit) {
+    ProfileCard(
+        title = "Dati personali",
+        subtitle = profile?.displayName?.takeIf { it.isNotBlank() } ?: "Nome, contatti e foto profilo",
+        icon = Icons.Default.Person,
+        actionIcon = Icons.Default.Edit,
+        actionLabel = if (profile == null) "Completa dati personali" else "Modifica dati personali",
+        expanded = expanded,
+        onExpandedChange = onExpandedChange,
+        onAction = onEdit
+    ) {
         if (profile == null || listOf(profile.firstName, profile.lastName, profile.city, profile.phone, profile.email).all { it.isBlank() }) {
             EmptyText("Completa i dati del pilota per averli pronti nelle richieste locali.")
         } else {
@@ -682,11 +751,27 @@ private fun PersonalDataCard(
 @Composable
 private fun CertificatesSection(
     certificates: List<LocalPilotCertificate>,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
     onAdd: () -> Unit,
     onEdit: (LocalPilotCertificate) -> Unit,
     onDelete: (LocalPilotCertificate) -> Unit
 ) {
-    ProfileCard(title = "Attestati", actionLabel = "+ Aggiungi attestato", onAction = onAdd) {
+    val subtitle = when (certificates.size) {
+        0 -> "Nessun attestato salvato"
+        1 -> "1 attestato salvato"
+        else -> "${certificates.size} attestati salvati"
+    }
+    ProfileCard(
+        title = "Attestati",
+        subtitle = subtitle,
+        icon = Icons.Default.Badge,
+        actionIcon = Icons.Default.Add,
+        actionLabel = "Aggiungi attestato",
+        expanded = expanded,
+        onExpandedChange = onExpandedChange,
+        onAction = onAdd
+    ) {
         if (certificates.isEmpty()) {
             EmptyText("Nessun attestato di competenza registrato.")
         } else {
@@ -710,8 +795,9 @@ private fun CertificateRow(
     onDelete: () -> Unit
 ) {
     Surface(
-        color = MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
         tonalElevation = 1.dp,
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -719,20 +805,48 @@ private fun CertificateRow(
             modifier = Modifier.padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text(
-                text = certificate.titleLabel(),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.Top
+            ) {
+                ProfileIconChip(
+                    icon = Icons.Default.Badge,
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = certificate.titleLabel(),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = certificate.issuingAuthority.ifBlank { "Ente non indicato" },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Row {
+                    IconButton(onClick = onEdit) {
+                        Icon(Icons.Default.Edit, contentDescription = "Modifica attestato")
+                    }
+                    IconButton(onClick = onDelete) {
+                        Icon(Icons.Default.Delete, contentDescription = "Elimina attestato")
+                    }
+                }
+            }
             SummaryValue("Numero", certificate.certificateNumber)
             SummaryValue("Conseguito", formatDateForDisplay(certificate.issueDate))
             SummaryValue("Scadenza", formatDateForDisplay(certificate.expiryDate))
-            SummaryValue("Ente", certificate.issuingAuthority)
             SummaryValue("Note", certificate.notes)
-            ActionRow {
-                TextButton(onClick = onEdit) { Text("Modifica") }
-                TextButton(onClick = onDelete) { Text("Elimina") }
-            }
         }
     }
 }
@@ -740,9 +854,20 @@ private fun CertificateRow(
 @Composable
 private fun OperatorSection(
     operator: LocalUasOperator?,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
     onEdit: () -> Unit
 ) {
-    ProfileCard(title = "Operatore UAS", actionLabel = if (operator == null) "Configura" else "Modifica", onAction = onEdit) {
+    ProfileCard(
+        title = "Operatore UAS",
+        subtitle = operator?.easaOperatorCode?.takeIf { it.isNotBlank() } ?: "Codice UAS, PEC e assicurazione",
+        icon = Icons.Default.Shield,
+        actionIcon = Icons.Default.Edit,
+        actionLabel = if (operator == null) "Configura operatore UAS" else "Modifica operatore UAS",
+        expanded = expanded,
+        onExpandedChange = onExpandedChange,
+        onAction = onEdit
+    ) {
         if (operator == null || listOf(operator.name, operator.easaOperatorCode, operator.pec, operator.insuranceCompany, operator.insurancePolicyNumber).all { it.isBlank() }) {
             SummaryValue("Tipo", formatOperatorType(operator?.type ?: LocalOperatorTypes.Individual))
             EmptyText("Aggiungi codice operatore, PEC e assicurazione quando disponibili.")
@@ -767,12 +892,28 @@ private fun OperatorSection(
 private fun DroneFleetSection(
     drones: List<LocalDrone>,
     selectedDrone: LocalDrone?,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
     onAdd: () -> Unit,
     onEdit: (LocalDrone) -> Unit,
     onDelete: (LocalDrone) -> Unit,
     onSelect: (LocalDrone) -> Unit
 ) {
-    ProfileCard(title = "I miei droni", actionLabel = "+ Aggiungi drone", onAction = onAdd) {
+    val subtitle = selectedDrone?.displayName?.let { "Predefinito: $it" } ?: when (drones.size) {
+        0 -> "Nessun drone salvato"
+        1 -> "1 drone salvato"
+        else -> "${drones.size} droni salvati"
+    }
+    ProfileCard(
+        title = "I miei droni",
+        subtitle = subtitle,
+        icon = Icons.Default.FlightTakeoff,
+        actionIcon = Icons.Default.Add,
+        actionLabel = "Aggiungi drone",
+        expanded = expanded,
+        onExpandedChange = onExpandedChange,
+        onAction = onAdd
+    ) {
         if (drones.isEmpty()) {
             EmptyText("Nessun drone registrato.")
         } else {
@@ -800,8 +941,17 @@ private fun DroneRow(
     onDelete: () -> Unit
 ) {
     Surface(
-        color = MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(14.dp),
+        color = if (isSelected) {
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.34f)
+        } else {
+            MaterialTheme.colorScheme.surfaceContainer
+        },
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(
+            1.dp,
+            if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
+            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+        ),
         tonalElevation = 1.dp,
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -811,10 +961,26 @@ private fun DroneRow(
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.Top
             ) {
-                Column(modifier = Modifier.weight(1f)) {
+                ProfileIconChip(
+                    icon = Icons.Default.FlightTakeoff,
+                    containerColor = if (isSelected) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.tertiaryContainer
+                    },
+                    contentColor = if (isSelected) {
+                        MaterialTheme.colorScheme.onPrimary
+                    } else {
+                        MaterialTheme.colorScheme.onTertiaryContainer
+                    }
+                )
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
                     Text(
                         text = drone.displayName,
                         style = MaterialTheme.typography.titleMedium,
@@ -829,24 +995,31 @@ private fun DroneRow(
                     )
                     SummaryValue("S/N", drone.serialNumber)
                 }
-                if (isSelected) {
-                    AssistChip(
-                        onClick = {},
-                        label = { Text("Predefinito") }
-                    )
+                Row {
+                    IconButton(onClick = onSelect, enabled = !isSelected) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = if (isSelected) "Drone predefinito" else "Imposta drone predefinito"
+                        )
+                    }
+                    IconButton(onClick = onEdit) {
+                        Icon(Icons.Default.Edit, contentDescription = "Modifica drone")
+                    }
+                    IconButton(onClick = onDelete) {
+                        Icon(Icons.Default.Delete, contentDescription = "Elimina drone")
+                    }
                 }
+            }
+            if (isSelected) {
+                AssistChip(
+                    onClick = {},
+                    label = { Text("Predefinito") }
+                )
             }
             SummaryValue("Dichiarazione EU-STS", formatEuStsSummary(drone))
             CompactSerialSummary("S/N Batterie", drone.batteries)
             CompactSerialSummary("S/N Radiocomandi", drone.remoteControllers)
             CompactSerialSummary("S/N Camere", drone.cameras)
-            ActionRow {
-                OutlinedButton(onClick = onSelect, enabled = !isSelected) {
-                    Text(if (isSelected) "Predefinito" else "Predef.")
-                }
-                TextButton(onClick = onEdit) { Text("Modifica") }
-                TextButton(onClick = onDelete) { Text("Elimina") }
-            }
         }
     }
 }
@@ -854,12 +1027,23 @@ private fun DroneRow(
 @Composable
 private fun AuthorizationDraftsCard(
     drafts: List<AuthorizationDraft>,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
     onRefresh: () -> Unit
 ) {
     val activeDraft = drafts.firstOrNull {
         it.status == AuthorizationDraftStatuses.Draft || it.status == AuthorizationDraftStatuses.Ready
     }
-    ProfileCard(title = "Richieste di autorizzazione", actionLabel = "Aggiorna", onAction = onRefresh) {
+    ProfileCard(
+        title = "Richieste",
+        subtitle = activeDraft?.zoneName?.takeIf { it.isNotBlank() } ?: "Autorizzazioni locali salvate",
+        icon = Icons.Default.Description,
+        actionIcon = Icons.Default.Refresh,
+        actionLabel = "Aggiorna richieste",
+        expanded = expanded,
+        onExpandedChange = onExpandedChange,
+        onAction = onRefresh
+    ) {
         if (activeDraft == null) {
             EmptyText("Nessuna richiesta locale attiva.")
         } else {
@@ -877,35 +1061,88 @@ private fun AuthorizationDraftsCard(
 @Composable
 private fun ProfileCard(
     title: String,
+    subtitle: String,
+    icon: ImageVector,
+    actionIcon: ImageVector,
     actionLabel: String,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
     onAction: () -> Unit,
-    content: @Composable () -> Unit
+    content: @Composable ColumnScope.() -> Unit
 ) {
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-        shape = RoundedCornerShape(18.dp)
+        shape = RoundedCornerShape(20.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-                TextButton(onClick = onAction) {
-                    Text(actionLabel)
+                ProfileIconChip(icon = icon)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                IconButton(onClick = onAction) {
+                    Icon(actionIcon, contentDescription = actionLabel)
+                }
+                IconButton(onClick = { onExpandedChange(!expanded) }) {
+                    Icon(
+                        imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = if (expanded) "Chiudi $title" else "Apri $title"
+                    )
                 }
             }
-            content()
+            if (expanded) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f))
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    content = content
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileIconChip(
+    icon: ImageVector,
+    containerColor: Color = MaterialTheme.colorScheme.primaryContainer,
+    contentColor: Color = MaterialTheme.colorScheme.onPrimaryContainer
+) {
+    Surface(
+        color = containerColor,
+        contentColor = contentColor,
+        shape = CircleShape,
+        modifier = Modifier.size(40.dp)
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(21.dp)
+            )
         }
     }
 }
@@ -1414,10 +1651,22 @@ private fun EditCard(
                 horizontalArrangement = Arrangement.End
             ) {
                 OutlinedButton(onClick = onCancel) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
                     Text("Annulla")
                 }
                 Spacer(modifier = Modifier.width(10.dp))
                 Button(onClick = onSave) {
+                    Icon(
+                        imageVector = Icons.Default.Save,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
                     Text("Salva")
                 }
             }

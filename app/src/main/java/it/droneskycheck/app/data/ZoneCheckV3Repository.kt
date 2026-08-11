@@ -6,11 +6,15 @@ import java.net.URLEncoder
 import org.json.JSONArray
 import org.json.JSONObject
 
+interface ZoneCheckV3Client {
+    fun check(lat: Double, lon: Double): ZoneCheckV3Response
+}
+
 class ZoneCheckV3Repository(
     private val endpointUrl: String = DscApiConfig.ZoneCheckV3Url,
     private val apiKey: String = DscApiConfig.ApiKey
-) {
-    fun check(lat: Double, lon: Double): ZoneCheckV3Response {
+) : ZoneCheckV3Client {
+    override fun check(lat: Double, lon: Double): ZoneCheckV3Response {
         val url = URL(
             "$endpointUrl?lat=${encode(lat)}&lon=${encode(lon)}"
         )

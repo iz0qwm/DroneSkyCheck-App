@@ -17,6 +17,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -44,12 +45,27 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Air
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.LocationOff
+import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Opacity
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Thermostat
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.AlertDialog
@@ -80,6 +96,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -89,6 +106,8 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import it.droneskycheck.app.data.AuthorizationInfo
@@ -103,7 +122,12 @@ import it.droneskycheck.app.data.CreateAuthorizationDraftResult
 import it.droneskycheck.app.data.EnrInfo
 import it.droneskycheck.app.data.Issue
 import it.droneskycheck.app.data.KeyValueInfo
+import it.droneskycheck.app.data.LegalTimelineRepository
+import it.droneskycheck.app.data.LegalTimelineResponse
+import it.droneskycheck.app.data.LegalTimelineSegment
+import it.droneskycheck.app.data.LegalTimelineState
 import it.droneskycheck.app.data.LocalAuthorizationRepository
+import it.droneskycheck.app.data.MapPreferencesRepository
 import it.droneskycheck.app.data.NotamInfo
 import it.droneskycheck.app.data.OfficialInfo
 import it.droneskycheck.app.data.SupInfo
@@ -112,6 +136,17 @@ import it.droneskycheck.app.data.UasGeographicalZoneInfo
 import it.droneskycheck.app.data.ValidityInfo
 import it.droneskycheck.app.data.ZoneCheckV3Response
 import it.droneskycheck.app.data.ZoneInfo
+import it.droneskycheck.app.data.ZoneCheckV3Repository
+import it.droneskycheck.app.data.formatLocalRange
+import it.droneskycheck.app.data.weather.WeatherAssessment
+import it.droneskycheck.app.data.weather.WeatherAssessmentEngine
+import it.droneskycheck.app.data.weather.WeatherCodeCategory
+import it.droneskycheck.app.data.weather.WeatherConfidenceLevel
+import it.droneskycheck.app.data.weather.WeatherForecast
+import it.droneskycheck.app.data.weather.WeatherForecastHour
+import it.droneskycheck.app.data.weather.WeatherForecastRepository
+import it.droneskycheck.app.data.weather.WeatherReasonCode
+import it.droneskycheck.app.data.weather.WeatherState
 import it.droneskycheck.app.map.DscLayerCategory
 import it.droneskycheck.app.map.DscZoneMapColors
 import it.droneskycheck.app.map.DroneSkyMapView
@@ -119,20 +154,28 @@ import it.droneskycheck.app.map.MapLayerIds
 import it.droneskycheck.app.ui.authorization.AuthorizationDraftSheet
 import it.droneskycheck.app.ui.profile.PilotProfileSheet
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 import org.json.JSONArray
 import org.json.JSONObject
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 @Composable
 fun MapScreen(
-    viewModel: MapViewModel = viewModel()
+    providedViewModel: MapViewModel? = null
 ) {
     val context = LocalContext.current
+    val viewModel: MapViewModel = providedViewModel ?: viewModel(
+        factory = remember(context) {
+            MapViewModelFactory(context.applicationContext)
+        }
+    )
     val coroutineScope = rememberCoroutineScope()
     val authorizationRepository = remember(context) { LocalAuthorizationRepository(context.applicationContext) }
     val activity = context.findActivity()
@@ -338,6 +381,7 @@ fun MapScreen(
                 userLocation = uiState.userLocation,
                 message = uiState.locationStatusMessage,
                 onRecenter = viewModel::onLocationRecenterRequested,
+                onAnalyzeHere = viewModel::onAnalyzeUserLocationRequested,
                 onDisable = viewModel::onLocationDisabled,
                 onDismiss = viewModel::onLocationControlDismissed
             )
@@ -416,8 +460,17 @@ fun MapScreen(
                 isLoading = uiState.isVerdictLoading,
                 verdict = uiState.verdict,
                 error = uiState.verdictError,
+                isLegalTimelineLoading = uiState.isLegalTimelineLoading,
+                legalTimeline = uiState.legalTimeline,
+                legalTimelineError = uiState.legalTimelineError,
+                isOperationalContextRequested = uiState.isOperationalContextRequested,
+                isWeatherAnalysisLoading = uiState.isWeatherAnalysisLoading,
+                weatherForecast = uiState.weatherForecast,
+                weatherAssessment = uiState.weatherAssessment,
+                weatherError = uiState.weatherError,
                 draftError = draftError,
                 onRetry = viewModel::onZoneCheckRetryRequested,
+                onOperationalContextRequested = viewModel::onOperationalContextRequested,
                 onAuthorizationRequest = { zoneInfo ->
                     draftError = null
                     coroutineScope.launch {
@@ -836,6 +889,7 @@ private fun LocationControlBottomSheet(
     userLocation: UserLocation?,
     message: String?,
     onRecenter: () -> Unit,
+    onAnalyzeHere: () -> Unit,
     onDisable: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -872,13 +926,38 @@ private fun LocationControlBottomSheet(
                 horizontalArrangement = Arrangement.End
             ) {
                 OutlinedButton(onClick = onDisable) {
+                    Icon(
+                        imageVector = Icons.Default.LocationOff,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.size(8.dp))
                     Text("Disattiva")
+                }
+                Spacer(modifier = Modifier.size(10.dp))
+                OutlinedButton(
+                    onClick = onAnalyzeHere,
+                    enabled = userLocation != null
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.size(8.dp))
+                    Text("Analizza qui")
                 }
                 Spacer(modifier = Modifier.size(10.dp))
                 Button(
                     onClick = onRecenter,
                     enabled = userLocation != null
                 ) {
+                    Icon(
+                        imageVector = Icons.Default.MyLocation,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.size(8.dp))
                     Text("Ricentra")
                 }
             }
@@ -1226,8 +1305,17 @@ private fun ZoneBottomSheet(
     isLoading: Boolean,
     verdict: ZoneCheckV3Response?,
     error: String?,
+    isLegalTimelineLoading: Boolean,
+    legalTimeline: LegalTimelineResponse?,
+    legalTimelineError: String?,
+    isOperationalContextRequested: Boolean,
+    isWeatherAnalysisLoading: Boolean,
+    weatherForecast: WeatherForecast?,
+    weatherAssessment: WeatherAssessment?,
+    weatherError: String?,
     draftError: String?,
     onRetry: () -> Unit,
+    onOperationalContextRequested: () -> Unit,
     onAuthorizationRequest: (ZoneInfo) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -1277,6 +1365,21 @@ private fun ZoneBottomSheet(
                         color = MaterialTheme.colorScheme.error
                     )
                 }
+                if (isOperationalContextRequested) {
+                    OperationalReportSection(
+                        isLoading = isLegalTimelineLoading,
+                        timeline = legalTimeline,
+                        timelineError = legalTimelineError,
+                        isWeatherLoading = isWeatherAnalysisLoading,
+                        forecast = weatherForecast,
+                        assessment = weatherAssessment,
+                        weatherError = weatherError
+                    )
+                } else {
+                    OperationalContextActionSection(
+                        onClick = onOperationalContextRequested
+                    )
+                }
                 HorizontalDivider()
                 Text(
                     text = "Zone presenti · ${response.zones.size}",
@@ -1315,6 +1418,12 @@ private fun ZoneBottomSheet(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Button(onClick = onRetry) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.size(8.dp))
                     Text("Riprova")
                 }
             }
@@ -1334,6 +1443,375 @@ private fun ZoneBottomSheet(
                 )
             }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OperationalReportSection(
+    isLoading: Boolean,
+    timeline: LegalTimelineResponse?,
+    timelineError: String?,
+    isWeatherLoading: Boolean,
+    forecast: WeatherForecast?,
+    assessment: WeatherAssessment?,
+    weatherError: String?
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainerLowest,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                ReportIconChip(
+                    icon = Icons.Default.Info,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Report operativo",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "Orari della zona e condizioni meteo sul punto controllato",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            LegalTimelineSection(
+                isLoading = isLoading,
+                timeline = timeline,
+                error = timelineError
+            )
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            WeatherAnalysisSection(
+                isLoading = isWeatherLoading,
+                forecast = forecast,
+                assessment = assessment,
+                error = weatherError
+            )
+        }
+    }
+}
+
+@Composable
+private fun LegalTimelineSection(
+    isLoading: Boolean,
+    timeline: LegalTimelineResponse?,
+    error: String?
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        ReportSectionTitle(
+            icon = Icons.Default.Schedule,
+            title = "Controllo temporale",
+            subtitle = "Finestre operative calcolate nelle prossime ore"
+        )
+        when {
+            isLoading -> Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                Text(
+                    text = "Calcolo gli orari della zona.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            error != null -> Text(
+                text = "Previsione temporale non disponibile",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            timeline != null -> LegalTimelineContent(timeline)
+            else -> Text(
+                text = "Previsione temporale non disponibile",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun ReportSectionTitle(
+    icon: ImageVector,
+    title: String,
+    subtitle: String
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        ReportIconChip(
+            icon = icon,
+            color = MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun ReportIconChip(
+    icon: ImageVector,
+    color: Color,
+    contentColor: Color
+) {
+    Surface(
+        modifier = Modifier.size(28.dp),
+        shape = CircleShape,
+        color = color,
+        contentColor = contentColor
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun LegalTimelineContent(timeline: LegalTimelineResponse) {
+    val now = remember(timeline) { Instant.now() }
+    val current = timeline.currentSegment(now)
+    val zoneId = remember { ZoneId.systemDefault() }
+
+    current?.let { segment ->
+        Surface(
+            shape = MaterialTheme.shapes.small,
+            color = segment.timelineColor(),
+            contentColor = Color.White
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = "ORA",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = segment.currentTimelineTitle(),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = segment.currentTimelineSubtitle(zoneId),
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        timeline.segments.take(MaxTimelineSegments).forEach { segment ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.Top
+            ) {
+                Text(
+                    text = segment.formatLocalRange(zoneId),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = if (segment == current) FontWeight.SemiBold else FontWeight.Normal,
+                    modifier = Modifier.widthIn(min = 88.dp)
+                )
+                Text(
+                    text = segment.timelineRowText(),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun WeatherAnalysisSection(
+    isLoading: Boolean,
+    forecast: WeatherForecast?,
+    assessment: WeatherAssessment?,
+    error: String?
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        ReportSectionTitle(
+            icon = Icons.Default.Cloud,
+            title = "Meteo",
+            subtitle = "Valori previsti sull'ora piu vicina"
+        )
+        when {
+            isLoading -> Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                Text(
+                    text = "Analisi meteo in corso.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            error != null -> Text(
+                text = error,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            assessment != null -> WeatherAnalysisContent(
+                assessment = assessment,
+                forecast = forecast
+            )
+            else -> Text(
+                text = "Meteo non disponibile",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun WeatherAnalysisContent(
+    assessment: WeatherAssessment,
+    forecast: WeatherForecast?
+) {
+    val hour = remember(forecast) { forecast?.closestHour(Instant.now()) }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = assessment.weatherSummary(),
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        hour?.let { forecastHour ->
+            Text(
+                text = forecastHour.weatherReferenceText(),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                forecastHour.weatherFacts(assessment).forEach { fact ->
+                    WeatherFactRow(fact)
+                }
+            }
+        }
+        Text(
+            text = assessment.weatherReasonText(),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = assessment.weatherConfidenceText(),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun WeatherFactRow(fact: WeatherFact) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Surface(
+            modifier = Modifier.size(26.dp),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            contentColor = MaterialTheme.colorScheme.primary
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = fact.icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(15.dp)
+                )
+            }
+        }
+        Text(
+            text = fact.label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.widthIn(min = 74.dp)
+        )
+        Text(
+            text = fact.value,
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+@Composable
+private fun OperationalContextActionSection(
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurface
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = "Meteo e prossime ore",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold
+            )
+            Button(
+                onClick = onClick,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Cloud,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.size(8.dp))
+                Text("Controlla meteo e prossime ore")
             }
         }
     }
@@ -2589,6 +3067,224 @@ private fun List<Issue>.joinIssues(): String =
         ).distinct().joinToString(" - ").ifBlank { "Elemento senza dettaglio" }
     }
 
+private fun LegalTimelineSegment.currentTimelineTitle(): String =
+    when (state) {
+        LegalTimelineState.AVAILABLE -> "Volo consentito"
+        LegalTimelineState.AVAILABLE_WITH_LIMIT -> "Volo consentito con limite"
+        LegalTimelineState.AUTH_REQUIRED -> "Autorizzazione richiesta"
+        LegalTimelineState.UNAVAILABLE -> "Non puoi volare"
+        LegalTimelineState.UNKNOWN -> "Stato da verificare"
+    }
+
+private fun LegalTimelineSegment.currentTimelineSubtitle(zoneId: ZoneId): String =
+    when (state) {
+        LegalTimelineState.AVAILABLE ->
+            "max ${maxAltitudeAgl ?: 120} m AGL ${untilLocalTimeText(from, to, zoneId)}"
+        LegalTimelineState.AVAILABLE_WITH_LIMIT ->
+            "max ${maxAltitudeAgl ?: "-"} m AGL ${untilLocalTimeText(from, to, zoneId)}"
+        LegalTimelineState.AUTH_REQUIRED ->
+            untilLocalTimeText(from, to, zoneId)
+        LegalTimelineState.UNAVAILABLE ->
+            "${maxAltitudeAgl ?: 0} m AGL ${untilLocalTimeText(from, to, zoneId)}"
+        LegalTimelineState.UNKNOWN ->
+            untilLocalTimeText(from, to, zoneId)
+    }
+
+private fun LegalTimelineSegment.timelineRowText(): String =
+    when (state) {
+        LegalTimelineState.AVAILABLE -> "Volo consentito - max ${maxAltitudeAgl ?: 120} m AGL"
+        LegalTimelineState.AVAILABLE_WITH_LIMIT -> "Volo consentito con limite - max ${maxAltitudeAgl ?: "-"} m AGL"
+        LegalTimelineState.AUTH_REQUIRED -> "Autorizzazione richiesta"
+        LegalTimelineState.UNAVAILABLE -> "Volo non consentito"
+        LegalTimelineState.UNKNOWN -> "Da verificare"
+    }
+
+@Composable
+private fun LegalTimelineSegment.timelineColor(): Color =
+    when (state) {
+        LegalTimelineState.AVAILABLE -> dscAltitudeColor(120)
+        LegalTimelineState.AVAILABLE_WITH_LIMIT -> dscAltitudeColor(maxAltitudeAgl ?: 60)
+        LegalTimelineState.AUTH_REQUIRED -> MaterialTheme.colorScheme.tertiary
+        LegalTimelineState.UNAVAILABLE -> dscAltitudeColor(0)
+        LegalTimelineState.UNKNOWN -> MaterialTheme.colorScheme.outline
+    }
+
+private fun untilLocalTimeText(from: Instant, to: Instant, zoneId: ZoneId): String {
+    val localFrom = from.atZone(zoneId)
+    val localTo = to.atZone(zoneId)
+    val toText = DateTimeFormatter.ofPattern("HH:mm").format(localTo)
+    val dayDelta = java.time.temporal.ChronoUnit.DAYS.between(localFrom.toLocalDate(), localTo.toLocalDate())
+    return when (dayDelta) {
+        0L -> "fino alle $toText"
+        1L -> "fino a domani alle $toText"
+        else -> "fino al ${DateTimeFormatter.ofPattern("dd/MM HH:mm").format(localTo)}"
+    }
+}
+
+private fun WeatherAssessment.weatherSummary(): String =
+    when (state) {
+        WeatherState.FAVORABLE -> "Condizioni meteo favorevoli"
+        WeatherState.CAUTION -> "Condizioni meteo da valutare"
+        WeatherState.UNFAVORABLE -> "Condizioni meteo sfavorevoli"
+        WeatherState.INSUFFICIENT_DATA -> "Dati meteo insufficienti"
+    } + " - indice $score/100"
+
+private data class WeatherFact(
+    val icon: ImageVector,
+    val label: String,
+    val value: String
+)
+
+private fun WeatherForecastHour.weatherReferenceText(): String {
+    val local = localDateTime?.let { DateTimeFormatter.ofPattern("HH:mm").format(it) }
+        ?: offsetDateTime?.let { DateTimeFormatter.ofPattern("HH:mm").format(it) }
+    return local?.let { "Valori dell'ora piu vicina: $it" } ?: "Valori dell'ora piu vicina"
+}
+
+private fun WeatherForecast.closestHour(now: Instant): WeatherForecastHour? =
+    hours.minByOrNull { hour ->
+        kotlin.math.abs(Duration.between(now, hour.instant).toMillis())
+    }
+
+private fun WeatherForecastHour.weatherFacts(assessment: WeatherAssessment): List<WeatherFact> {
+    val currentMetrics = metrics
+    return listOfNotNull(
+        currentMetrics.windSpeedKmh?.let { speed ->
+            WeatherFact(
+                icon = Icons.Default.Air,
+                label = "Vento",
+                value = buildString {
+                    append(speed.formatKmh())
+                    currentMetrics.windDirectionDegrees?.let { append(" da ${it.roundToIntText()} gradi") }
+                }
+            )
+        },
+        currentMetrics.windGustsKmh?.let {
+            WeatherFact(
+                icon = Icons.Default.Speed,
+                label = "Raffiche",
+                value = it.formatKmh()
+            )
+        },
+        WeatherFact(
+            icon = Icons.Default.Opacity,
+            label = "Pioggia",
+            value = buildString {
+                append(currentMetrics.precipitationMm?.formatMillimeters() ?: "dato non disponibile")
+                currentMetrics.precipitationProbabilityPct?.let { append(" - probabilita ${it.formatPercent()}") }
+            }
+        ).takeIf { currentMetrics.precipitationMm != null || currentMetrics.precipitationProbabilityPct != null },
+        currentMetrics.visibilityMeters?.let {
+            WeatherFact(
+                icon = Icons.Default.Visibility,
+                label = "Visibilita",
+                value = it.formatVisibility()
+            )
+        },
+        currentMetrics.temperatureC?.let {
+            WeatherFact(
+                icon = Icons.Default.Thermostat,
+                label = "Temperatura",
+                value = "${it.roundToIntText()} C"
+            )
+        },
+        currentMetrics.cloudCoverPct?.let {
+            WeatherFact(
+                icon = Icons.Default.Cloud,
+                label = "Nuvole",
+                value = it.formatPercent()
+            )
+        },
+        WeatherFact(
+            icon = Icons.Default.WbSunny,
+            label = "Scenario",
+            value = assessment.weatherCodeCategory.toUserText()
+        )
+    )
+}
+
+private fun WeatherAssessment.weatherReasonText(): String =
+    if (reasons.isEmpty()) {
+        "Nessun fattore meteo critico rilevato nell'ora piu vicina."
+    } else {
+        "Fattori rilevati: ${reasons.joinToString(", ") { it.toUserText() }}."
+    }
+
+private fun WeatherAssessment.weatherConfidenceText(): String =
+    "Affidabilita dati: ${confidence.level.toUserText()} (${confidence.score}/100)"
+
+private fun WeatherConfidenceLevel.toUserText(): String =
+    when (this) {
+        WeatherConfidenceLevel.HIGH -> "alta"
+        WeatherConfidenceLevel.MEDIUM -> "media"
+        WeatherConfidenceLevel.LOW -> "bassa"
+        WeatherConfidenceLevel.INSUFFICIENT -> "insufficiente"
+    }
+
+private fun WeatherCodeCategory.toUserText(): String =
+    when (this) {
+        WeatherCodeCategory.BENIGN -> "tempo stabile"
+        WeatherCodeCategory.FOG -> "nebbia"
+        WeatherCodeCategory.DRIZZLE -> "pioviggine"
+        WeatherCodeCategory.RAIN -> "pioggia"
+        WeatherCodeCategory.HEAVY_RAIN -> "pioggia intensa"
+        WeatherCodeCategory.SNOW -> "neve"
+        WeatherCodeCategory.SHOWERS -> "rovesci"
+        WeatherCodeCategory.THUNDERSTORM -> "temporale"
+        WeatherCodeCategory.THUNDERSTORM_WITH_HAIL -> "temporale con grandine"
+        WeatherCodeCategory.UNKNOWN -> "codice meteo non riconosciuto"
+    }
+
+private fun WeatherReasonCode.toUserText(): String =
+    when (this) {
+        WeatherReasonCode.STRONG_WIND -> "vento sostenuto"
+        WeatherReasonCode.HIGH_GUSTS -> "raffiche elevate"
+        WeatherReasonCode.HIGH_GUST_SPREAD -> "raffiche molto variabili"
+        WeatherReasonCode.HIGH_GUST_RATIO -> "raffiche proporzionalmente alte"
+        WeatherReasonCode.PRECIPITATION -> "precipitazione"
+        WeatherReasonCode.INTENSE_PRECIPITATION -> "precipitazione intensa"
+        WeatherReasonCode.HIGH_PRECIPITATION_PROBABILITY -> "probabilita di pioggia elevata"
+        WeatherReasonCode.FOG -> "nebbia"
+        WeatherReasonCode.DRIZZLE -> "pioviggine"
+        WeatherReasonCode.RAIN -> "pioggia"
+        WeatherReasonCode.HEAVY_RAIN -> "pioggia intensa"
+        WeatherReasonCode.SNOW -> "neve"
+        WeatherReasonCode.SHOWERS -> "rovesci"
+        WeatherReasonCode.THUNDERSTORM -> "temporale"
+        WeatherReasonCode.THUNDERSTORM_WITH_HAIL -> "temporale con grandine"
+        WeatherReasonCode.LOW_VISIBILITY -> "visibilita ridotta"
+        WeatherReasonCode.EXTREME_TEMPERATURE -> "temperatura estrema"
+        WeatherReasonCode.HIGH_CLOUD_COVER_INFO -> "copertura nuvolosa elevata"
+        WeatherReasonCode.UNKNOWN_WEATHER_CODE -> "codice meteo non riconosciuto"
+        WeatherReasonCode.WIND_MISSING -> "vento mancante"
+        WeatherReasonCode.GUSTS_MISSING -> "raffiche mancanti"
+        WeatherReasonCode.WEATHER_CODE_MISSING -> "codice meteo mancante"
+        WeatherReasonCode.PRECIPITATION_MISSING -> "precipitazione mancante"
+        WeatherReasonCode.PRECIPITATION_PROBABILITY_MISSING -> "probabilita precipitazione mancante"
+        WeatherReasonCode.VISIBILITY_MISSING -> "visibilita mancante"
+        WeatherReasonCode.TEMPERATURE_MISSING -> "temperatura mancante"
+        WeatherReasonCode.CLOUD_COVER_MISSING -> "copertura nuvolosa mancante"
+        WeatherReasonCode.INVALID_METRIC -> "dato fuori scala"
+    }
+
+private fun Double.formatKmh(): String =
+    "${roundToIntText()} km/h"
+
+private fun Double.formatPercent(): String =
+    "${roundToIntText()}%"
+
+private fun Double.formatMillimeters(): String =
+    if (this < 0.05) "0 mm" else "${formatOneDecimal()} mm"
+
+private fun Double.formatVisibility(): String =
+    if (this >= 10_000.0) "10+ km" else "${(this / 1000.0).formatOneDecimal()} km"
+
+private fun Double.roundToIntText(): String =
+    roundToInt().toString()
+
+private fun Double.formatOneDecimal(): String =
+    String.format(Locale.ROOT, "%.1f", this)
+
 private fun verdictBadgeTitle(response: ZoneCheckV3Response): String =
     when {
         response.verdict.maxAltitudeMetersAgl <= 0 ||
@@ -3159,6 +3855,24 @@ private fun Context.findActivity(): Activity? =
         else -> null
     }
 
+private class MapViewModelFactory(
+    private val context: Context
+) : ViewModelProvider.Factory {
+    @Suppress("UNCHECKED_CAST")
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        if (modelClass.isAssignableFrom(MapViewModel::class.java)) {
+            return MapViewModel(
+                zoneCheckRepository = ZoneCheckV3Repository(),
+                legalTimelineRepository = LegalTimelineRepository(),
+                weatherForecastRepository = WeatherForecastRepository(),
+                weatherAssessmentEngine = WeatherAssessmentEngine(),
+                mapPreferences = MapPreferencesRepository(context)
+            ) as T
+        }
+        throw IllegalArgumentException("Unknown ViewModel class ${modelClass.name}")
+    }
+}
+
 private val LocationPermissions = arrayOf(
     Manifest.permission.ACCESS_FINE_LOCATION,
     Manifest.permission.ACCESS_COARSE_LOCATION
@@ -3166,6 +3880,7 @@ private val LocationPermissions = arrayOf(
 
 private const val LOCATION_MIN_TIME_MS = 2_500L
 private const val LOCATION_MIN_DISTANCE_METERS = 5f
+private const val MaxTimelineSegments = 6
 private val ZoneSheetMaxHeight = 720.dp
 private val NotamUtcFormatter: DateTimeFormatter =
     DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm 'UTC'").withZone(ZoneOffset.UTC)
