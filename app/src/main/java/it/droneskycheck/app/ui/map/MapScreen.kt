@@ -161,6 +161,7 @@ import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
@@ -1380,6 +1381,10 @@ private fun ZoneBottomSheet(
                         onClick = onOperationalContextRequested
                     )
                 }
+                SelectedMapNotamFallbackSection(
+                    selectedZone = zone,
+                    response = response
+                )
                 HorizontalDivider()
                 Text(
                     text = "Zone presenti · ${response.zones.size}",
@@ -1458,6 +1463,8 @@ private fun OperationalReportSection(
     assessment: WeatherAssessment?,
     weatherError: String?
 ) {
+    var expanded by remember { mutableStateOf(true) }
+
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,
@@ -1469,40 +1476,70 @@ private fun OperationalReportSection(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                ReportIconChip(
-                    icon = Icons.Default.Info,
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                )
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Report operativo",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        text = "Orari della zona e condizioni meteo sul punto controllato",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-            LegalTimelineSection(
-                isLoading = isLoading,
-                timeline = timeline,
-                error = timelineError
+            OperationalReportHandle(
+                expanded = expanded,
+                onToggle = { expanded = !expanded }
             )
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            WeatherAnalysisSection(
-                isLoading = isWeatherLoading,
-                forecast = forecast,
-                assessment = assessment,
-                error = weatherError
+            if (expanded) {
+                LegalTimelineSection(
+                    isLoading = isLoading,
+                    timeline = timeline,
+                    error = timelineError
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                WeatherAnalysisSection(
+                    isLoading = isWeatherLoading,
+                    forecast = forecast,
+                    assessment = assessment,
+                    error = weatherError
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun OperationalReportHandle(
+    expanded: Boolean,
+    onToggle: () -> Unit
+) {
+    TextButton(
+        onClick = onToggle,
+        modifier = Modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(horizontal = 0.dp, vertical = 0.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            ReportIconChip(
+                icon = Icons.Default.Info,
+                color = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Report operativo",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = if (expanded) {
+                        "Orari della zona e condizioni meteo sul punto controllato"
+                    } else {
+                        "Mostra di nuovo meteo e controllo temporale"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Text(
+                text = if (expanded) "\u25B2" else "\u25BC",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Bold
             )
         }
     }
@@ -1610,10 +1647,11 @@ private fun LegalTimelineContent(timeline: LegalTimelineResponse) {
     val zoneId = remember { ZoneId.systemDefault() }
 
     current?.let { segment ->
+        val timelineColor = segment.timelineColor()
         Surface(
             shape = MaterialTheme.shapes.small,
-            color = segment.timelineColor(),
-            contentColor = Color.White
+            color = timelineColor,
+            contentColor = readableContentColor(timelineColor)
         ) {
             Column(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
@@ -1638,7 +1676,16 @@ private fun LegalTimelineContent(timeline: LegalTimelineResponse) {
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        timeline.segments.take(MaxTimelineSegments).forEach { segment ->
+        Text(
+            text = "Prossime ore",
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        timeline.segments
+            .filter { it.to.isAfter(now) }
+            .take(MaxTimelineSegments)
+            .forEach { segment ->
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -1656,6 +1703,99 @@ private fun LegalTimelineContent(timeline: LegalTimelineResponse) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f)
                 )
+            }
+        }
+    }
+    LegalDailySummarySection(
+        timeline = timeline,
+        now = now,
+        zoneId = zoneId
+    )
+}
+
+@Composable
+private fun LegalDailySummarySection(
+    timeline: LegalTimelineResponse,
+    now: Instant,
+    zoneId: ZoneId
+) {
+    val windowEnd = timeline.window.to ?: timeline.segments.maxOfOrNull { it.to } ?: return
+    val summaries = remember(timeline, now, zoneId) {
+        summarizeLegalTimelineByDay(
+            segments = timeline.segments,
+            zoneId = zoneId,
+            from = now,
+            to = windowEnd
+        )
+    }
+    if (summaries.isEmpty()) return
+
+    val ordinaryDays = summaries.filterNot { it.isWeekend }
+    val weekendDays = summaries.filter { it.isWeekend }
+
+    if (ordinaryDays.isNotEmpty()) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                text = "Prossimi giorni",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold
+            )
+            ordinaryDays.forEach { LegalDailySummaryRow(it) }
+        }
+    }
+    if (weekendDays.isNotEmpty()) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                text = "Weekend",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold
+            )
+            weekendDays.forEach { LegalDailySummaryRow(it, emphasized = true) }
+        }
+    }
+}
+
+@Composable
+private fun LegalDailySummaryRow(
+    summary: LegalDailySummary,
+    emphasized: Boolean = false
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.small,
+        color = if (emphasized) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = if (emphasized) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = summary.date.dayTitle(),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            if (summary.windows.size == 1 && summary.windows.first().coversDisplayedDay()) {
+                Text(
+                    text = summary.windows.first().legalWindowText(compact = true),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = LocalContentColor.current.copy(alpha = 0.82f)
+                )
+            } else {
+                summary.windows.take(MaxDailySummaryWindows).forEach { window ->
+                    Text(
+                        text = "${window.formatLocalTimeRange()} · ${window.legalWindowText()}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = LocalContentColor.current.copy(alpha = 0.82f)
+                    )
+                }
+                if (summary.windows.size > MaxDailySummaryWindows) {
+                    Text(
+                        text = "Altre finestre nel giorno",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = LocalContentColor.current.copy(alpha = 0.68f)
+                    )
+                }
             }
         }
     }
@@ -1712,7 +1852,8 @@ private fun WeatherAnalysisContent(
     assessment: WeatherAssessment,
     forecast: WeatherForecast?
 ) {
-    val hour = remember(forecast) { forecast?.closestHour(Instant.now()) }
+    val now = remember(forecast) { Instant.now() }
+    val hour = remember(forecast, now) { forecast?.closestHour(now) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
             text = assessment.weatherSummary(),
@@ -1742,6 +1883,115 @@ private fun WeatherAnalysisContent(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+        forecast?.let {
+            WeatherTrendSection(
+                forecast = it,
+                now = now
+            )
+        }
+    }
+}
+
+@Composable
+private fun WeatherTrendSection(
+    forecast: WeatherForecast,
+    now: Instant
+) {
+    val engine = remember { WeatherAssessmentEngine() }
+    val trends = remember(forecast, now, engine) {
+        summarizeWeatherTrendByDay(
+            forecast = forecast,
+            now = now,
+            engine = engine
+        )
+    }
+    if (trends.isEmpty()) return
+
+    val ordinaryDays = trends.filterNot { it.isWeekend }
+    val weekendDays = trends.filter { it.isWeekend }
+
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    Text(
+        text = "Tendenza prossimi giorni",
+        style = MaterialTheme.typography.labelLarge,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.onSurface
+    )
+    Text(
+        text = forecast.weatherHorizonText(),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    if (ordinaryDays.isNotEmpty()) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            ordinaryDays.forEach { WeatherTrendRow(it) }
+        }
+    }
+    if (weekendDays.isNotEmpty()) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                text = "Weekend",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold
+            )
+            weekendDays.forEach { WeatherTrendRow(it, emphasized = true) }
+        }
+    }
+}
+
+@Composable
+private fun WeatherTrendRow(
+    trend: WeatherDailyTrend,
+    emphasized: Boolean = false
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.small,
+        color = if (emphasized) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = if (emphasized) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = trend.date.dayTitle(),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = trend.conditionScoreText(),
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+            Text(
+                text = "Affidabilita previsione: ${trend.reliability.toUserText()}",
+                style = MaterialTheme.typography.bodySmall,
+                color = LocalContentColor.current.copy(alpha = 0.78f)
+            )
+            trend.bestWindow?.let { window ->
+                Text(
+                    text = "Finestra migliore: ${window.formatLocalTimeRange()}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = LocalContentColor.current.copy(alpha = 0.78f)
+                )
+            }
+            val note = trend.weatherTrendNote()
+            if (note != null) {
+                Text(
+                    text = note,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = LocalContentColor.current.copy(alpha = 0.78f)
+                )
+            }
+        }
     }
 }
 
@@ -2446,6 +2696,44 @@ private fun NotamSection(notams: List<NotamInfo>) {
 }
 
 @Composable
+private fun SelectedMapNotamFallbackSection(
+    selectedZone: DemoZone?,
+    response: ZoneCheckV3Response
+) {
+    if (selectedZone?.isNotamZone() != true) return
+    val officialText = selectedZone.description
+        .cleanOfficialSourceText()
+        ?.takeUnless { selectedText ->
+            response.zones.any { zone ->
+                zone.official?.sourceText.containsEquivalent(selectedText) ||
+                    zone.notams.any { notam ->
+                        notam.official?.sourceText.containsEquivalent(selectedText)
+                    }
+            }
+        }
+        ?: return
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            text = "NOTAM selezionato dalla mappa",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold
+        )
+        ZoneOptionalDetail("Nome", selectedZone.name.cleanZoneName())
+        ZoneOptionalDetail("Tipo", selectedZone.userCategoryTitle() ?: selectedZone.type)
+        ZoneOptionalDetail(
+            label = "Pianificazione temporale",
+            value = "Non disponibile nel dettaglio app per questo NOTAM. Verifica date e orari nel testo ufficiale."
+        )
+        OfficialTextBox(
+            text = officialText,
+            expanded = true,
+            monospace = true
+        )
+    }
+}
+
+@Composable
 private fun NotamSummaryCard(presentation: NotamPresentation) {
     val isManual = presentation.statusLabel.equals("Verifica necessaria", ignoreCase = true)
     val containerColor = if (isManual) {
@@ -2600,10 +2888,11 @@ private fun AuthorizationBadges(authorization: AuthorizationInfo) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         badges.forEach { (type, label) ->
+            val badgeColor = authorizationBadgeColor(type)
             CompactInfoPill(
                 text = label,
-                containerColor = authorizationBadgeColor(type),
-                contentColor = Color.White
+                containerColor = badgeColor,
+                contentColor = readableContentColor(badgeColor)
             )
         }
     }
@@ -2659,7 +2948,7 @@ private fun KeyValueList(items: List<KeyValueInfo>) {
 private fun VerdictBadge(response: ZoneCheckV3Response) {
     val altitude = response.verdict.maxAltitudeMetersAgl
     val badgeColor = dscAltitudeColor(altitude)
-    val contentColor = if (altitude == 45) Color.Black else Color.White
+    val contentColor = readableContentColor(badgeColor)
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -2687,10 +2976,11 @@ private fun VerdictBadge(response: ZoneCheckV3Response) {
 
 @Composable
 private fun ZoneLimitPill(limit: Int) {
+    val pillColor = dscAltitudeColor(limit)
     CompactInfoPill(
         text = "$limit m AGL",
-        containerColor = dscAltitudeColor(limit),
-        contentColor = if (limit == 45) Color.Black else Color.White
+        containerColor = pillColor,
+        contentColor = readableContentColor(pillColor)
     )
 }
 
@@ -3213,6 +3503,76 @@ private fun WeatherAssessment.weatherReasonText(): String =
 private fun WeatherAssessment.weatherConfidenceText(): String =
     "Affidabilita dati: ${confidence.level.toUserText()} (${confidence.score}/100)"
 
+private fun LocalDate.dayTitle(): String {
+    val text = DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.ITALY).format(this)
+    return text.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ITALY) else it.toString() }
+}
+
+private fun LegalDailyWindow.coversDisplayedDay(): Boolean =
+    start == LocalTime.MIDNIGHT && end == LocalTime.MIDNIGHT
+
+private fun LegalDailyWindow.formatLocalTimeRange(): String =
+    "${start.formatHourMinute()} - ${end.formatHourMinute()}"
+
+private fun LegalDailyWindow.legalWindowText(compact: Boolean = false): String =
+    when (state) {
+        LegalTimelineState.AVAILABLE ->
+            if (compact) "Disponibile tutto il giorno - max ${maxAltitudeAgl ?: 120} m" else "Volo consentito - max ${maxAltitudeAgl ?: 120} m"
+        LegalTimelineState.AVAILABLE_WITH_LIMIT ->
+            if (compact) "Disponibile con limite - max ${maxAltitudeAgl ?: "-"} m" else "Volo consentito con limite - max ${maxAltitudeAgl ?: "-"} m"
+        LegalTimelineState.AUTH_REQUIRED -> "Autorizzazione richiesta"
+        LegalTimelineState.UNAVAILABLE -> "Volo non consentito"
+        LegalTimelineState.UNKNOWN -> "Da verificare"
+    }
+
+private fun WeatherDailyTrend.conditionScoreText(): String =
+    listOfNotNull(
+        label.toUserText(),
+        score?.let { "$it/100" }
+    ).joinToString(" - ")
+
+private fun WeatherDailyTrend.weatherTrendNote(): String? =
+    when {
+        availableHours <= 0 -> "Nessuna previsione disponibile"
+        variable -> "Giornata variabile: non basarti solo sul punteggio"
+        notes.isNotEmpty() -> "Criticita: ${notes.joinToString(", ") { it.toUserText() }}"
+        else -> null
+    }
+
+private fun WeatherDailyTrendLabel.toUserText(): String =
+    when (this) {
+        WeatherDailyTrendLabel.FAVORABLE -> "Favorevole"
+        WeatherDailyTrendLabel.CAUTION -> "Da valutare"
+        WeatherDailyTrendLabel.UNFAVORABLE -> "Sfavorevole"
+        WeatherDailyTrendLabel.VARIABLE -> "Variabile"
+        WeatherDailyTrendLabel.INSUFFICIENT -> "Dati incompleti"
+    }
+
+private fun ForecastReliability.toUserText(): String =
+    when (this) {
+        ForecastReliability.HIGH -> "Alta"
+        ForecastReliability.MEDIUM -> "Media"
+        ForecastReliability.INDICATIVE -> "Indicativa"
+    }
+
+private fun WeatherTrendWindow.formatLocalTimeRange(): String =
+    "${start.formatHourMinute()} - ${end.formatHourMinute()}"
+
+private fun LocalTime.formatHourMinute(): String =
+    DateTimeFormatter.ofPattern("HH:mm").format(this)
+
+private fun WeatherForecast.weatherHorizonText(): String {
+    val zoneId = timezone ?: ZoneId.systemDefault()
+    val lastDate = hours.maxByOrNull { it.instant }?.let { hour ->
+        hour.localDateTime?.toLocalDate() ?: hour.instant.atZone(zoneId).toLocalDate()
+    }
+    val daysText = metadata.forecastDays?.let { "$it giorni provider" }
+    return listOfNotNull(
+        daysText,
+        lastDate?.let { "fino a ${it.dayTitle()}" }
+    ).joinToString(" - ").ifBlank { "Orizzonte disponibile dalla previsione ricevuta" }
+}
+
 private fun WeatherConfidenceLevel.toUserText(): String =
     when (this) {
         WeatherConfidenceLevel.HIGH -> "alta"
@@ -3354,6 +3714,11 @@ private fun ZoneInfo.userCategoryTitle(): String? =
 
 private fun DemoZone.userCategoryTitle(): String? =
     MapLayerIds.categoryForFeatureType(type)?.title
+
+private fun DemoZone.isNotamZone(): Boolean =
+    type.contains("NOTAM", ignoreCase = true) ||
+        name.contains("NOTAM", ignoreCase = true) ||
+        userCategoryTitle()?.contains("NOTAM", ignoreCase = true) == true
 
 private fun DemoZone.previewAltitudeText(): String {
     val isAirfield = type.contains("AVIOSUP", ignoreCase = true) ||
@@ -3881,6 +4246,7 @@ private val LocationPermissions = arrayOf(
 private const val LOCATION_MIN_TIME_MS = 2_500L
 private const val LOCATION_MIN_DISTANCE_METERS = 5f
 private const val MaxTimelineSegments = 6
+private const val MaxDailySummaryWindows = 4
 private val ZoneSheetMaxHeight = 720.dp
 private val NotamUtcFormatter: DateTimeFormatter =
     DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm 'UTC'").withZone(ZoneOffset.UTC)

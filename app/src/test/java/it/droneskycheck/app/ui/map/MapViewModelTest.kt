@@ -19,6 +19,7 @@ import it.droneskycheck.app.data.weather.WeatherForecast
 import it.droneskycheck.app.data.weather.WeatherForecastClient
 import java.time.Clock
 import java.time.Instant
+import java.time.ZoneId
 import java.time.ZoneOffset
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -80,6 +81,8 @@ class MapViewModelTest {
         assertTrue(viewModel.uiState.value.isWeatherAnalysisEnabled)
         assertEquals(1, legal.calls)
         assertEquals(MapPoint(41.9, 12.5), legal.lastPoint)
+        assertEquals(Instant.parse("2026-08-11T06:00:00Z"), legal.lastFrom)
+        assertEquals(Instant.parse("2026-08-16T22:00:00Z"), legal.lastTo)
         assertEquals(MapPoint(41.9, 12.5), weather.lastPoint)
         scope.cancel()
     }
@@ -164,6 +167,7 @@ class MapViewModelTest {
             weatherForecastRepository = weather,
             mapPreferences = preferences,
             clock = clock,
+            timelineZoneId = ZoneId.of("Europe/Rome"),
             externalScope = scope
         )
 
@@ -214,6 +218,10 @@ private class FakeLegalTimelineClient(
         private set
     var lastPoint: MapPoint? = null
         private set
+    var lastFrom: Instant? = null
+        private set
+    var lastTo: Instant? = null
+        private set
 
     override suspend fun getLegalTimeline(
         lat: Double,
@@ -223,6 +231,8 @@ private class FakeLegalTimelineClient(
     ): Result<LegalTimelineResponse> {
         calls += 1
         lastPoint = MapPoint(lat, lon)
+        lastFrom = from
+        lastTo = to
         delay(delaysByLatitude[lat] ?: 0L)
         failure?.let { return Result.failure(it) }
         return Result.success(timeline(lat, lon, from, to))

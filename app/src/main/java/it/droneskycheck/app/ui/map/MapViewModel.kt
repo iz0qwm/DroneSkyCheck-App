@@ -19,6 +19,7 @@ import it.droneskycheck.app.map.DscLayerCategory
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
+import java.time.ZoneId
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -36,6 +37,7 @@ class MapViewModel(
     private val weatherAssessmentEngine: WeatherAssessmentEngine = WeatherAssessmentEngine(),
     private val mapPreferences: MapPreferences = InMemoryMapPreferences(),
     private val clock: Clock = Clock.systemUTC(),
+    private val timelineZoneId: ZoneId = ZoneId.systemDefault(),
     externalScope: CoroutineScope? = null
 ) : ViewModel() {
     private val scope = externalScope ?: viewModelScope
@@ -67,10 +69,11 @@ class MapViewModel(
         val point = _uiState.value.selectedPoint ?: return
         val requestId = selectionRequestId
         val windowStart = clock.instant()
+        val windowEnd = legalTimelineEndIncludingWeekend(windowStart, timelineZoneId)
         val timelineRequest = LegalTimelineRequestKey(
             point = point,
             from = windowStart,
-            to = windowStart.plus(StandardTimelineWindow)
+            to = windowEnd
         )
         lastLegalTimelineRequest = timelineRequest
 
@@ -138,7 +141,7 @@ class MapViewModel(
         selectionRequestId += 1
         val requestId = selectionRequestId
         val windowStart = clock.instant()
-        val windowEnd = windowStart.plus(StandardTimelineWindow)
+        val windowEnd = legalTimelineEndIncludingWeekend(windowStart, timelineZoneId)
         val timelineRequest = LegalTimelineRequestKey(
             point = selection.point,
             from = windowStart,
@@ -476,7 +479,6 @@ class MapViewModel(
         const val LogTag = "DscMapViewModel"
         const val CachedMapDataMessage = "Dati mappa salvati"
         const val StatusMessageMillis = 8_000L
-        val StandardTimelineWindow: Duration = Duration.ofHours(24)
     }
 }
 
