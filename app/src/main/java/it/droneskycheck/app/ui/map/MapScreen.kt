@@ -3941,7 +3941,7 @@ private fun WeatherDailyTrend.conditionScoreText(): String =
 private fun WeatherDailyTrend.weatherTrendNote(): String? =
     when {
         availableHours <= 0 -> "Nessuna previsione disponibile"
-        variable -> "Giornata variabile: non basarti solo sul punteggio"
+        variable -> "Giornata variabile: il punteggio riassume la giornata, controlla le fasce orarie"
         notes.isNotEmpty() -> "Criticita: ${notes.joinToString(", ") { it.toUserText() }}"
         else -> null
     }
@@ -3994,7 +3994,7 @@ private fun DroneDailyOperationalTrend.droneTrendScoreText(): String =
 
 private fun DroneDailyOperationalTrend.droneTrendNote(): String? =
     when {
-        variable -> "Compatibilita variabile durante la giornata"
+        variable -> "Compatibilita variabile durante la giornata: valuta la finestra oraria, non solo il punteggio"
         warnings.isNotEmpty() -> warnings.first()
         factors.isNotEmpty() -> "Fattori: ${factors.joinToString(", ")}"
         level == DroneOperationalLevel.UNKNOWN -> "Profilo tecnico incompleto"
@@ -4017,18 +4017,21 @@ private fun DroneCatalogMatchResult?.catalogMatchUserText(): String? =
 
 private fun it.droneskycheck.app.data.drone.DroneWindResistance.profileWindText(): String? {
     val phaseRows = listOfNotNull(
-        takeoffLandingMs?.formatOneDecimal()?.let { "$it m/s decollo/atterraggio" },
-        cruiseMs?.formatOneDecimal()?.let { "$it m/s crociera" }
+        takeoffLandingMs?.windLimitText()?.let { "$it decollo/atterraggio" },
+        cruiseMs?.windLimitText()?.let { "$it crociera" }
     )
     return when {
         phaseRows.isNotEmpty() -> "Resistenza vento: ${phaseRows.joinToString(" - ")}"
-        generalMs != null -> "Resistenza vento: ${generalMs.formatOneDecimal()} m/s"
+        generalMs != null -> "Resistenza vento: ${generalMs.windLimitText()}"
         generalMinMs != null && generalMaxMs != null -> {
-            "Resistenza vento: ${generalMinMs.formatOneDecimal()}-${generalMaxMs.formatOneDecimal()} m/s"
+            "Resistenza vento: ${generalMinMs.windLimitText()} - ${generalMaxMs.windLimitText()}"
         }
         else -> null
     }
 }
+
+private fun Double.windLimitText(): String =
+    "${formatOneDecimal()} m/s (${msToKmh().formatOneDecimal()} km/h)"
 
 private fun DroneOperationalCapabilities.temperatureProfileText(): String? {
     val min = minOperatingTemperatureC?.formatOneDecimal()
@@ -4223,7 +4226,7 @@ private fun dscAltitudeColor(limit: Int): Color =
 
 private fun readableContentColor(background: Color): Color {
     val luminance = 0.299f * background.red + 0.587f * background.green + 0.114f * background.blue
-    return if (luminance > 0.58f) Color.Black else Color.White
+    return if (luminance > 0.5f) Color.Black else Color.White
 }
 
 private fun it.droneskycheck.app.map.Rgba.toComposeColor(): Color =

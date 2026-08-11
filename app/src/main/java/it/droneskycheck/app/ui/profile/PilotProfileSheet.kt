@@ -1387,7 +1387,7 @@ private fun DroneOperationalDataSection(
         catalogMatch.matchedDrone?.let { matched ->
             Text(
                 text = listOfNotNull(
-                    matched.maxWindResistanceMs?.formatOneDecimal()?.let { "Vento $it m/s" },
+                    matched.maxWindResistanceMs?.windLimitText()?.let { "Vento $it" },
                     matched.operatingTemperatureMinC?.formatOneDecimal()?.let { min ->
                         matched.operatingTemperatureMaxC?.formatOneDecimal()?.let { max -> "Temperatura $min / $max C" }
                     },
@@ -2094,6 +2094,9 @@ private fun it.droneskycheck.app.data.drone.DroneCatalogMatchResult.profileSumma
         ) { it.displayName } ?: "Profilo tecnico ambiguo."
         DroneCatalogMatchStatus.NOT_FOUND -> "Profilo tecnico non riconosciuto. Puoi inserire manualmente la resistenza al vento."
     }
+
+private fun Double.windLimitText(): String =
+    "${formatOneDecimal()} m/s (${msToKmh().formatOneDecimal()} km/h)"
 
 private fun cropBitmapToSquare(source: Bitmap, zoom: Float, offset: Offset, previewSize: IntSize): Bitmap {
     val viewport = min(
