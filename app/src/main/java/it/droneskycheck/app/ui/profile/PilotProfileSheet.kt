@@ -114,6 +114,11 @@ import it.droneskycheck.app.data.LocalPilotProfile
 import it.droneskycheck.app.data.LocalPilotRepository
 import it.droneskycheck.app.data.LocalPilotSnapshot
 import it.droneskycheck.app.data.LocalUasOperator
+import it.droneskycheck.app.data.drone.DroneCatalogMatchStatus
+import it.droneskycheck.app.data.drone.DroneTechnicalCatalogResolver
+import it.droneskycheck.app.data.drone.formatOneDecimal
+import it.droneskycheck.app.data.drone.msToKmh
+import it.droneskycheck.app.data.drone.parseDroneTechnicalCatalog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -255,6 +260,7 @@ private val DroneSaver = listSaver<LocalDrone, String>(
             it.model,
             it.classLabel,
             it.weight?.toString().orEmpty(),
+            it.manualMaxWindResistanceMs?.toString().orEmpty(),
             it.serialNumber,
             it.remoteControllers,
             it.batteries,
@@ -275,17 +281,18 @@ private val DroneSaver = listSaver<LocalDrone, String>(
             model = it.getOrNull(2).orEmpty(),
             classLabel = it.getOrNull(3).orEmpty(),
             weight = it.getOrNull(4)?.toDoubleOrNull(),
-            serialNumber = it.getOrNull(5).orEmpty(),
-            remoteControllers = it.getOrNull(6).orEmpty(),
-            batteries = it.getOrNull(7).orEmpty(),
-            cameras = it.getOrNull(8).orEmpty(),
-            remoteId = it.getOrNull(9).toBoolean(),
-            euSts01Registered = it.getOrNull(10).toBoolean(),
-            euSts01DeclarationDate = it.getOrNull(11).orEmpty(),
-            euSts02Registered = it.getOrNull(12).toBoolean(),
-            euSts02DeclarationDate = it.getOrNull(13).orEmpty(),
-            notes = it.getOrNull(14).orEmpty(),
-            isSelected = it.getOrNull(15).toBoolean()
+            manualMaxWindResistanceMs = it.getOrNull(5)?.toDoubleOrNull(),
+            serialNumber = it.getOrNull(6).orEmpty(),
+            remoteControllers = it.getOrNull(7).orEmpty(),
+            batteries = it.getOrNull(8).orEmpty(),
+            cameras = it.getOrNull(9).orEmpty(),
+            remoteId = it.getOrNull(10).toBoolean(),
+            euSts01Registered = it.getOrNull(11).toBoolean(),
+            euSts01DeclarationDate = it.getOrNull(12).orEmpty(),
+            euSts02Registered = it.getOrNull(13).toBoolean(),
+            euSts02DeclarationDate = it.getOrNull(14).orEmpty(),
+            notes = it.getOrNull(15).orEmpty(),
+            isSelected = it.getOrNull(16).toBoolean()
         )
     }
 )
@@ -1294,6 +1301,11 @@ private fun DroneForm(
     onCancel: () -> Unit,
     onSave: () -> Unit
 ) {
+    val context = LocalContext.current
+    val catalogResolver = remember(context) { context.loadDroneTechnicalCatalogResolver() }
+    val catalogMatch = remember(catalogResolver, draft.manufacturer, draft.model) {
+        catalogResolver.resolve(draft.manufacturer, draft.model)
+    }
     EditCard(title = if (draft.id.isBlank()) "Aggiungi drone" else "Modifica drone", errors = errors, onCancel = onCancel, onSave = onSave) {
         ProfileTextField("Produttore", draft.manufacturer, placeholder = "DJI") {
             onDraftChange(draft.copy(manufacturer = it))
@@ -1316,6 +1328,11 @@ private fun DroneForm(
         ) {
             onDraftChange(draft.copy(weight = it.replace(",", ".").toDoubleOrNull()))
         }
+        DroneOperationalDataSection(
+            draft = draft,
+            catalogMatch = catalogMatch,
+            onDraftChange = onDraftChange
+        )
         ProfileTextField("Aircraft S/N", draft.serialNumber, placeholder = "Numero di serie drone") {
             onDraftChange(draft.copy(serialNumber = it))
         }
@@ -1350,6 +1367,55 @@ private fun DroneForm(
         ProfileTextField("Note", draft.notes, singleLine = false, minLines = 3) {
             onDraftChange(draft.copy(notes = it))
         }
+    }
+}
+
+@Composable
+private fun DroneOperationalDataSection(
+    draft: LocalDrone,
+    catalogMatch: it.droneskycheck.app.data.drone.DroneCatalogMatchResult,
+    onDraftChange: (LocalDrone) -> Unit
+) {
+    HorizontalDivider()
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Dati operativi", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        Text(
+            text = catalogMatch.profileSummaryText(),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        catalogMatch.matchedDrone?.let { matched ->
+            Text(
+                text = listOfNotNull(
+                    matched.maxWindResistanceMs?.formatOneDecimal()?.let { "Vento $it m/s" },
+                    matched.operatingTemperatureMinC?.formatOneDecimal()?.let { min ->
+                        matched.operatingTemperatureMaxC?.formatOneDecimal()?.let { max -> "Temperatura $min / $max C" }
+                    },
+                    matched.ingressProtectionRating?.let { "Protezione $it" },
+                    matched.source.name
+                ).joinToString(" - "),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        ProfileTextField(
+            label = "Resistenza max vento dichiarata (m/s)",
+            value = draft.manualMaxWindResistanceMs?.toString().orEmpty(),
+            placeholder = catalogMatch.matchedDrone?.maxWindResistanceMs?.formatOneDecimal() ?: "10.7",
+            keyboardType = KeyboardType.Decimal
+        ) {
+            onDraftChange(draft.copy(manualMaxWindResistanceMs = it.replace(",", ".").toDoubleOrNull()))
+        }
+        Text(
+            text = if (draft.manualMaxWindResistanceMs != null) {
+                val kmh = draft.manualMaxWindResistanceMs.msToKmh().formatOneDecimal()
+                "Dato personalizzato: ${draft.manualMaxWindResistanceMs.formatOneDecimal()} m/s ($kmh km/h)."
+            } else {
+                "Campo opzionale. Se compilato, prevale sul catalogo."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
@@ -1959,6 +2025,9 @@ private fun validateDrone(drone: LocalDrone): List<String> {
     if (drone.euSts02Registered && classLabel != "C6") errors += "EU-STS-02 richiede un drone classe C6."
     if (drone.euSts01Registered && drone.euSts01DeclarationDate.isBlank()) errors += "Inserisci la data della dichiarazione EU-STS-01."
     if (drone.euSts02Registered && drone.euSts02DeclarationDate.isBlank()) errors += "Inserisci la data della dichiarazione EU-STS-02."
+    drone.manualMaxWindResistanceMs?.let {
+        if (it <= 0.0 || it > 30.0) errors += "La resistenza al vento deve essere un valore in m/s plausibile."
+    }
     return errors
 }
 
@@ -2001,6 +2070,30 @@ private fun decodeBitmap(context: Context, uri: Uri): Bitmap? =
             context.contentResolver.openInputStream(uri)?.use(BitmapFactory::decodeStream)
         }
     }.getOrNull()
+
+private fun Context.loadDroneTechnicalCatalogResolver(): DroneTechnicalCatalogResolver =
+    runCatching {
+        assets.open("drone_technical_catalog.json")
+            .bufferedReader(Charsets.UTF_8)
+            .use { it.readText() }
+            .let(::parseDroneTechnicalCatalog)
+            .let(::DroneTechnicalCatalogResolver)
+    }.getOrDefault(DroneTechnicalCatalogResolver.empty())
+
+private fun it.droneskycheck.app.data.drone.DroneCatalogMatchResult.profileSummaryText(): String =
+    when (status) {
+        DroneCatalogMatchStatus.EXACT -> matchedDrone?.displayName?.let { "Profilo tecnico: $it riconosciuto." }
+            ?: "Profilo tecnico riconosciuto."
+        DroneCatalogMatchStatus.ALIAS -> matchedDrone?.displayName?.let { "Profilo tecnico: $it riconosciuto da alias." }
+            ?: "Profilo tecnico riconosciuto da alias."
+        DroneCatalogMatchStatus.SUGGESTED -> suggestions.takeIf { it.isNotEmpty() }?.joinToString(
+            prefix = "Profilo tecnico non associato. Forse intendevi: "
+        ) { it.displayName } ?: "Profilo tecnico non associato."
+        DroneCatalogMatchStatus.AMBIGUOUS -> suggestions.takeIf { it.isNotEmpty() }?.joinToString(
+            prefix = "Profilo tecnico ambiguo. Possibili profili: "
+        ) { it.displayName } ?: "Profilo tecnico ambiguo."
+        DroneCatalogMatchStatus.NOT_FOUND -> "Profilo tecnico non riconosciuto. Puoi inserire manualmente la resistenza al vento."
+    }
 
 private fun cropBitmapToSquare(source: Bitmap, zoom: Float, offset: Offset, previewSize: IntSize): Bitmap {
     val viewport = min(

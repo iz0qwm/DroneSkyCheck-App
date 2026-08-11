@@ -17,7 +17,12 @@ import it.droneskycheck.app.data.Position
 import it.droneskycheck.app.data.Verdict
 import it.droneskycheck.app.data.ZoneCheckV3Client
 import it.droneskycheck.app.data.ZoneCheckV3Response
+import it.droneskycheck.app.data.drone.DroneCatalogMatchStatus
 import it.droneskycheck.app.data.drone.DroneOperationalLevel
+import it.droneskycheck.app.data.drone.DroneTechnicalCatalogClient
+import it.droneskycheck.app.data.drone.DroneTechnicalCatalogResolver
+import it.droneskycheck.app.data.drone.InMemoryDroneTechnicalCatalogClient
+import it.droneskycheck.app.data.drone.parseDroneTechnicalCatalog
 import it.droneskycheck.app.data.weather.WeatherForecast
 import it.droneskycheck.app.data.weather.WeatherForecastCacheDto
 import it.droneskycheck.app.data.weather.WeatherForecastClient
@@ -27,6 +32,7 @@ import it.droneskycheck.app.data.weather.WeatherForecastMetadata
 import it.droneskycheck.app.data.weather.WeatherForecastUnitsDto
 import it.droneskycheck.app.data.weather.WeatherMetrics
 import java.time.LocalDate
+import java.io.File
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneId
@@ -262,12 +268,57 @@ class MapViewModelTest {
         scope.cancel()
     }
 
+    @Test
+    fun catalogRecognizedDroneFeedsSpecificDroneAssessment() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val viewModel = viewModel(
+            scope = scope,
+            weather = FakeWeatherClient(forecast = weatherForecast(windKmh = 22.0, gustKmh = 38.0)),
+            preferences = InMemoryMapPreferences(),
+            pilotStore = FakePilotStore(listOf(LocalDrone(id = "air", manufacturer = "DJI", model = "AIR3S", isSelected = true))),
+            catalog = catalogClient()
+        )
+
+        waitUntil { viewModel.uiState.value.selectedDroneCatalogMatch != null }
+        viewModel.onMapTapped(selection(41.9, 12.5))
+        viewModel.onOperationalContextRequested()
+        waitUntil { viewModel.uiState.value.droneOperationalAssessment != null }
+
+        assertEquals(DroneCatalogMatchStatus.EXACT, viewModel.uiState.value.selectedDroneCatalogMatch?.status)
+        assertEquals(12.0, viewModel.uiState.value.droneOperationalAssessment?.capabilities?.maxWindResistanceMs ?: -1.0, 0.0)
+        assertTrue(viewModel.uiState.value.droneOperationalAssessment?.score != null)
+        scope.cancel()
+    }
+
+    @Test
+    fun ambiguousDroneInputDoesNotApplyCatalogCapabilityAutomatically() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val viewModel = viewModel(
+            scope = scope,
+            weather = FakeWeatherClient(forecast = weatherForecast()),
+            preferences = InMemoryMapPreferences(),
+            pilotStore = FakePilotStore(listOf(LocalDrone(id = "amb", manufacturer = "DJI", model = "3S", isSelected = true))),
+            catalog = catalogClient()
+        )
+
+        waitUntil { viewModel.uiState.value.selectedDroneCatalogMatch != null }
+        viewModel.onMapTapped(selection(41.9, 12.5))
+        viewModel.onOperationalContextRequested()
+        waitUntil { viewModel.uiState.value.droneOperationalAssessment != null }
+
+        assertNull(viewModel.uiState.value.selectedDroneCatalogMatch?.matchedDrone)
+        assertNull(viewModel.uiState.value.droneOperationalAssessment?.capabilities?.maxWindResistanceMs)
+        assertEquals(DroneOperationalLevel.UNKNOWN, viewModel.uiState.value.droneOperationalAssessment?.level)
+        scope.cancel()
+    }
+
     private fun viewModel(
         scope: CoroutineScope,
         legal: FakeLegalTimelineClient = FakeLegalTimelineClient(),
         weather: FakeWeatherClient = FakeWeatherClient(),
         preferences: InMemoryMapPreferences,
-        pilotStore: LocalPilotStore = FakePilotStore()
+        pilotStore: LocalPilotStore = FakePilotStore(),
+        catalog: DroneTechnicalCatalogClient = InMemoryDroneTechnicalCatalogClient()
     ): MapViewModel =
         MapViewModel(
             zoneCheckRepository = FakeZoneCheckClient(),
@@ -275,6 +326,7 @@ class MapViewModelTest {
             weatherForecastRepository = weather,
             mapPreferences = preferences,
             localPilotStore = pilotStore,
+            droneTechnicalCatalog = catalog,
             clock = clock,
             timelineZoneId = ZoneId.of("Europe/Rome"),
             externalScope = scope
@@ -294,6 +346,18 @@ class MapViewModelTest {
         }
     }
 }
+
+private fun catalogClient(): DroneTechnicalCatalogClient =
+    InMemoryDroneTechnicalCatalogClient(
+        DroneTechnicalCatalogResolver(
+            parseDroneTechnicalCatalog(
+                listOf(
+                    File("app/src/main/assets/drone_technical_catalog.json"),
+                    File("src/main/assets/drone_technical_catalog.json")
+                ).first { it.exists() }.readText(Charsets.UTF_8)
+            )
+        )
+    )
 
 private class FakeZoneCheckClient : ZoneCheckV3Client {
     override fun check(lat: Double, lon: Double): ZoneCheckV3Response =
@@ -412,7 +476,10 @@ private class FakePilotStore(
     }
 }
 
-private fun weatherForecast(): WeatherForecast {
+private fun weatherForecast(
+    windKmh: Double = 8.0,
+    gustKmh: Double = 12.0
+): WeatherForecast {
     val rome = ZoneId.of("Europe/Rome")
     val local = LocalDate.parse("2026-08-11").atTime(8, 0)
     return WeatherForecast(
@@ -428,8 +495,8 @@ private fun weatherForecast(): WeatherForecast {
                 localTimeText = local.toString(),
                 utcOffsetSeconds = 7200,
                 metrics = WeatherMetrics(
-                    windSpeedKmh = 8.0,
-                    windGustsKmh = 12.0,
+                    windSpeedKmh = windKmh,
+                    windGustsKmh = gustKmh,
                     precipitationMm = 0.0,
                     precipitationProbabilityPct = 5.0,
                     visibilityMeters = 12_000.0,

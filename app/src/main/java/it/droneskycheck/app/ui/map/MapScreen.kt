@@ -140,14 +140,17 @@ import it.droneskycheck.app.data.ZoneCheckV3Response
 import it.droneskycheck.app.data.ZoneInfo
 import it.droneskycheck.app.data.ZoneCheckV3Repository
 import it.droneskycheck.app.data.drone.DroneDataCompleteness
+import it.droneskycheck.app.data.drone.DroneCatalogMatchResult
+import it.droneskycheck.app.data.drone.DroneCatalogMatchStatus
 import it.droneskycheck.app.data.drone.DroneOperationalAssessment
 import it.droneskycheck.app.data.drone.DroneOperationalAssessmentEngine
+import it.droneskycheck.app.data.drone.DroneOperationalCapabilities
 import it.droneskycheck.app.data.drone.DroneOperationalFactor
 import it.droneskycheck.app.data.drone.DroneOperationalFactorType
 import it.droneskycheck.app.data.drone.DroneOperationalLevel
+import it.droneskycheck.app.data.drone.DroneTechnicalCatalogRepository
 import it.droneskycheck.app.data.drone.formatOneDecimal
 import it.droneskycheck.app.data.drone.msToKmh
-import it.droneskycheck.app.data.drone.toOperationalCapabilities
 import it.droneskycheck.app.data.formatLocalRange
 import it.droneskycheck.app.data.weather.WeatherAssessment
 import it.droneskycheck.app.data.weather.WeatherAssessmentEngine
@@ -482,6 +485,7 @@ fun MapScreen(
                 weatherError = uiState.weatherError,
                 droneFleet = uiState.droneFleet,
                 selectedDrone = uiState.selectedDrone,
+                selectedDroneCatalogMatch = uiState.selectedDroneCatalogMatch,
                 droneOperationalAssessment = uiState.droneOperationalAssessment,
                 draftError = draftError,
                 onRetry = viewModel::onZoneCheckRetryRequested,
@@ -1331,6 +1335,7 @@ private fun ZoneBottomSheet(
     weatherError: String?,
     droneFleet: List<LocalDrone>,
     selectedDrone: LocalDrone?,
+    selectedDroneCatalogMatch: DroneCatalogMatchResult?,
     droneOperationalAssessment: DroneOperationalAssessment?,
     draftError: String?,
     onRetry: () -> Unit,
@@ -1396,6 +1401,7 @@ private fun ZoneBottomSheet(
                         weatherError = weatherError,
                         droneFleet = droneFleet,
                         selectedDrone = selectedDrone,
+                        selectedDroneCatalogMatch = selectedDroneCatalogMatch,
                         droneOperationalAssessment = droneOperationalAssessment,
                         onDroneSelected = onDroneSelected
                     )
@@ -1487,6 +1493,7 @@ private fun OperationalReportSection(
     weatherError: String?,
     droneFleet: List<LocalDrone>,
     selectedDrone: LocalDrone?,
+    selectedDroneCatalogMatch: DroneCatalogMatchResult?,
     droneOperationalAssessment: DroneOperationalAssessment?,
     onDroneSelected: (String) -> Unit
 ) {
@@ -1526,6 +1533,7 @@ private fun OperationalReportSection(
                     forecast = forecast,
                     droneFleet = droneFleet,
                     selectedDrone = selectedDrone,
+                    catalogMatch = selectedDroneCatalogMatch,
                     assessment = droneOperationalAssessment,
                     onDroneSelected = onDroneSelected
                 )
@@ -2037,6 +2045,7 @@ private fun DroneOperationalSection(
     forecast: WeatherForecast?,
     droneFleet: List<LocalDrone>,
     selectedDrone: LocalDrone?,
+    catalogMatch: DroneCatalogMatchResult?,
     assessment: DroneOperationalAssessment?,
     onDroneSelected: (String) -> Unit
 ) {
@@ -2079,6 +2088,7 @@ private fun DroneOperationalSection(
                     )
                     assessment != null -> DroneAssessmentContent(
                         drone = selectedDrone,
+                        catalogMatch = catalogMatch,
                         assessment = assessment,
                         forecast = forecast
                     )
@@ -2150,6 +2160,7 @@ private fun DroneSelector(
 @Composable
 private fun DroneAssessmentContent(
     drone: LocalDrone,
+    catalogMatch: DroneCatalogMatchResult?,
     assessment: DroneOperationalAssessment,
     forecast: WeatherForecast
 ) {
@@ -2187,6 +2198,8 @@ private fun DroneAssessmentContent(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+        DroneCatalogMatchText(catalogMatch)
+        DroneTechnicalProfileSummary(assessment.capabilities)
         assessment.warnings.firstOrNull()?.let {
             Text(
                 text = it,
@@ -2207,9 +2220,50 @@ private fun DroneAssessmentContent(
         DroneOperationalTrendSection(
             forecast = forecast,
             now = now,
-            drone = drone
+            drone = drone,
+            assessment = assessment
         )
     }
+}
+
+@Composable
+private fun DroneTechnicalProfileSummary(capabilities: DroneOperationalCapabilities) {
+    val profileName = capabilities.technicalProfileName ?: return
+    val rows = listOfNotNull(
+        capabilities.windResistance.profileWindText(),
+        capabilities.temperatureProfileText(),
+        capabilities.ingressProtectionRating?.let { "Protezione $it" }
+    )
+    if (rows.isEmpty()) return
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            text = "Profilo tecnico",
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold
+        )
+        Text(
+            text = profileName,
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.Medium
+        )
+        rows.forEach { row ->
+            Text(
+                text = row,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun DroneCatalogMatchText(catalogMatch: DroneCatalogMatchResult?) {
+    val text = catalogMatch.catalogMatchUserText() ?: return
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
 }
 
 @Composable
@@ -2249,9 +2303,10 @@ private fun DroneFactorRow(factor: DroneOperationalFactor) {
 private fun DroneOperationalTrendSection(
     forecast: WeatherForecast,
     now: Instant,
-    drone: LocalDrone
+    drone: LocalDrone,
+    assessment: DroneOperationalAssessment
 ) {
-    val capabilities = remember(drone) { drone.toOperationalCapabilities() }
+    val capabilities = assessment.capabilities
     val droneEngine = remember { DroneOperationalAssessmentEngine() }
     val weatherEngine = remember { WeatherAssessmentEngine() }
     val trends = remember(forecast, now, capabilities, droneEngine, weatherEngine) {
@@ -3946,6 +4001,41 @@ private fun DroneDailyOperationalTrend.droneTrendNote(): String? =
         else -> null
     }
 
+private fun DroneCatalogMatchResult?.catalogMatchUserText(): String? =
+    when (this?.status) {
+        DroneCatalogMatchStatus.EXACT -> matchedDrone?.displayName?.let { "Profilo tecnico riconosciuto: $it." }
+        DroneCatalogMatchStatus.ALIAS -> matchedDrone?.displayName?.let { "Profilo tecnico riconosciuto da alias: $it." }
+        DroneCatalogMatchStatus.SUGGESTED -> suggestions.takeIf { it.isNotEmpty() }?.joinToString(
+            prefix = "Profilo tecnico non associato. Forse intendevi: "
+        ) { it.displayName }
+        DroneCatalogMatchStatus.AMBIGUOUS -> suggestions.takeIf { it.isNotEmpty() }?.joinToString(
+            prefix = "Profilo tecnico ambiguo. Possibili profili: "
+        ) { it.displayName }
+        DroneCatalogMatchStatus.NOT_FOUND,
+        null -> "Profilo tecnico non disponibile nel catalogo."
+    }
+
+private fun it.droneskycheck.app.data.drone.DroneWindResistance.profileWindText(): String? {
+    val phaseRows = listOfNotNull(
+        takeoffLandingMs?.formatOneDecimal()?.let { "$it m/s decollo/atterraggio" },
+        cruiseMs?.formatOneDecimal()?.let { "$it m/s crociera" }
+    )
+    return when {
+        phaseRows.isNotEmpty() -> "Resistenza vento: ${phaseRows.joinToString(" - ")}"
+        generalMs != null -> "Resistenza vento: ${generalMs.formatOneDecimal()} m/s"
+        generalMinMs != null && generalMaxMs != null -> {
+            "Resistenza vento: ${generalMinMs.formatOneDecimal()}-${generalMaxMs.formatOneDecimal()} m/s"
+        }
+        else -> null
+    }
+}
+
+private fun DroneOperationalCapabilities.temperatureProfileText(): String? {
+    val min = minOperatingTemperatureC?.formatOneDecimal()
+    val max = maxOperatingTemperatureC?.formatOneDecimal()
+    return if (min != null && max != null) "Temperatura: $min / $max C" else null
+}
+
 private fun DroneOperationalLevel.toUserText(): String =
     when (this) {
         DroneOperationalLevel.FAVORABLE -> "Favorevole"
@@ -3999,7 +4089,8 @@ private fun LocalDrone.droneDeclaredDataText(): String? =
     listOfNotNull(
         displayName.takeIf { it.isNotBlank() },
         classLabel.takeIf { it.isNotBlank() }?.let { "classe $it" },
-        weight?.roundToInt()?.let { "$it g" }
+        weight?.roundToInt()?.let { "$it g" },
+        manualMaxWindResistanceMs?.formatOneDecimal()?.let { "vento manuale $it m/s" }
     )
         .distinct()
         .joinToString(" - ")
@@ -4664,7 +4755,8 @@ private class MapViewModelFactory(
                 weatherForecastRepository = WeatherForecastRepository(),
                 weatherAssessmentEngine = WeatherAssessmentEngine(),
                 mapPreferences = MapPreferencesRepository(context),
-                localPilotStore = LocalPilotRepository(context)
+                localPilotStore = LocalPilotRepository(context),
+                droneTechnicalCatalog = DroneTechnicalCatalogRepository(context)
             ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class ${modelClass.name}")

@@ -14,7 +14,9 @@ import it.droneskycheck.app.data.MapPreferences
 import it.droneskycheck.app.data.ZoneCheckV3Client
 import it.droneskycheck.app.data.ZoneCheckV3Repository
 import it.droneskycheck.app.data.drone.DroneOperationalAssessmentEngine
-import it.droneskycheck.app.data.drone.toOperationalCapabilities
+import it.droneskycheck.app.data.drone.DroneTechnicalCatalogClient
+import it.droneskycheck.app.data.drone.DroneTechnicalCatalogResolver
+import it.droneskycheck.app.data.drone.InMemoryDroneTechnicalCatalogClient
 import it.droneskycheck.app.data.weather.WeatherAssessmentEngine
 import it.droneskycheck.app.data.weather.WeatherForecast
 import it.droneskycheck.app.data.weather.WeatherForecastClient
@@ -41,6 +43,7 @@ class MapViewModel(
     private val weatherForecastRepository: WeatherForecastClient = WeatherForecastRepository(),
     private val weatherAssessmentEngine: WeatherAssessmentEngine = WeatherAssessmentEngine(),
     private val droneAssessmentEngine: DroneOperationalAssessmentEngine = DroneOperationalAssessmentEngine(),
+    private val droneTechnicalCatalog: DroneTechnicalCatalogClient = InMemoryDroneTechnicalCatalogClient(),
     private val mapPreferences: MapPreferences = InMemoryMapPreferences(),
     private val localPilotStore: LocalPilotStore = InMemoryLocalPilotStore(),
     private val clock: Clock = Clock.systemUTC(),
@@ -56,9 +59,10 @@ class MapViewModel(
     private var legalTimelineJob: Job? = null
     private var weatherJob: Job? = null
     private var lastLegalTimelineRequest: LegalTimelineRequestKey? = null
+    private var catalogResolver: DroneTechnicalCatalogResolver = DroneTechnicalCatalogResolver.empty()
 
     init {
-        loadDroneFleet()
+        loadDroneCatalogAndFleet()
     }
 
     fun onMapTapped(selection: MapTapSelection) {
@@ -346,6 +350,7 @@ class MapViewModel(
             _uiState.value = _uiState.value.copy(
                 droneFleet = drones,
                 selectedDrone = selected,
+                selectedDroneCatalogMatch = selected?.let { catalogResolver.resolve(it.manufacturer, it.model) },
                 droneOperationalAssessment = currentDroneAssessment(
                     forecast = _uiState.value.weatherForecast,
                     weatherAssessment = _uiState.value.weatherAssessment,
@@ -355,15 +360,18 @@ class MapViewModel(
         }
     }
 
-    private fun loadDroneFleet() {
+    private fun loadDroneCatalogAndFleet() {
         scope.launch {
-            val drones = withContext(Dispatchers.IO) {
-                localPilotStore.getDrones()
+            val loaded = withContext(Dispatchers.IO) {
+                droneTechnicalCatalog.resolver() to localPilotStore.getDrones()
             }
+            catalogResolver = loaded.first
+            val drones = loaded.second
             val selected = drones.firstOrNull { it.isSelected } ?: drones.firstOrNull()
             _uiState.value = _uiState.value.copy(
                 droneFleet = drones,
                 selectedDrone = selected,
+                selectedDroneCatalogMatch = selected?.let { catalogResolver.resolve(it.manufacturer, it.model) },
                 droneOperationalAssessment = currentDroneAssessment(
                     forecast = _uiState.value.weatherForecast,
                     weatherAssessment = _uiState.value.weatherAssessment,
@@ -379,13 +387,14 @@ class MapViewModel(
         selectedDrone: LocalDrone? = _uiState.value.selectedDrone
     ) =
         if (_uiState.value.isWeatherAnalysisEnabled) {
+            val capabilities = selectedDrone?.let { catalogResolver.capabilitiesFor(it).first }
             forecast
                 ?.closestHour(clock.instant())
                 ?.toWeatherMetrics()
                 ?.let { metrics ->
                     droneAssessmentEngine.assess(
                         metrics = metrics,
-                        capabilities = selectedDrone?.toOperationalCapabilities(),
+                        capabilities = capabilities,
                         weatherAssessment = weatherAssessment
                     )
                 }

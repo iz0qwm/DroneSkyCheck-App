@@ -61,6 +61,7 @@ data class LocalDrone(
     val model: String = "",
     val classLabel: String = "",
     val weight: Double? = null,
+    val manualMaxWindResistanceMs: Double? = null,
     val serialNumber: String = "",
     val remoteControllers: String = "",
     val batteries: String = "",

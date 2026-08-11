@@ -65,6 +65,7 @@ data class LocalDroneEntity(
     val model: String = "",
     val classLabel: String = "",
     val weight: Double? = null,
+    val manualMaxWindResistanceMs: Double? = null,
     val serialNumber: String = "",
     val remoteControllers: String = "",
     val batteries: String = "",
@@ -161,7 +162,7 @@ interface LocalPilotDao {
         LocalDroneEntity::class,
         AuthorizationDraftEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = true
 )
 abstract class LocalPilotDatabase : RoomDatabase() {
@@ -179,6 +180,7 @@ abstract class LocalPilotDatabase : RoomDatabase() {
                     "dsc-local-pilot.db"
                 )
                     .addMigrations(Migration1To2)
+                    .addMigrations(Migration2To3)
                     .fallbackToDestructiveMigration(false)
                     .build()
                     .also { instance = it }
@@ -207,6 +209,12 @@ abstract class LocalPilotDatabase : RoomDatabase() {
                     )
                     """.trimIndent()
                 )
+            }
+        }
+
+        private val Migration2To3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `local_drones` ADD COLUMN `manualMaxWindResistanceMs` REAL")
             }
         }
     }

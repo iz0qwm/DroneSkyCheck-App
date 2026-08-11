@@ -17,15 +17,24 @@ data class DroneOperationalCapabilities(
     val massGrams: Double? = null,
     val euClass: String? = null,
     val maxWindResistanceMs: Double? = null,
+    val windResistance: DroneWindResistance = DroneWindResistance(),
+    val operationalWindResistanceBasis: OperationalWindResistanceBasis = OperationalWindResistanceBasis.UNKNOWN,
     val minOperatingTemperatureC: Double? = null,
     val maxOperatingTemperatureC: Double? = null,
+    val operatingTemperatureNotes: String? = null,
+    val ingressProtectionRating: String? = null,
     val weatherProtection: DroneWeatherProtection = DroneWeatherProtection.UNKNOWN,
     val precipitationCapability: DronePrecipitationCapability = DronePrecipitationCapability.UNKNOWN,
     val massSource: DroneCapabilitySource = DroneCapabilitySource.UNKNOWN,
     val euClassSource: DroneCapabilitySource = DroneCapabilitySource.UNKNOWN,
     val windResistanceSource: DroneCapabilitySource = DroneCapabilitySource.UNKNOWN,
     val temperatureRangeSource: DroneCapabilitySource = DroneCapabilitySource.UNKNOWN,
-    val precipitationSource: DroneCapabilitySource = DroneCapabilitySource.UNKNOWN
+    val precipitationSource: DroneCapabilitySource = DroneCapabilitySource.UNKNOWN,
+    val technicalProfileName: String? = null,
+    val technicalProfileSourceName: String? = null,
+    val technicalProfileSourceReference: String? = null,
+    val technicalProfileMatchStatus: String? = null,
+    val manualWindResistanceOverride: Boolean = false
 )
 
 enum class DroneCapabilitySource {
@@ -495,9 +504,16 @@ fun LocalDrone.toOperationalCapabilities(): DroneOperationalCapabilities =
         model = model,
         massGrams = weight,
         euClass = classLabel.takeIf { it.isNotBlank() },
+        maxWindResistanceMs = manualMaxWindResistanceMs,
+        windResistance = DroneWindResistance(generalMs = manualMaxWindResistanceMs),
+        operationalWindResistanceBasis = manualMaxWindResistanceMs?.let { OperationalWindResistanceBasis.GENERAL }
+            ?: OperationalWindResistanceBasis.UNKNOWN,
         massSource = weight?.let { DroneCapabilitySource.USER_PROVIDED } ?: DroneCapabilitySource.UNKNOWN,
         euClassSource = classLabel.takeIf { it.isNotBlank() }?.let { DroneCapabilitySource.USER_PROVIDED }
-            ?: DroneCapabilitySource.UNKNOWN
+            ?: DroneCapabilitySource.UNKNOWN,
+        windResistanceSource = manualMaxWindResistanceMs?.let { DroneCapabilitySource.USER_PROVIDED }
+            ?: DroneCapabilitySource.UNKNOWN,
+        manualWindResistanceOverride = manualMaxWindResistanceMs != null
     )
 
 fun DroneOperationalCapabilities.dataCompleteness(): DroneDataCompleteness {
