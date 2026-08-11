@@ -3,13 +3,18 @@ package it.droneskycheck.app.ui.map
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import it.droneskycheck.app.data.InMemoryMapPreferences
+import it.droneskycheck.app.data.InMemoryLocalPilotStore
 import it.droneskycheck.app.data.LegalTimelineClient
 import it.droneskycheck.app.data.LegalTimelineRepository
 import it.droneskycheck.app.data.DscLogger
 import it.droneskycheck.app.data.LegalTimelineRepositoryError
+import it.droneskycheck.app.data.LocalDrone
+import it.droneskycheck.app.data.LocalPilotStore
 import it.droneskycheck.app.data.MapPreferences
 import it.droneskycheck.app.data.ZoneCheckV3Client
 import it.droneskycheck.app.data.ZoneCheckV3Repository
+import it.droneskycheck.app.data.drone.DroneOperationalAssessmentEngine
+import it.droneskycheck.app.data.drone.toOperationalCapabilities
 import it.droneskycheck.app.data.weather.WeatherAssessmentEngine
 import it.droneskycheck.app.data.weather.WeatherForecast
 import it.droneskycheck.app.data.weather.WeatherForecastClient
@@ -35,7 +40,9 @@ class MapViewModel(
     private val legalTimelineRepository: LegalTimelineClient = LegalTimelineRepository(),
     private val weatherForecastRepository: WeatherForecastClient = WeatherForecastRepository(),
     private val weatherAssessmentEngine: WeatherAssessmentEngine = WeatherAssessmentEngine(),
+    private val droneAssessmentEngine: DroneOperationalAssessmentEngine = DroneOperationalAssessmentEngine(),
     private val mapPreferences: MapPreferences = InMemoryMapPreferences(),
+    private val localPilotStore: LocalPilotStore = InMemoryLocalPilotStore(),
     private val clock: Clock = Clock.systemUTC(),
     private val timelineZoneId: ZoneId = ZoneId.systemDefault(),
     externalScope: CoroutineScope? = null
@@ -49,6 +56,10 @@ class MapViewModel(
     private var legalTimelineJob: Job? = null
     private var weatherJob: Job? = null
     private var lastLegalTimelineRequest: LegalTimelineRequestKey? = null
+
+    init {
+        loadDroneFleet()
+    }
 
     fun onMapTapped(selection: MapTapSelection) {
         requestAnalysis(selection)
@@ -88,6 +99,7 @@ class MapViewModel(
             isWeatherAnalysisLoading = true,
             weatherForecast = null,
             weatherAssessment = null,
+            droneOperationalAssessment = null,
             weatherError = null
         )
         DscLogger.debug(
@@ -116,6 +128,7 @@ class MapViewModel(
                 isWeatherAnalysisLoading = false,
                 weatherForecast = null,
                 weatherAssessment = null,
+                droneOperationalAssessment = null,
                 weatherError = null
             )
             return
@@ -169,6 +182,7 @@ class MapViewModel(
             isWeatherAnalysisLoading = false,
             weatherForecast = null,
             weatherAssessment = null,
+            droneOperationalAssessment = null,
             weatherError = null
         )
 
@@ -266,6 +280,7 @@ class MapViewModel(
             isWeatherAnalysisLoading = true,
             weatherForecast = null,
             weatherAssessment = null,
+            droneOperationalAssessment = null,
             weatherError = null
         )
 
@@ -298,6 +313,7 @@ class MapViewModel(
                     isWeatherAnalysisLoading = false,
                     weatherForecast = forecast,
                     weatherAssessment = assessment,
+                    droneOperationalAssessment = currentDroneAssessment(forecast, assessment),
                     weatherError = null
                 )
             }.onFailure { error ->
@@ -311,11 +327,71 @@ class MapViewModel(
                     isWeatherAnalysisLoading = false,
                     weatherForecast = null,
                     weatherAssessment = null,
+                    droneOperationalAssessment = null,
                     weatherError = "Meteo non disponibile"
                 )
             }
         }
     }
+
+    fun onDroneSelected(droneId: String) {
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                localPilotStore.selectDrone(droneId)
+            }
+            val drones = withContext(Dispatchers.IO) {
+                localPilotStore.getDrones()
+            }
+            val selected = drones.firstOrNull { it.isSelected } ?: drones.firstOrNull { it.id == droneId }
+            _uiState.value = _uiState.value.copy(
+                droneFleet = drones,
+                selectedDrone = selected,
+                droneOperationalAssessment = currentDroneAssessment(
+                    forecast = _uiState.value.weatherForecast,
+                    weatherAssessment = _uiState.value.weatherAssessment,
+                    selectedDrone = selected
+                )
+            )
+        }
+    }
+
+    private fun loadDroneFleet() {
+        scope.launch {
+            val drones = withContext(Dispatchers.IO) {
+                localPilotStore.getDrones()
+            }
+            val selected = drones.firstOrNull { it.isSelected } ?: drones.firstOrNull()
+            _uiState.value = _uiState.value.copy(
+                droneFleet = drones,
+                selectedDrone = selected,
+                droneOperationalAssessment = currentDroneAssessment(
+                    forecast = _uiState.value.weatherForecast,
+                    weatherAssessment = _uiState.value.weatherAssessment,
+                    selectedDrone = selected
+                )
+            )
+        }
+    }
+
+    private fun currentDroneAssessment(
+        forecast: WeatherForecast?,
+        weatherAssessment: it.droneskycheck.app.data.weather.WeatherAssessment?,
+        selectedDrone: LocalDrone? = _uiState.value.selectedDrone
+    ) =
+        if (_uiState.value.isWeatherAnalysisEnabled) {
+            forecast
+                ?.closestHour(clock.instant())
+                ?.toWeatherMetrics()
+                ?.let { metrics ->
+                    droneAssessmentEngine.assess(
+                        metrics = metrics,
+                        capabilities = selectedDrone?.toOperationalCapabilities(),
+                        weatherAssessment = weatherAssessment
+                    )
+                }
+        } else {
+            null
+        }
 
     private fun isCurrentSelection(requestId: Long, point: MapPoint): Boolean =
         selectionRequestId == requestId && _uiState.value.selectedPoint == point
@@ -350,6 +426,7 @@ class MapViewModel(
             isWeatherAnalysisLoading = false,
             weatherForecast = null,
             weatherAssessment = null,
+            droneOperationalAssessment = null,
             weatherError = null
         )
     }

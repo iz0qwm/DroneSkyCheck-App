@@ -2,6 +2,11 @@ package it.droneskycheck.app.ui.map
 
 import it.droneskycheck.app.data.LegalTimelineSegment
 import it.droneskycheck.app.data.LegalTimelineState
+import it.droneskycheck.app.data.drone.DroneDataCompleteness
+import it.droneskycheck.app.data.drone.DroneOperationalAssessment
+import it.droneskycheck.app.data.drone.DroneOperationalAssessmentEngine
+import it.droneskycheck.app.data.drone.DroneOperationalCapabilities
+import it.droneskycheck.app.data.drone.DroneOperationalLevel
 import it.droneskycheck.app.data.weather.WeatherAssessment
 import it.droneskycheck.app.data.weather.WeatherAssessmentEngine
 import it.droneskycheck.app.data.weather.WeatherForecast
@@ -124,6 +129,19 @@ data class WeatherTrendWindow(
     val end: LocalTime
 )
 
+data class DroneDailyOperationalTrend(
+    val date: LocalDate,
+    val isWeekend: Boolean,
+    val level: DroneOperationalLevel,
+    val score: Int?,
+    val dataCompleteness: DroneDataCompleteness,
+    val bestWindow: WeatherTrendWindow?,
+    val factors: List<String>,
+    val warnings: List<String>,
+    val variable: Boolean,
+    val availableHours: Int
+)
+
 enum class WeatherDailyTrendLabel {
     FAVORABLE,
     CAUTION,
@@ -192,6 +210,73 @@ fun summarizeWeatherTrendByDay(
         }
 }
 
+fun summarizeDroneOperationalTrendByDay(
+    forecast: WeatherForecast?,
+    capabilities: DroneOperationalCapabilities?,
+    now: Instant,
+    droneEngine: DroneOperationalAssessmentEngine = DroneOperationalAssessmentEngine(),
+    weatherEngine: WeatherAssessmentEngine = WeatherAssessmentEngine()
+): List<DroneDailyOperationalTrend> {
+    if (forecast == null || capabilities == null) return emptyList()
+    val zoneId = forecast.timezone ?: ZoneId.systemDefault()
+
+    return forecast.hours
+        .filter { !it.instant.isBefore(now) }
+        .groupBy { it.localDate(zoneId) }
+        .toSortedMap()
+        .mapNotNull { (date, hours) ->
+            val assessed = hours.mapNotNull { hour ->
+                val metrics = hour.toWeatherMetrics()
+                val weather = weatherEngine.assess(metrics)
+                droneEngine.assess(metrics, capabilities, weather)?.let { hour to it }
+            }
+            if (assessed.isEmpty()) return@mapNotNull null
+
+            val scores = assessed.mapNotNull { it.second.score }
+            val levels = assessed.map { it.second.level }
+            val minimum = scores.minOrNull()
+            val maximum = scores.maxOrNull()
+            val average = scores.takeIf { it.isNotEmpty() }?.average()
+            val variable = minimum != null && maximum != null && minimum < 50 && maximum >= 75
+            val level = when {
+                levels.any { it == DroneOperationalLevel.UNFAVORABLE } -> DroneOperationalLevel.UNFAVORABLE
+                levels.all { it == DroneOperationalLevel.UNKNOWN } -> DroneOperationalLevel.UNKNOWN
+                variable -> DroneOperationalLevel.CAUTION
+                average == null -> DroneOperationalLevel.UNKNOWN
+                average >= 80 && (minimum ?: 0) >= 65 -> DroneOperationalLevel.FAVORABLE
+                average >= 65 -> DroneOperationalLevel.ACCEPTABLE
+                average >= 45 -> DroneOperationalLevel.CAUTION
+                else -> DroneOperationalLevel.UNFAVORABLE
+            }
+            val representativeScore = when {
+                average == null || minimum == null -> null
+                variable -> minOf(65, ((average * 0.55) + (minimum * 0.45)).roundToInt())
+                else -> ((average * 0.7) + (minimum * 0.3)).roundToInt().coerceIn(0, 100)
+            }
+
+            DroneDailyOperationalTrend(
+                date = date,
+                isWeekend = date.dayOfWeek == DayOfWeek.SATURDAY || date.dayOfWeek == DayOfWeek.SUNDAY,
+                level = level,
+                score = representativeScore,
+                dataCompleteness = assessed.map { it.second.dataCompleteness }.leastComplete(),
+                bestWindow = bestDroneWeatherWindow(assessed, zoneId),
+                factors = assessed
+                    .flatMap { it.second.factors }
+                    .filter { it.level != DroneOperationalLevel.FAVORABLE }
+                    .map { it.title }
+                    .distinct()
+                    .take(3),
+                warnings = assessed
+                    .flatMap { it.second.warnings }
+                    .distinct()
+                    .take(2),
+                variable = variable,
+                availableHours = hours.size
+            )
+        }
+}
+
 private fun forecastReliabilityFor(
     date: LocalDate,
     today: LocalDate,
@@ -227,6 +312,23 @@ private fun bestWeatherWindow(
     )
 }
 
+private fun bestDroneWeatherWindow(
+    assessed: List<Pair<WeatherForecastHour, DroneOperationalAssessment>>,
+    zoneId: ZoneId
+): WeatherTrendWindow? {
+    val favorable = longestDroneRun(assessed) {
+        it.score != null &&
+            it.score >= 70 &&
+            (it.level == DroneOperationalLevel.FAVORABLE || it.level == DroneOperationalLevel.ACCEPTABLE)
+    } ?: return null
+    val start = favorable.first().first.localTime(zoneId)
+    val end = favorable.last().first.instant.plus(Duration.ofHours(1)).atZone(zoneId).toLocalTime()
+    return WeatherTrendWindow(
+        start = start.truncatedTo(ChronoUnit.MINUTES),
+        end = end.truncatedTo(ChronoUnit.MINUTES)
+    )
+}
+
 private fun longestRun(
     assessed: List<Pair<WeatherForecastHour, WeatherAssessment>>,
     predicate: (WeatherAssessment) -> Boolean
@@ -239,6 +341,26 @@ private fun longestRun(
     }
     return best.takeIf { it.isNotEmpty() }
 }
+
+private fun longestDroneRun(
+    assessed: List<Pair<WeatherForecastHour, DroneOperationalAssessment>>,
+    predicate: (DroneOperationalAssessment) -> Boolean
+): List<Pair<WeatherForecastHour, DroneOperationalAssessment>>? {
+    var best = emptyList<Pair<WeatherForecastHour, DroneOperationalAssessment>>()
+    var current = emptyList<Pair<WeatherForecastHour, DroneOperationalAssessment>>()
+    for (item in assessed.sortedBy { it.first.instant }) {
+        current = if (predicate(item.second)) current + item else emptyList()
+        if (current.size > best.size) best = current
+    }
+    return best.takeIf { it.isNotEmpty() }
+}
+
+private fun List<DroneDataCompleteness>.leastComplete(): DroneDataCompleteness =
+    when {
+        any { it == DroneDataCompleteness.MINIMAL } -> DroneDataCompleteness.MINIMAL
+        any { it == DroneDataCompleteness.PARTIAL } -> DroneDataCompleteness.PARTIAL
+        else -> DroneDataCompleteness.FULL
+    }
 
 private fun WeatherForecastHour.localDate(zoneId: ZoneId): LocalDate =
     localDateTime?.toLocalDate() ?: instant.atZone(zoneId).toLocalDate()

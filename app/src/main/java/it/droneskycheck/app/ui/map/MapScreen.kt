@@ -126,7 +126,9 @@ import it.droneskycheck.app.data.LegalTimelineRepository
 import it.droneskycheck.app.data.LegalTimelineResponse
 import it.droneskycheck.app.data.LegalTimelineSegment
 import it.droneskycheck.app.data.LegalTimelineState
+import it.droneskycheck.app.data.LocalDrone
 import it.droneskycheck.app.data.LocalAuthorizationRepository
+import it.droneskycheck.app.data.LocalPilotRepository
 import it.droneskycheck.app.data.MapPreferencesRepository
 import it.droneskycheck.app.data.NotamInfo
 import it.droneskycheck.app.data.OfficialInfo
@@ -137,6 +139,15 @@ import it.droneskycheck.app.data.ValidityInfo
 import it.droneskycheck.app.data.ZoneCheckV3Response
 import it.droneskycheck.app.data.ZoneInfo
 import it.droneskycheck.app.data.ZoneCheckV3Repository
+import it.droneskycheck.app.data.drone.DroneDataCompleteness
+import it.droneskycheck.app.data.drone.DroneOperationalAssessment
+import it.droneskycheck.app.data.drone.DroneOperationalAssessmentEngine
+import it.droneskycheck.app.data.drone.DroneOperationalFactor
+import it.droneskycheck.app.data.drone.DroneOperationalFactorType
+import it.droneskycheck.app.data.drone.DroneOperationalLevel
+import it.droneskycheck.app.data.drone.formatOneDecimal
+import it.droneskycheck.app.data.drone.msToKmh
+import it.droneskycheck.app.data.drone.toOperationalCapabilities
 import it.droneskycheck.app.data.formatLocalRange
 import it.droneskycheck.app.data.weather.WeatherAssessment
 import it.droneskycheck.app.data.weather.WeatherAssessmentEngine
@@ -469,9 +480,13 @@ fun MapScreen(
                 weatherForecast = uiState.weatherForecast,
                 weatherAssessment = uiState.weatherAssessment,
                 weatherError = uiState.weatherError,
+                droneFleet = uiState.droneFleet,
+                selectedDrone = uiState.selectedDrone,
+                droneOperationalAssessment = uiState.droneOperationalAssessment,
                 draftError = draftError,
                 onRetry = viewModel::onZoneCheckRetryRequested,
                 onOperationalContextRequested = viewModel::onOperationalContextRequested,
+                onDroneSelected = viewModel::onDroneSelected,
                 onAuthorizationRequest = { zoneInfo ->
                     draftError = null
                     coroutineScope.launch {
@@ -1314,9 +1329,13 @@ private fun ZoneBottomSheet(
     weatherForecast: WeatherForecast?,
     weatherAssessment: WeatherAssessment?,
     weatherError: String?,
+    droneFleet: List<LocalDrone>,
+    selectedDrone: LocalDrone?,
+    droneOperationalAssessment: DroneOperationalAssessment?,
     draftError: String?,
     onRetry: () -> Unit,
     onOperationalContextRequested: () -> Unit,
+    onDroneSelected: (String) -> Unit,
     onAuthorizationRequest: (ZoneInfo) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -1374,7 +1393,11 @@ private fun ZoneBottomSheet(
                         isWeatherLoading = isWeatherAnalysisLoading,
                         forecast = weatherForecast,
                         assessment = weatherAssessment,
-                        weatherError = weatherError
+                        weatherError = weatherError,
+                        droneFleet = droneFleet,
+                        selectedDrone = selectedDrone,
+                        droneOperationalAssessment = droneOperationalAssessment,
+                        onDroneSelected = onDroneSelected
                     )
                 } else {
                     OperationalContextActionSection(
@@ -1461,7 +1484,11 @@ private fun OperationalReportSection(
     isWeatherLoading: Boolean,
     forecast: WeatherForecast?,
     assessment: WeatherAssessment?,
-    weatherError: String?
+    weatherError: String?,
+    droneFleet: List<LocalDrone>,
+    selectedDrone: LocalDrone?,
+    droneOperationalAssessment: DroneOperationalAssessment?,
+    onDroneSelected: (String) -> Unit
 ) {
     var expanded by remember { mutableStateOf(true) }
 
@@ -1492,6 +1519,15 @@ private fun OperationalReportSection(
                     forecast = forecast,
                     assessment = assessment,
                     error = weatherError
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                DroneOperationalSection(
+                    isWeatherLoading = isWeatherLoading,
+                    forecast = forecast,
+                    droneFleet = droneFleet,
+                    selectedDrone = selectedDrone,
+                    assessment = droneOperationalAssessment,
+                    onDroneSelected = onDroneSelected
                 )
             }
         }
@@ -1984,6 +2020,322 @@ private fun WeatherTrendRow(
                 )
             }
             val note = trend.weatherTrendNote()
+            if (note != null) {
+                Text(
+                    text = note,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = LocalContentColor.current.copy(alpha = 0.78f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DroneOperationalSection(
+    isWeatherLoading: Boolean,
+    forecast: WeatherForecast?,
+    droneFleet: List<LocalDrone>,
+    selectedDrone: LocalDrone?,
+    assessment: DroneOperationalAssessment?,
+    onDroneSelected: (String) -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        ReportSectionTitle(
+            icon = Icons.Default.Air,
+            title = "Drone",
+            subtitle = "Compatibilita meteo rispetto al drone selezionato"
+        )
+        when {
+            droneFleet.isEmpty() -> Text(
+                text = "Nessun drone selezionato. Il report meteo generale resta disponibile.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            else -> {
+                DroneSelector(
+                    drones = droneFleet,
+                    selectedDrone = selectedDrone,
+                    onDroneSelected = onDroneSelected
+                )
+                when {
+                    isWeatherLoading -> Text(
+                        text = "Assessment drone in attesa dei dati meteo.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    forecast == null -> Text(
+                        text = "Assessment drone sospeso: meteo non disponibile.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    selectedDrone == null -> Text(
+                        text = "Seleziona un drone per valutarne la compatibilita con le condizioni previste.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    assessment != null -> DroneAssessmentContent(
+                        drone = selectedDrone,
+                        assessment = assessment,
+                        forecast = forecast
+                    )
+                    else -> Text(
+                        text = "Valutazione drone non disponibile per i dati correnti.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DroneSelector(
+    drones: List<LocalDrone>,
+    selectedDrone: LocalDrone?,
+    onDroneSelected: (String) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            text = "Drone selezionato",
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold
+        )
+        if (drones.size == 1) {
+            Text(
+                text = drones.single().displayName,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium
+            )
+            return
+        }
+        drones.forEach { drone ->
+            val selected = selectedDrone?.id == drone.id
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onDroneSelected(drone.id) },
+                shape = MaterialTheme.shapes.small,
+                color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+                contentColor = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = drone.displayName,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                        modifier = Modifier.weight(1f)
+                    )
+                    drone.classLabel.takeIf { it.isNotBlank() }?.let {
+                        Text(
+                            text = it,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = LocalContentColor.current.copy(alpha = 0.78f)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DroneAssessmentContent(
+    drone: LocalDrone,
+    assessment: DroneOperationalAssessment,
+    forecast: WeatherForecast
+) {
+    val now = remember(forecast) { Instant.now() }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Surface(
+            shape = MaterialTheme.shapes.small,
+            color = assessment.level.droneLevelColor(),
+            contentColor = readableContentColor(assessment.level.droneLevelColor())
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = "Compatibilita con le condizioni",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = assessment.droneAssessmentSummary(),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "Completezza profilo: ${assessment.dataCompleteness.toUserText()}",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+        drone.droneDeclaredDataText()?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        assessment.warnings.firstOrNull()?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Medium,
+                color = if (assessment.level == DroneOperationalLevel.UNFAVORABLE) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                }
+            )
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            assessment.factors.take(MaxDroneAssessmentFactors).forEach { factor ->
+                DroneFactorRow(factor)
+            }
+        }
+        DroneOperationalTrendSection(
+            forecast = forecast,
+            now = now,
+            drone = drone
+        )
+    }
+}
+
+@Composable
+private fun DroneFactorRow(factor: DroneOperationalFactor) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        Text(
+            text = factor.title,
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.widthIn(min = 82.dp)
+        )
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(1.dp)
+        ) {
+            Text(
+                text = factor.message,
+                style = MaterialTheme.typography.bodySmall,
+                color = factor.level.droneLevelTextColor()
+            )
+            factor.droneFactorValueText()?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DroneOperationalTrendSection(
+    forecast: WeatherForecast,
+    now: Instant,
+    drone: LocalDrone
+) {
+    val capabilities = remember(drone) { drone.toOperationalCapabilities() }
+    val droneEngine = remember { DroneOperationalAssessmentEngine() }
+    val weatherEngine = remember { WeatherAssessmentEngine() }
+    val trends = remember(forecast, now, capabilities, droneEngine, weatherEngine) {
+        summarizeDroneOperationalTrendByDay(
+            forecast = forecast,
+            capabilities = capabilities,
+            now = now,
+            droneEngine = droneEngine,
+            weatherEngine = weatherEngine
+        )
+    }
+    if (trends.isEmpty()) return
+
+    val ordinaryDays = trends.filterNot { it.isWeekend }
+    val weekendDays = trends.filter { it.isWeekend }
+
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    Text(
+        text = "Tendenza con ${drone.displayName}",
+        style = MaterialTheme.typography.labelLarge,
+        fontWeight = FontWeight.SemiBold
+    )
+    if (ordinaryDays.isNotEmpty()) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            ordinaryDays.forEach { DroneTrendRow(it) }
+        }
+    }
+    if (weekendDays.isNotEmpty()) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                text = "Weekend",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold
+            )
+            weekendDays.forEach { DroneTrendRow(it, emphasized = true) }
+        }
+    }
+}
+
+@Composable
+private fun DroneTrendRow(
+    trend: DroneDailyOperationalTrend,
+    emphasized: Boolean = false
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.small,
+        color = if (emphasized) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = if (emphasized) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = trend.date.dayTitle(),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = trend.droneTrendScoreText(),
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+            Text(
+                text = "Completezza profilo: ${trend.dataCompleteness.toUserText()}",
+                style = MaterialTheme.typography.bodySmall,
+                color = LocalContentColor.current.copy(alpha = 0.78f)
+            )
+            trend.bestWindow?.let { window ->
+                Text(
+                    text = "Migliore finestra meteo per questo drone: ${window.formatLocalTimeRange()}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = LocalContentColor.current.copy(alpha = 0.78f)
+                )
+            }
+            val note = trend.droneTrendNote()
             if (note != null) {
                 Text(
                     text = note,
@@ -3573,6 +3925,86 @@ private fun WeatherForecast.weatherHorizonText(): String {
     ).joinToString(" - ").ifBlank { "Orizzonte disponibile dalla previsione ricevuta" }
 }
 
+private fun DroneOperationalAssessment.droneAssessmentSummary(): String =
+    listOfNotNull(
+        level.toUserText(),
+        score?.let { "$it/100" }
+    ).joinToString(" - ").ifBlank { "Dati insufficienti" }
+
+private fun DroneDailyOperationalTrend.droneTrendScoreText(): String =
+    listOfNotNull(
+        level.toUserText(),
+        score?.let { "$it/100" }
+    ).joinToString(" - ").ifBlank { "Dati insufficienti" }
+
+private fun DroneDailyOperationalTrend.droneTrendNote(): String? =
+    when {
+        variable -> "Compatibilita variabile durante la giornata"
+        warnings.isNotEmpty() -> warnings.first()
+        factors.isNotEmpty() -> "Fattori: ${factors.joinToString(", ")}"
+        level == DroneOperationalLevel.UNKNOWN -> "Profilo tecnico incompleto"
+        else -> null
+    }
+
+private fun DroneOperationalLevel.toUserText(): String =
+    when (this) {
+        DroneOperationalLevel.FAVORABLE -> "Favorevole"
+        DroneOperationalLevel.ACCEPTABLE -> "Buono"
+        DroneOperationalLevel.CAUTION -> "Attenzione"
+        DroneOperationalLevel.UNFAVORABLE -> "Sfavorevole"
+        DroneOperationalLevel.UNKNOWN -> "Dati insufficienti"
+    }
+
+private fun DroneDataCompleteness.toUserText(): String =
+    when (this) {
+        DroneDataCompleteness.FULL -> "Completo"
+        DroneDataCompleteness.PARTIAL -> "Parziale"
+        DroneDataCompleteness.MINIMAL -> "Minimo"
+    }
+
+@Composable
+private fun DroneOperationalLevel.droneLevelColor(): Color =
+    when (this) {
+        DroneOperationalLevel.FAVORABLE -> dscAltitudeColor(120)
+        DroneOperationalLevel.ACCEPTABLE -> MaterialTheme.colorScheme.secondaryContainer
+        DroneOperationalLevel.CAUTION -> MaterialTheme.colorScheme.tertiaryContainer
+        DroneOperationalLevel.UNFAVORABLE -> dscAltitudeColor(0)
+        DroneOperationalLevel.UNKNOWN -> MaterialTheme.colorScheme.surfaceContainerHigh
+    }
+
+@Composable
+private fun DroneOperationalLevel.droneLevelTextColor(): Color =
+    when (this) {
+        DroneOperationalLevel.UNFAVORABLE -> MaterialTheme.colorScheme.error
+        DroneOperationalLevel.CAUTION -> MaterialTheme.colorScheme.tertiary
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+private fun DroneOperationalFactor.droneFactorValueText(): String? =
+    when (type) {
+        DroneOperationalFactorType.WIND,
+        DroneOperationalFactorType.GUSTS -> {
+            val observed = observedValue?.msToKmh()?.formatOneDecimal()?.let { "$it km/h previsti" }
+            val limit = limitValue?.msToKmh()?.formatOneDecimal()?.let { "$it km/h dichiarati" }
+            listOfNotNull(observed, limit).joinToString(" - ").ifBlank { null }
+        }
+        DroneOperationalFactorType.TEMPERATURE ->
+            observedValue?.formatOneDecimal()?.let { "$it C previsti" }
+        DroneOperationalFactorType.PRECIPITATION ->
+            observedValue?.formatMillimeters()
+        else -> null
+    }
+
+private fun LocalDrone.droneDeclaredDataText(): String? =
+    listOfNotNull(
+        displayName.takeIf { it.isNotBlank() },
+        classLabel.takeIf { it.isNotBlank() }?.let { "classe $it" },
+        weight?.roundToInt()?.let { "$it g" }
+    )
+        .distinct()
+        .joinToString(" - ")
+        .ifBlank { null }
+
 private fun WeatherConfidenceLevel.toUserText(): String =
     when (this) {
         WeatherConfidenceLevel.HIGH -> "alta"
@@ -4231,7 +4663,8 @@ private class MapViewModelFactory(
                 legalTimelineRepository = LegalTimelineRepository(),
                 weatherForecastRepository = WeatherForecastRepository(),
                 weatherAssessmentEngine = WeatherAssessmentEngine(),
-                mapPreferences = MapPreferencesRepository(context)
+                mapPreferences = MapPreferencesRepository(context),
+                localPilotStore = LocalPilotRepository(context)
             ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class ${modelClass.name}")
@@ -4247,6 +4680,7 @@ private const val LOCATION_MIN_TIME_MS = 2_500L
 private const val LOCATION_MIN_DISTANCE_METERS = 5f
 private const val MaxTimelineSegments = 6
 private const val MaxDailySummaryWindows = 4
+private const val MaxDroneAssessmentFactors = 5
 private val ZoneSheetMaxHeight = 720.dp
 private val NotamUtcFormatter: DateTimeFormatter =
     DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm 'UTC'").withZone(ZoneOffset.UTC)

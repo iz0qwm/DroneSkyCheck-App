@@ -2,6 +2,8 @@ package it.droneskycheck.app.ui.map
 
 import it.droneskycheck.app.data.ZoneCheckV3Response
 import it.droneskycheck.app.data.LegalTimelineResponse
+import it.droneskycheck.app.data.LocalDrone
+import it.droneskycheck.app.data.drone.DroneOperationalAssessment
 import it.droneskycheck.app.data.weather.WeatherAssessment
 import it.droneskycheck.app.data.weather.WeatherForecast
 import it.droneskycheck.app.map.DscLayerCategory
@@ -28,6 +30,9 @@ data class MapUiState(
     val weatherForecast: WeatherForecast? = null,
     val weatherAssessment: WeatherAssessment? = null,
     val weatherError: String? = null,
+    val droneFleet: List<LocalDrone> = emptyList(),
+    val selectedDrone: LocalDrone? = null,
+    val droneOperationalAssessment: DroneOperationalAssessment? = null,
     val mapStatusMessage: String? = null,
     val cameraBounds: CameraBounds? = null,
     val layerVisibility: Map<DscLayerCategory, Boolean> = DscLayerCategory.defaultVisibility,

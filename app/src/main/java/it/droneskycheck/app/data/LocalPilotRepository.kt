@@ -3,9 +3,15 @@ package it.droneskycheck.app.data
 import android.content.Context
 import java.util.UUID
 
+interface LocalPilotStore {
+    suspend fun getDrones(): List<LocalDrone>
+    suspend fun getSelectedDrone(): LocalDrone?
+    suspend fun selectDrone(id: String)
+}
+
 class LocalPilotRepository(
     private val dao: LocalPilotDao
-) {
+) : LocalPilotStore {
     constructor(context: Context) : this(
         LocalPilotDatabase.getInstance(context).localPilotDao()
     )
@@ -85,10 +91,10 @@ class LocalPilotRepository(
         return entity.toModel()
     }
 
-    suspend fun getDrones(): List<LocalDrone> =
+    override suspend fun getDrones(): List<LocalDrone> =
         dao.getDroneEntities().map { it.toModel() }
 
-    suspend fun getSelectedDrone(): LocalDrone? =
+    override suspend fun getSelectedDrone(): LocalDrone? =
         getDrones().firstOrNull { it.isSelected } ?: getDrones().firstOrNull()
 
     suspend fun saveDrone(drone: LocalDrone): LocalDrone {
@@ -130,13 +136,35 @@ class LocalPilotRepository(
         }
     }
 
-    suspend fun selectDrone(id: String) {
+    override suspend fun selectDrone(id: String) {
         dao.clearSelectedDrone()
         dao.setSelectedDrone(id)
     }
 
     private fun localId(prefix: String): String =
         "$prefix-${UUID.randomUUID()}"
+}
+
+class InMemoryLocalPilotStore(
+    initialDrones: List<LocalDrone> = emptyList()
+) : LocalPilotStore {
+    private var drones: List<LocalDrone> = normalizeSelection(initialDrones)
+
+    override suspend fun getDrones(): List<LocalDrone> = drones
+
+    override suspend fun getSelectedDrone(): LocalDrone? =
+        drones.firstOrNull { it.isSelected } ?: drones.firstOrNull()
+
+    override suspend fun selectDrone(id: String) {
+        drones = drones.map { drone ->
+            drone.copy(isSelected = drone.id == id)
+        }
+    }
+
+    private fun normalizeSelection(input: List<LocalDrone>): List<LocalDrone> {
+        if (input.isEmpty() || input.any { it.isSelected }) return input
+        return input.mapIndexed { index, drone -> drone.copy(isSelected = index == 0) }
+    }
 }
 
 private fun PilotProfileEntity.toModel(): LocalPilotProfile =

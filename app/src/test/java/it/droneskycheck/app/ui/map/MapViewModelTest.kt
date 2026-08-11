@@ -10,13 +10,23 @@ import it.droneskycheck.app.data.LegalTimelineResponse
 import it.droneskycheck.app.data.LegalTimelineSegment
 import it.droneskycheck.app.data.LegalTimelineState
 import it.droneskycheck.app.data.LegalTimelineWindow
+import it.droneskycheck.app.data.LocalDrone
+import it.droneskycheck.app.data.LocalPilotStore
 import it.droneskycheck.app.data.Meta
 import it.droneskycheck.app.data.Position
 import it.droneskycheck.app.data.Verdict
 import it.droneskycheck.app.data.ZoneCheckV3Client
 import it.droneskycheck.app.data.ZoneCheckV3Response
+import it.droneskycheck.app.data.drone.DroneOperationalLevel
 import it.droneskycheck.app.data.weather.WeatherForecast
+import it.droneskycheck.app.data.weather.WeatherForecastCacheDto
 import it.droneskycheck.app.data.weather.WeatherForecastClient
+import it.droneskycheck.app.data.weather.WeatherForecastHour
+import it.droneskycheck.app.data.weather.WeatherForecastLocation
+import it.droneskycheck.app.data.weather.WeatherForecastMetadata
+import it.droneskycheck.app.data.weather.WeatherForecastUnitsDto
+import it.droneskycheck.app.data.weather.WeatherMetrics
+import java.time.LocalDate
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneId
@@ -155,17 +165,116 @@ class MapViewModelTest {
         scope.cancel()
     }
 
+    @Test
+    fun loadsSelectedDroneFromLocalFleet() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val pilotStore = FakePilotStore(
+            listOf(
+                LocalDrone(id = "mini", manufacturer = "DJI", model = "Mini", classLabel = "C0"),
+                LocalDrone(id = "air", manufacturer = "DJI", model = "Air", classLabel = "C1", isSelected = true)
+            )
+        )
+        val viewModel = viewModel(
+            scope = scope,
+            weather = FakeWeatherClient(),
+            preferences = InMemoryMapPreferences(),
+            pilotStore = pilotStore
+        )
+
+        waitUntil { viewModel.uiState.value.selectedDrone != null }
+
+        assertEquals("air", viewModel.uiState.value.selectedDrone?.id)
+        assertEquals(2, viewModel.uiState.value.droneFleet.size)
+        scope.cancel()
+    }
+
+    @Test
+    fun changingDronePersistsSelectionAndDoesNotRelaunchTimelineOrWeather() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val weather = FakeWeatherClient(forecast = weatherForecast())
+        val legal = FakeLegalTimelineClient()
+        val pilotStore = FakePilotStore(
+            listOf(
+                LocalDrone(id = "mini", manufacturer = "DJI", model = "Mini", isSelected = true),
+                LocalDrone(id = "air", manufacturer = "DJI", model = "Air")
+            )
+        )
+        val viewModel = viewModel(
+            scope = scope,
+            legal = legal,
+            weather = weather,
+            preferences = InMemoryMapPreferences(),
+            pilotStore = pilotStore
+        )
+
+        viewModel.onMapTapped(selection(41.9, 12.5))
+        viewModel.onOperationalContextRequested()
+        waitUntil { weather.calls == 1 && viewModel.uiState.value.weatherForecast != null }
+        val legalCalls = legal.calls
+        val weatherCalls = weather.calls
+
+        viewModel.onDroneSelected("air")
+        waitUntil { viewModel.uiState.value.selectedDrone?.id == "air" }
+
+        assertEquals(1, pilotStore.selectCalls)
+        assertEquals(legalCalls, legal.calls)
+        assertEquals(weatherCalls, weather.calls)
+        assertEquals(DroneOperationalLevel.UNKNOWN, viewModel.uiState.value.droneOperationalAssessment?.level)
+        scope.cancel()
+    }
+
+    @Test
+    fun meteoOffDoesNotCalculateDroneAssessment() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val pilotStore = FakePilotStore(listOf(LocalDrone(id = "mini", manufacturer = "DJI", model = "Mini", isSelected = true)))
+        val viewModel = viewModel(
+            scope = scope,
+            weather = FakeWeatherClient(forecast = weatherForecast()),
+            preferences = InMemoryMapPreferences(),
+            pilotStore = pilotStore
+        )
+
+        viewModel.onMapTapped(selection(41.9, 12.5))
+        waitUntil { viewModel.uiState.value.selectedPoint != null }
+
+        assertFalse(viewModel.uiState.value.isWeatherAnalysisEnabled)
+        assertNull(viewModel.uiState.value.droneOperationalAssessment)
+        scope.cancel()
+    }
+
+    @Test
+    fun meteoOnCalculatesPartialDroneAssessmentForSelectedDrone() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val viewModel = viewModel(
+            scope = scope,
+            weather = FakeWeatherClient(forecast = weatherForecast()),
+            preferences = InMemoryMapPreferences(),
+            pilotStore = FakePilotStore(listOf(LocalDrone(id = "mini", manufacturer = "DJI", model = "Mini", isSelected = true)))
+        )
+
+        waitUntil { viewModel.uiState.value.selectedDrone != null }
+        viewModel.onMapTapped(selection(41.9, 12.5))
+        viewModel.onOperationalContextRequested()
+        waitUntil { viewModel.uiState.value.droneOperationalAssessment != null }
+
+        assertEquals("mini", viewModel.uiState.value.selectedDrone?.id)
+        assertEquals(DroneOperationalLevel.UNKNOWN, viewModel.uiState.value.droneOperationalAssessment?.level)
+        scope.cancel()
+    }
+
     private fun viewModel(
         scope: CoroutineScope,
         legal: FakeLegalTimelineClient = FakeLegalTimelineClient(),
         weather: FakeWeatherClient = FakeWeatherClient(),
-        preferences: InMemoryMapPreferences
+        preferences: InMemoryMapPreferences,
+        pilotStore: LocalPilotStore = FakePilotStore()
     ): MapViewModel =
         MapViewModel(
             zoneCheckRepository = FakeZoneCheckClient(),
             legalTimelineRepository = legal,
             weatherForecastRepository = weather,
             mapPreferences = preferences,
+            localPilotStore = pilotStore,
             clock = clock,
             timelineZoneId = ZoneId.of("Europe/Rome"),
             externalScope = scope
@@ -267,7 +376,10 @@ private class FakeLegalTimelineClient(
         )
 }
 
-private class FakeWeatherClient : WeatherForecastClient {
+private class FakeWeatherClient(
+    private val forecast: WeatherForecast? = null,
+    private val delaysByLatitude: Map<Double, Long> = emptyMap()
+) : WeatherForecastClient {
     var calls: Int = 0
         private set
     var lastPoint: MapPoint? = null
@@ -276,6 +388,66 @@ private class FakeWeatherClient : WeatherForecastClient {
     override suspend fun getForecast(latitude: Double, longitude: Double): Result<WeatherForecast> {
         calls += 1
         lastPoint = MapPoint(latitude, longitude)
-        return Result.failure(IllegalStateException("weather fixture"))
+        delay(delaysByLatitude[latitude] ?: 0L)
+        return forecast?.let { Result.success(it) }
+            ?: Result.failure(IllegalStateException("weather fixture"))
     }
+}
+
+private class FakePilotStore(
+    initialDrones: List<LocalDrone> = emptyList()
+) : LocalPilotStore {
+    private var drones = initialDrones
+    var selectCalls: Int = 0
+        private set
+
+    override suspend fun getDrones(): List<LocalDrone> = drones
+
+    override suspend fun getSelectedDrone(): LocalDrone? =
+        drones.firstOrNull { it.isSelected } ?: drones.firstOrNull()
+
+    override suspend fun selectDrone(id: String) {
+        selectCalls += 1
+        drones = drones.map { it.copy(isSelected = it.id == id) }
+    }
+}
+
+private fun weatherForecast(): WeatherForecast {
+    val rome = ZoneId.of("Europe/Rome")
+    val local = LocalDate.parse("2026-08-11").atTime(8, 0)
+    return WeatherForecast(
+        location = WeatherForecastLocation(null, null, null, "Europe/Rome", "CEST", 7200),
+        timezone = rome,
+        generatedAt = Instant.parse("2026-08-11T06:00:00Z"),
+        providerFetchedAt = Instant.parse("2026-08-11T06:00:00Z"),
+        hours = listOf(
+            WeatherForecastHour(
+                instant = local.atZone(rome).toInstant(),
+                offsetDateTime = null,
+                localDateTime = local,
+                localTimeText = local.toString(),
+                utcOffsetSeconds = 7200,
+                metrics = WeatherMetrics(
+                    windSpeedKmh = 8.0,
+                    windGustsKmh = 12.0,
+                    precipitationMm = 0.0,
+                    precipitationProbabilityPct = 5.0,
+                    visibilityMeters = 12_000.0,
+                    weatherCode = 0,
+                    temperatureC = 22.0,
+                    cloudCoverPct = 20.0
+                ),
+                missingFields = emptyList()
+            )
+        ),
+        days = emptyList(),
+        warnings = emptyList(),
+        metadata = WeatherForecastMetadata(
+            schemaVersion = 1,
+            provider = "fixture",
+            forecastDays = 7,
+            units = WeatherForecastUnitsDto(null, null, null, null, null, null, null, null),
+            cache = WeatherForecastCacheDto(false, null, null)
+        )
+    )
 }
