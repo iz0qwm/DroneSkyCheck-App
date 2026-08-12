@@ -3,6 +3,8 @@ package it.droneskycheck.app.map
 import it.droneskycheck.app.data.DscLogger
 import it.droneskycheck.app.data.traffic.TrafficAwarenessDefaults
 import it.droneskycheck.app.data.traffic.TrafficAwarenessLogTag
+import it.droneskycheck.app.data.traffic.TrafficAssessment
+import it.droneskycheck.app.data.traffic.TrafficRelevance
 import it.droneskycheck.app.data.traffic.TrafficTarget
 import it.droneskycheck.app.data.traffic.coarseTraffic
 import it.droneskycheck.app.ui.map.MapPoint
@@ -23,9 +25,13 @@ object TrafficAwarenessMapProperties {
     const val Source = "source"
     const val RotationDeg = "rotationDeg"
     const val HasRotation = "hasRotation"
+    const val Relevance = "relevance"
 }
 
-fun trafficTargetsFeatureCollection(targets: List<TrafficTarget>): FeatureCollection {
+fun trafficTargetsFeatureCollection(
+    targets: List<TrafficTarget>,
+    assessments: Map<String, TrafficAssessment> = emptyMap()
+): FeatureCollection {
     val features = targets.mapNotNull { target ->
         if (!target.position.lat.isFinite() || !target.position.lon.isFinite()) {
             DscLogger.warn(TrafficAwarenessLogTag, "target skipped reason=invalid_geojson_position id=${target.id}")
@@ -40,6 +46,10 @@ fun trafficTargetsFeatureCollection(targets: List<TrafficTarget>): FeatureCollec
             target.source?.let { addStringProperty(TrafficAwarenessMapProperties.Source, it) }
             addNumberProperty(TrafficAwarenessMapProperties.RotationDeg, target.mapRotationDeg())
             addBooleanProperty(TrafficAwarenessMapProperties.HasRotation, target.hasMapRotation())
+            addStringProperty(
+                TrafficAwarenessMapProperties.Relevance,
+                (assessments[target.id]?.relevance ?: TrafficRelevance.INFORMATION).name
+            )
         }.also {
             DscLogger.trace(
                 TrafficAwarenessLogTag,

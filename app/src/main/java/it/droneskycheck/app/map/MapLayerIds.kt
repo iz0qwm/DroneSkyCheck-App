@@ -7,6 +7,7 @@ object MapLayerIds {
     const val KWOS_DATA_BASE_URL = DscApiConfig.KwosDataBaseUrl
     const val TRAFFIC_AWARENESS_SOURCE_ID = "traffic-awareness-source"
     const val TRAFFIC_AWARENESS_SYMBOL_LAYER_ID = "traffic-awareness-symbol-layer"
+    const val TRAFFIC_AWARENESS_ATTENTION_HALO_LAYER_ID = "traffic-awareness-attention-halo-layer"
     const val TRAFFIC_AWARENESS_RADIUS_SOURCE_ID = "traffic-awareness-radius-source"
     const val TRAFFIC_AWARENESS_RADIUS_FILL_LAYER_ID = "traffic-awareness-radius-fill-layer"
     const val TRAFFIC_AWARENESS_RADIUS_LINE_LAYER_ID = "traffic-awareness-radius-line-layer"

@@ -38,6 +38,8 @@ import it.droneskycheck.app.data.traffic.TrafficAwarenessLogTag
 import it.droneskycheck.app.data.traffic.TrafficAwarenessRepository
 import it.droneskycheck.app.data.traffic.TrafficAwarenessState
 import it.droneskycheck.app.data.traffic.TrafficOperationCenter
+import it.droneskycheck.app.data.traffic.TrafficAlertController
+import it.droneskycheck.app.data.traffic.TrafficAlertEvent
 import it.droneskycheck.app.data.traffic.TrafficRelevanceEngine
 import it.droneskycheck.app.data.traffic.coarseTraffic
 import it.droneskycheck.app.data.traffic.toTrafficAwarenessDiagnosticReason
@@ -49,9 +51,13 @@ import java.time.ZoneId
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -76,6 +82,12 @@ class MapViewModel(
     private val scope = externalScope ?: viewModelScope
     private val _uiState = MutableStateFlow(MapUiState())
     val uiState: StateFlow<MapUiState> = _uiState.asStateFlow()
+    private val _trafficAlertEvents = MutableSharedFlow<TrafficAlertEvent>(
+        replay = 0,
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
+    val trafficAlertEvents: SharedFlow<TrafficAlertEvent> = _trafficAlertEvents.asSharedFlow()
 
     private var selectionRequestId = 0L
     private var verdictJob: Job? = null
@@ -85,8 +97,10 @@ class MapViewModel(
     private var lastLegalTimelineRequest: LegalTimelineRequestKey? = null
     private var catalogResolver: DroneTechnicalCatalogResolver = DroneTechnicalCatalogResolver.empty()
     private val trafficRelevanceEngine = TrafficRelevanceEngine()
+    private val trafficAlertController = TrafficAlertController()
 
     init {
+        loadTrafficAlertPreferences()
         loadDroneCatalogAndFleet()
     }
 
@@ -516,6 +530,15 @@ class MapViewModel(
                         "cpa=${assessment.cpaDistanceM?.toInt()} tcpa=${assessment.timeToCpaSec?.toInt()}"
                 )
             }
+            trafficAlertController.update(assessments, nowMillis)?.let { event ->
+                DscLogger.debug(
+                    TrafficAwarenessLogTag,
+                    "alert triggered target=${event.primaryTargetId} count=${event.triggeredCount}"
+                )
+                if (_trafficAlertEvents.subscriptionCount.value > 0) {
+                    _trafficAlertEvents.tryEmit(event)
+                }
+            }
             _uiState.value = _uiState.value.copy(
                 trafficAwareness = _uiState.value.trafficAwareness.copy(
                     enabled = true,
@@ -562,12 +585,39 @@ class MapViewModel(
         _uiState.value = _uiState.value.copy(selectedTrafficTarget = null)
     }
 
+    fun onTrafficAlertSettingsRequested() {
+        _uiState.value = _uiState.value.copy(isTrafficAlertSettingsSheetVisible = true)
+    }
+
+    fun onTrafficAlertSettingsDismissed() {
+        _uiState.value = _uiState.value.copy(isTrafficAlertSettingsSheetVisible = false)
+    }
+
+    fun onTrafficAlertSoundEnabledChanged(enabled: Boolean) {
+        mapPreferences.setTrafficAlertSoundEnabled(enabled)
+        DscLogger.debug(TrafficAwarenessLogTag, "alert sound enabled=$enabled")
+        _uiState.value = _uiState.value.copy(trafficAlertSoundEnabled = enabled)
+    }
+
+    fun onTrafficAlertVibrationEnabledChanged(enabled: Boolean) {
+        mapPreferences.setTrafficAlertVibrationEnabled(enabled)
+        DscLogger.debug(TrafficAwarenessLogTag, "alert vibration enabled=$enabled")
+        _uiState.value = _uiState.value.copy(trafficAlertVibrationEnabled = enabled)
+    }
+
     private fun trafficAwarenessStopReason(point: MapPoint): String =
         when {
             !_uiState.value.trafficAwareness.enabled -> "disabled"
             _uiState.value.selectedPoint != point -> "center_changed"
             else -> "cancelled"
         }
+
+    private fun loadTrafficAlertPreferences() {
+        _uiState.value = _uiState.value.copy(
+            trafficAlertSoundEnabled = mapPreferences.isTrafficAlertSoundEnabled(),
+            trafficAlertVibrationEnabled = mapPreferences.isTrafficAlertVibrationEnabled()
+        )
+    }
 
     fun onDroneSelected(droneId: String) {
         scope.launch {

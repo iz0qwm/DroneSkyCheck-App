@@ -2,11 +2,14 @@ package it.droneskycheck.app.map
 
 import it.droneskycheck.app.data.traffic.TrafficAircraft
 import it.droneskycheck.app.data.traffic.TrafficAltitude
+import it.droneskycheck.app.data.traffic.TrafficAssessment
+import it.droneskycheck.app.data.traffic.TrafficCalculationConfidence
 import it.droneskycheck.app.data.traffic.TrafficIdentifiers
 import it.droneskycheck.app.data.traffic.TrafficMotion
 import it.droneskycheck.app.data.traffic.TrafficPosition
 import it.droneskycheck.app.data.traffic.TrafficProvenance
 import it.droneskycheck.app.data.traffic.TrafficRelative
+import it.droneskycheck.app.data.traffic.TrafficRelevance
 import it.droneskycheck.app.data.traffic.TrafficSource
 import it.droneskycheck.app.data.traffic.TrafficTarget
 import it.droneskycheck.app.data.traffic.TrafficTime
@@ -79,9 +82,47 @@ class TrafficAwarenessMapFeaturesTest {
     fun layerIdsAreConsistentWithInstallAndUpdateNames() {
         assertEquals("traffic-awareness-source", MapLayerIds.TRAFFIC_AWARENESS_SOURCE_ID)
         assertEquals("traffic-awareness-symbol-layer", MapLayerIds.TRAFFIC_AWARENESS_SYMBOL_LAYER_ID)
+        assertEquals("traffic-awareness-attention-halo-layer", MapLayerIds.TRAFFIC_AWARENESS_ATTENTION_HALO_LAYER_ID)
         assertEquals("traffic-awareness-radius-source", MapLayerIds.TRAFFIC_AWARENESS_RADIUS_SOURCE_ID)
         assertEquals("traffic-awareness-radius-fill-layer", MapLayerIds.TRAFFIC_AWARENESS_RADIUS_FILL_LAYER_ID)
         assertEquals("traffic-awareness-radius-line-layer", MapLayerIds.TRAFFIC_AWARENESS_RADIUS_LINE_LAYER_ID)
+    }
+
+    @Test
+    fun geoJsonIncludesRelevanceFromAssessments() {
+        val collection = trafficTargetsFeatureCollection(
+            targets = listOf(
+                trafficTarget(id = "traffic:attention"),
+                trafficTarget(id = "traffic:monitor")
+            ),
+            assessments = mapOf(
+                "traffic:attention" to assessment(TrafficRelevance.ATTENTION),
+                "traffic:monitor" to assessment(TrafficRelevance.MONITOR)
+            )
+        )
+        val featuresById = collection.features().orEmpty()
+            .associateBy { it.properties()?.get(TrafficAwarenessMapProperties.TargetId)?.asString }
+
+        assertEquals(
+            "ATTENTION",
+            featuresById["traffic:attention"]?.properties()?.get(TrafficAwarenessMapProperties.Relevance)?.asString
+        )
+        assertEquals(
+            "MONITOR",
+            featuresById["traffic:monitor"]?.properties()?.get(TrafficAwarenessMapProperties.Relevance)?.asString
+        )
+    }
+
+    @Test
+    fun missingAssessmentDefaultsToInformationRelevance() {
+        val feature = trafficTargetsFeatureCollection(
+            listOf(trafficTarget(id = "traffic:unknown"))
+        ).features().orEmpty().single()
+
+        assertEquals(
+            "INFORMATION",
+            feature.properties()?.get(TrafficAwarenessMapProperties.Relevance)?.asString
+        )
     }
 
     @Test
@@ -139,12 +180,17 @@ class TrafficAwarenessMapFeaturesTest {
     @Test
     fun highAltitudeTargetIsNotFiltered() {
         val collection = trafficTargetsFeatureCollection(
-            listOf(
-                trafficTarget(geoM = 11_000.0)
-            )
+            targets = listOf(
+                trafficTarget(id = "traffic:high", geoM = 11_000.0)
+            ),
+            assessments = mapOf("traffic:high" to assessment(TrafficRelevance.ATTENTION))
         )
 
         assertEquals(1, collection.features().orEmpty().size)
+        assertEquals(
+            "ATTENTION",
+            collection.features().orEmpty().single().properties()?.get(TrafficAwarenessMapProperties.Relevance)?.asString
+        )
     }
 
     @Test
@@ -204,4 +250,17 @@ private fun trafficTarget(
             sources = listOf(TrafficSource(provider = provider, source = source)),
             contributions = emptyList()
         )
+    )
+
+private fun assessment(relevance: TrafficRelevance): TrafficAssessment =
+    TrafficAssessment(
+        relevance = relevance,
+        currentDistanceM = 1_000.0,
+        converging = true,
+        relativeBearingDeg = null,
+        trackDifferenceDeg = null,
+        cpaDistanceM = 500.0,
+        timeToCpaSec = 30.0,
+        calculationConfidence = TrafficCalculationConfidence.HIGH,
+        reasons = emptyList()
     )

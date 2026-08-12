@@ -135,9 +135,154 @@ class TrafficAwarenessPresentationTest {
         assertEquals("Tempo stimato" to "1 min 20 s", rows[3].toPair())
         assertEquals("Calcolo traiettoria" to "Stima completa", rows[4].toPair())
     }
+
+    @Test
+    fun noTrafficAttentionBannerForInformationOrMonitor() {
+        val info = trafficTarget(id = "traffic:info")
+        val monitor = trafficTarget(id = "traffic:monitor")
+
+        assertNull(
+            trafficAttentionPresentation(
+                targets = listOf(info, monitor),
+                assessments = mapOf(
+                    info.id to assessment(TrafficRelevance.INFORMATION),
+                    monitor.id to assessment(TrafficRelevance.MONITOR)
+                )
+            )
+        )
+    }
+
+    @Test
+    fun singleTrafficAttentionBannerUsesFallbackNameDistanceAndTime() {
+        val target = trafficTarget(id = "traffic:attention", callsign = "RYR9ZQ", distanceM = 5_600.0)
+        val banner = trafficAttentionPresentation(
+            targets = listOf(target),
+            assessments = mapOf(
+                target.id to assessment(
+                    relevance = TrafficRelevance.ATTENTION,
+                    currentDistanceM = 5_600.0,
+                    cpaDistanceM = 1_800.0,
+                    timeToCpaSec = 80.0
+                )
+            )
+        )
+
+        assertEquals("traffic:attention", banner?.targetId)
+        assertEquals("Traffico in avvicinamento", banner?.title)
+        assertEquals("RYR9ZQ - 5,6 km - CPA tra 1 min 20 s", banner?.detail)
+        assertEquals(1, banner?.attentionCount)
+    }
+
+    @Test
+    fun multipleAttentionTargetsPreferLowerPositiveTimeToCpa() {
+        val targetA = trafficTarget(id = "traffic:a", callsign = "A", distanceM = 4_000.0)
+        val targetB = trafficTarget(id = "traffic:b", callsign = "B", distanceM = 7_000.0)
+        val banner = trafficAttentionPresentation(
+            targets = listOf(targetA, targetB),
+            assessments = mapOf(
+                targetA.id to assessment(
+                    relevance = TrafficRelevance.ATTENTION,
+                    currentDistanceM = 4_000.0,
+                    cpaDistanceM = 1_000.0,
+                    timeToCpaSec = 150.0
+                ),
+                targetB.id to assessment(
+                    relevance = TrafficRelevance.ATTENTION,
+                    currentDistanceM = 7_000.0,
+                    cpaDistanceM = 2_500.0,
+                    timeToCpaSec = 60.0
+                )
+            )
+        )
+
+        assertEquals("traffic:b", banner?.targetId)
+        assertEquals("2 traffici in avvicinamento", banner?.title)
+        assertEquals(2, banner?.attentionCount)
+    }
+
+    @Test
+    fun multipleAttentionTargetsTieBreakByCpaDistanceCurrentDistanceAndId() {
+        val farId = trafficTarget(id = "traffic:z", callsign = "Z", distanceM = 8_000.0)
+        val nearId = trafficTarget(id = "traffic:a", callsign = "A", distanceM = 8_000.0)
+        val banner = trafficAttentionPresentation(
+            targets = listOf(farId, nearId),
+            assessments = mapOf(
+                farId.id to assessment(TrafficRelevance.ATTENTION, currentDistanceM = 3_000.0, cpaDistanceM = 1_000.0, timeToCpaSec = 60.0),
+                nearId.id to assessment(TrafficRelevance.ATTENTION, currentDistanceM = 3_000.0, cpaDistanceM = 1_000.0, timeToCpaSec = 60.0)
+            )
+        )
+
+        assertEquals("traffic:a", banner?.targetId)
+    }
+
+    @Test
+    fun adsbSheetPresentationPrioritizesOperationalAreaAndKeepsAltitudeSemantics() {
+        val target = trafficTarget(
+            callsign = "RYR9ZQ",
+            provider = "opensky",
+            source = "OpenSky",
+            baroM = 198.12,
+            geoM = 312.42,
+            speedMps = 35.59,
+            trackDeg = 303.0
+        )
+        val presentation = target.trafficSheetPresentation(
+            assessment(
+                relevance = TrafficRelevance.ATTENTION,
+                currentDistanceM = 5_600.0,
+                cpaDistanceM = 1_800.0,
+                timeToCpaSec = 80.0
+            )
+        )
+
+        assertEquals("RYR9ZQ", presentation.title)
+        assertEquals("opensky", presentation.sourceLabel)
+        assertEquals("Attenzione", presentation.relevanceLabel)
+        assertEquals("Rispetto all'area operativa", presentation.sections[0].title)
+        assertEquals("Passaggio minimo stimato" to "1,8 km", presentation.sections[0].rows.first { it.label == "Passaggio minimo stimato" }.toPair())
+        assertEquals("Geometrica" to "312 m", presentation.sections.first { it.title == "Quota" }.rows.first { it.label == "Geometrica" }.toPair())
+        assertEquals("Barometrica" to "198 m", presentation.sections.first { it.title == "Quota" }.rows.first { it.label == "Barometrica" }.toPair())
+    }
+
+    @Test
+    fun ognSheetPresentationShowsReceivedAltitudeAndCompactSource() {
+        val target = trafficTarget(
+            callsign = null,
+            icao24 = null,
+            sourceId = "FLRDDDDA9",
+            provider = "OGN",
+            source = "FREEFLIGHT",
+            sourceM = 68.0,
+            headingDeg = 314.0
+        )
+        val presentation = target.trafficSheetPresentation(assessment(TrafficRelevance.MONITOR))
+
+        assertEquals("FLRDDDDA9", presentation.title)
+        assertEquals("OGN · FREEFLIGHT", presentation.sourceLabel)
+        assertEquals("Quota ricevuta" to "68 m", presentation.sections.first { it.title == "Quota" }.rows.single().toPair())
+        assertNull(presentation.sections.first { it.title == "Dati traffico" }.rows.firstOrNull { it.value.contains("null") })
+    }
 }
 
 private fun TrafficAwarenessInfoRow.toPair(): Pair<String, String> = label to value
+
+private fun assessment(
+    relevance: TrafficRelevance,
+    currentDistanceM: Double? = 2_500.0,
+    cpaDistanceM: Double? = null,
+    timeToCpaSec: Double? = null
+): TrafficAssessment =
+    TrafficAssessment(
+        relevance = relevance,
+        currentDistanceM = currentDistanceM,
+        converging = if (relevance == TrafficRelevance.ATTENTION) true else null,
+        relativeBearingDeg = 296.8,
+        trackDifferenceDeg = null,
+        cpaDistanceM = cpaDistanceM,
+        timeToCpaSec = timeToCpaSec,
+        calculationConfidence = TrafficCalculationConfidence.HIGH,
+        reasons = emptyList()
+    )
 
 private fun responseWithTargets(count: Int): TrafficAwarenessResponse =
     TrafficAwarenessResponse(

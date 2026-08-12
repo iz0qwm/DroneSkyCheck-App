@@ -8,6 +8,8 @@ import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.media.AudioManager
+import android.media.ToneGenerator
 import android.os.Bundle
 import android.os.Looper
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -57,6 +59,7 @@ import androidx.compose.material.icons.filled.Opacity
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Thermostat
 import androidx.compose.material.icons.filled.Visibility
@@ -100,6 +103,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
@@ -113,6 +117,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import it.droneskycheck.app.data.AuthorizationInfo
 import it.droneskycheck.app.data.AuthorizationAdditionalRequirement
@@ -150,6 +155,9 @@ import it.droneskycheck.app.data.traffic.TrafficAwarenessRepository
 import it.droneskycheck.app.data.traffic.TrafficAwarenessState
 import it.droneskycheck.app.data.traffic.TrafficAssessment
 import it.droneskycheck.app.data.traffic.TrafficTarget
+import it.droneskycheck.app.ui.map.TrafficAttentionPresentation
+import it.droneskycheck.app.ui.map.TrafficTargetSheetPresentation
+import it.droneskycheck.app.ui.map.TrafficTargetSheetSection
 import it.droneskycheck.app.data.drone.DroneDataCompleteness
 import it.droneskycheck.app.data.drone.DroneCatalogMatchResult
 import it.droneskycheck.app.data.drone.DroneCatalogMatchStatus
@@ -188,6 +196,7 @@ import it.droneskycheck.app.map.MapLayerIds
 import it.droneskycheck.app.ui.authorization.AuthorizationDraftSheet
 import it.droneskycheck.app.ui.profile.PilotProfileSheet
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collect
 import kotlin.math.roundToInt
 import org.json.JSONArray
 import org.json.JSONObject
@@ -215,6 +224,9 @@ fun MapScreen(
     val authorizationRepository = remember(context) { LocalAuthorizationRepository(context.applicationContext) }
     val activity = context.findActivity()
     val uiState by viewModel.uiState.collectAsState()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val hapticFeedback = LocalHapticFeedback.current
+    val trafficAlertToneGenerator = rememberTrafficAlertToneGenerator()
     val visibleLayerCategories = uiState.layerVisibility
         .filterValues { it }
         .keys
@@ -234,6 +246,29 @@ fun MapScreen(
 
     LaunchedEffect(authorizationRepository) {
         reloadActiveDraft()
+    }
+    LaunchedEffect(
+        viewModel,
+        lifecycleOwner,
+        trafficAlertToneGenerator,
+        uiState.trafficAlertSoundEnabled,
+        uiState.trafficAlertVibrationEnabled
+    ) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            viewModel.trafficAlertEvents.collect {
+                if (uiState.trafficAlertSoundEnabled) {
+                    trafficAlertToneGenerator?.startTone(
+                        ToneGenerator.TONE_PROP_ACK,
+                        TrafficAlertToneDurationMillis
+                    )
+                }
+                if (uiState.trafficAlertVibrationEnabled) {
+                    hapticFeedback.performHapticFeedback(
+                        androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress
+                    )
+                }
+            }
+        }
     }
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
@@ -279,6 +314,7 @@ fun MapScreen(
             authorizationAreaPoints = currentDraft?.operationData?.areaPoints.orEmpty().map { MapPoint(it.lat, it.lon) },
             authorizationAreaClosed = currentDraft?.operationData?.areaClosed == true,
             trafficAwareness = uiState.trafficAwareness,
+            trafficAssessments = uiState.trafficAssessments,
             userLocation = uiState.userLocation,
             shouldCenterOnUserLocation = uiState.shouldCenterOnUserLocation,
             onUserLocationCentered = viewModel::onUserLocationCentered,
@@ -325,6 +361,11 @@ fun MapScreen(
 
         MapTitlePill(
             statusMessage = uiState.mapStatusMessage,
+            trafficAttention = trafficAttentionPresentation(
+                targets = uiState.trafficAwareness.response?.traffic?.targets.orEmpty(),
+                assessments = uiState.trafficAssessments
+            ),
+            onTrafficAttentionClick = viewModel::onTrafficTargetSelected,
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .windowInsetsPadding(WindowInsets.safeDrawing)
@@ -394,6 +435,7 @@ fun MapScreen(
                     viewModel.enableTrafficAwareness()
                 }
             },
+            onTrafficSettingsClick = viewModel::onTrafficAlertSettingsRequested,
             onLocationClick = {
                 when {
                     uiState.isUserLocationEnabled -> viewModel.onLocationControlRequested()
@@ -446,6 +488,16 @@ fun MapScreen(
                 onAnalyzeHere = viewModel::onAnalyzeUserLocationRequested,
                 onDisable = viewModel::onLocationDisabled,
                 onDismiss = viewModel::onLocationControlDismissed
+            )
+        }
+
+        if (uiState.isTrafficAlertSettingsSheetVisible) {
+            TrafficAlertSettingsBottomSheet(
+                soundEnabled = uiState.trafficAlertSoundEnabled,
+                vibrationEnabled = uiState.trafficAlertVibrationEnabled,
+                onSoundEnabledChanged = viewModel::onTrafficAlertSoundEnabledChanged,
+                onVibrationEnabledChanged = viewModel::onTrafficAlertVibrationEnabledChanged,
+                onDismiss = viewModel::onTrafficAlertSettingsDismissed
             )
         }
 
@@ -633,6 +685,7 @@ private fun MapControlsToolbar(
     trafficAwareness: TrafficAwarenessState,
     onLayersClick: () -> Unit,
     onTrafficClick: () -> Unit,
+    onTrafficSettingsClick: () -> Unit,
     onLocationClick: () -> Unit,
     onProfileClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -754,6 +807,33 @@ private fun MapControlsToolbar(
                 }
             ) {
                 TrafficAwarenessButtonContent(trafficAwareness)
+            }
+        }
+
+        AnimatedVisibility(
+            visible = expanded && trafficAwareness.enabled,
+            enter = actionEnter,
+            exit = actionExit,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .offset(x = (-72).dp, y = (-200).dp)
+        ) {
+            MapActionFab(
+                label = "Avvisi",
+                direction = MapActionDirection.Left,
+                contentDescription = "Impostazioni avvisi Traffic Awareness",
+                containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                onClick = {
+                    expanded = false
+                    onTrafficSettingsClick()
+                }
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp)
+                )
             }
         }
 
@@ -940,6 +1020,92 @@ private fun TrafficAwarenessButtonContent(state: TrafficAwarenessState) {
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun TrafficAlertSettingsBottomSheet(
+    soundEnabled: Boolean,
+    vibrationEnabled: Boolean,
+    onSoundEnabledChanged: (Boolean) -> Unit,
+    onVibrationEnabledChanged: (Boolean) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Text(
+                text = "Traffic Awareness",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "Gli avvisi vengono emessi quando un traffico entra nello stato di attenzione.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            TrafficAlertPreferenceRow(
+                title = "Suono",
+                checked = soundEnabled,
+                onCheckedChange = onSoundEnabledChanged
+            )
+            TrafficAlertPreferenceRow(
+                title = "Vibrazione",
+                checked = vibrationEnabled,
+                onCheckedChange = onVibrationEnabledChanged
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+    }
+}
+
+@Composable
+private fun TrafficAlertPreferenceRow(
+    title: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = FontWeight.SemiBold
+        )
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange
+        )
+    }
+}
+
+@Composable
+private fun rememberTrafficAlertToneGenerator(): ToneGenerator? {
+    val generator = remember {
+        runCatching {
+            ToneGenerator(AudioManager.STREAM_NOTIFICATION, TrafficAlertToneVolume)
+        }.getOrNull()
+    }
+    DisposableEffect(generator) {
+        onDispose {
+            generator?.release()
+        }
+    }
+    return generator
+}
+
+@Composable
 private fun LocationTargetIcon(modifier: Modifier = Modifier) {
     val color = LocalContentColor.current
     Canvas(modifier = modifier) {
@@ -1041,7 +1207,7 @@ private fun TrafficTargetBottomSheet(
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val rows = target.trafficSheetRows(assessment)
+    val presentation = target.trafficSheetPresentation(assessment)
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1050,31 +1216,108 @@ private fun TrafficTargetBottomSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .heightIn(max = 620.dp)
+                .verticalScroll(rememberScrollState())
                 .padding(start = 24.dp, top = 8.dp, end = 24.dp, bottom = 32.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            TrafficTargetSheetHeader(presentation)
+            presentation.sections.forEach { section ->
+                TrafficTargetSectionCard(section)
+            }
+        }
+    }
+}
+
+@Composable
+private fun TrafficTargetSheetHeader(presentation: TrafficTargetSheetPresentation) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        Icon(
+            imageVector = Icons.Default.Flight,
+            contentDescription = null,
+            modifier = Modifier
+                .padding(top = 4.dp)
+                .size(26.dp),
+            tint = MaterialTheme.colorScheme.primary
+        )
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Text(
-                text = target.trafficSheetTitle(),
+                text = presentation.title,
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            if (rows.isEmpty()) {
+            presentation.sourceLabel?.let {
                 Text(
-                    text = "Dettagli traffico non disponibili.",
+                    text = it,
                     style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            presentation.secondaryIdentity?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+        ) {
+            Text(
+                text = presentation.relevanceLabel,
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1
+            )
+        }
+    }
+}
+
+@Composable
+private fun TrafficTargetSectionCard(section: TrafficTargetSheetSection) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.72f)
+        ),
+        shape = MaterialTheme.shapes.medium
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = section.title.uppercase(),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            section.rows.forEach { row ->
+                TrafficTargetInfoRow(row)
+            }
+            section.note?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-            } else {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    rows.forEach { row ->
-                        TrafficTargetInfoRow(row)
-                    }
-                }
             }
         }
     }
@@ -1340,11 +1583,13 @@ private fun LayerVisibilityRow(
 @Composable
 private fun MapTitlePill(
     statusMessage: String?,
+    trafficAttention: TrafficAttentionPresentation?,
+    onTrafficAttentionClick: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val degraded = !statusMessage.isNullOrBlank()
     Surface(
-        modifier = modifier.widthIn(max = 300.dp),
+        modifier = modifier.widthIn(max = 340.dp),
         shape = MaterialTheme.shapes.large,
         color = if (degraded) {
             MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.94f)
@@ -1361,7 +1606,7 @@ private fun MapTitlePill(
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Text(
                 text = statusMessage ?: "Drone Sky Check",
@@ -1381,6 +1626,81 @@ private fun MapTitlePill(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+            AnimatedVisibility(
+                visible = !degraded && trafficAttention != null,
+                enter = fadeIn(),
+                exit = fadeOut()
+            ) {
+                trafficAttention?.let {
+                    TrafficAttentionBanner(
+                        attention = it,
+                        onClick = { onTrafficAttentionClick(it.targetId) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TrafficAttentionBanner(
+    attention: TrafficAttentionPresentation,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .semantics {
+                contentDescription = "${attention.title}. ${attention.detail}"
+            },
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.tertiaryContainer,
+        contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+        tonalElevation = 2.dp
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.Flight,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp)
+            )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(1.dp)
+            ) {
+                Text(
+                    text = attention.title,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = attention.detail,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            if (attention.attentionCount > 1) {
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
+                    contentColor = MaterialTheme.colorScheme.onSurface
+                ) {
+                    Text(
+                        text = attention.attentionCount.toString(),
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
         }
     }
 }
@@ -5421,3 +5741,5 @@ private val TemporalActiveColor = Color(198, 40, 40)
 private val TemporalInactiveColor = Color(46, 125, 50)
 private val TemporalUnknownColor = Color(144, 164, 174)
 private const val CoordinateDecimals = 5
+private const val TrafficAlertToneDurationMillis = 120
+private const val TrafficAlertToneVolume = 60

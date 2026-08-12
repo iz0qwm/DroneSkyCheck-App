@@ -58,6 +58,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
@@ -686,6 +688,49 @@ class MapViewModelTest {
     }
 
     @Test
+    fun trafficAttentionBannerTargetUsesExistingTargetSelectionFlow() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val traffic = FakeTrafficAwarenessClient(
+            results = ArrayDeque(
+                listOf(
+                    Result.success(
+                        trafficResponse(
+                            center = MapPoint(41.9, 12.5),
+                            targets = listOf(
+                                trafficTarget(
+                                    id = "traffic:attention",
+                                    lat = 41.9 + metersToLatDegreesForTest(2_000.0),
+                                    lon = 12.5,
+                                    callsign = "RYR9ZQ",
+                                    speedMps = 40.0,
+                                    trackDeg = 180.0,
+                                    ageSec = 2.0
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+        val viewModel = viewModel(
+            scope = scope,
+            traffic = traffic,
+            preferences = InMemoryMapPreferences(),
+            trafficPollingIntervalMillis = 10_000
+        )
+
+        viewModel.onMapTapped(selection(41.9, 12.5))
+        waitUntil { viewModel.uiState.value.selectedPoint != null }
+        viewModel.enableTrafficAwareness()
+        waitUntil { viewModel.uiState.value.trafficAssessments["traffic:attention"] != null }
+        viewModel.onTrafficTargetSelected("traffic:attention")
+
+        assertEquals("traffic:attention", viewModel.uiState.value.selectedTrafficTarget?.id)
+        assertFalse(viewModel.uiState.value.isZoneSheetVisible)
+        scope.cancel()
+    }
+
+    @Test
     fun trafficAssessmentsAreComputedForLatestSnapshotAndSelectedPoint() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val traffic = FakeTrafficAwarenessClient(
@@ -726,6 +771,104 @@ class MapViewModelTest {
             it.droneskycheck.app.data.traffic.TrafficRelevance.ATTENTION,
             viewModel.uiState.value.trafficAssessments["traffic:attention"]?.relevance
         )
+        scope.cancel()
+    }
+
+    @Test
+    fun trafficAlertPreferencesLoadAndPersistWithoutChangingTrafficAwareness() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val preferences = InMemoryMapPreferences(
+            initialTrafficAlertSoundEnabled = false,
+            initialTrafficAlertVibrationEnabled = true
+        )
+        val viewModel = viewModel(
+            scope = scope,
+            preferences = preferences,
+            trafficPollingIntervalMillis = 10_000
+        )
+
+        assertFalse(viewModel.uiState.value.trafficAlertSoundEnabled)
+        assertTrue(viewModel.uiState.value.trafficAlertVibrationEnabled)
+
+        viewModel.onTrafficAlertSettingsRequested()
+        viewModel.onTrafficAlertSoundEnabledChanged(true)
+        viewModel.onTrafficAlertVibrationEnabledChanged(false)
+        viewModel.onTrafficAlertSettingsDismissed()
+
+        assertTrue(preferences.isTrafficAlertSoundEnabled())
+        assertFalse(preferences.isTrafficAlertVibrationEnabled())
+        assertTrue(viewModel.uiState.value.trafficAlertSoundEnabled)
+        assertFalse(viewModel.uiState.value.trafficAlertVibrationEnabled)
+        assertFalse(viewModel.uiState.value.isTrafficAlertSettingsSheetVisible)
+        assertFalse(viewModel.uiState.value.trafficAwareness.enabled)
+        scope.cancel()
+    }
+
+    @Test
+    fun trafficAlertEventIsEmittedForActiveCollectorsOnlyOnAttentionEntry() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val viewModel = viewModel(
+            scope = scope,
+            traffic = FakeTrafficAwarenessClient(
+                results = ArrayDeque(
+                    listOf(
+                        Result.success(
+                            trafficResponse(
+                                center = MapPoint(41.9, 12.5),
+                                targets = listOf(
+                                    trafficTarget(
+                                        id = "traffic:attention",
+                                        lat = 41.9 + metersToLatDegreesForTest(2_000.0),
+                                        lon = 12.5,
+                                        callsign = "T1",
+                                        speedMps = 40.0,
+                                        trackDeg = 180.0,
+                                        ageSec = 2.0
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            ),
+            preferences = InMemoryMapPreferences(
+                initialTrafficAlertSoundEnabled = false,
+                initialTrafficAlertVibrationEnabled = false
+            ),
+            trafficPollingIntervalMillis = 10_000
+        )
+        var events = 0
+        val collector = launch {
+            viewModel.trafficAlertEvents.collect {
+                events += 1
+            }
+        }
+        delay(50)
+
+        viewModel.onMapTapped(selection(41.9, 12.5))
+        waitUntil { viewModel.uiState.value.selectedPoint != null }
+        viewModel.enableTrafficAwareness()
+        waitUntil { events == 1 }
+
+        assertEquals(1, events)
+        assertFalse(viewModel.uiState.value.trafficAlertSoundEnabled)
+        assertFalse(viewModel.uiState.value.trafficAlertVibrationEnabled)
+        assertEquals(
+            it.droneskycheck.app.data.traffic.TrafficRelevance.ATTENTION,
+            viewModel.uiState.value.trafficAssessments["traffic:attention"]?.relevance
+        )
+        collector.cancel()
+        var replayedEvents = 0
+        val lateCollector = launch {
+            viewModel.trafficAlertEvents.collect {
+                replayedEvents += 1
+            }
+        }
+        viewModel.onTrafficAlertSettingsRequested()
+        delay(50)
+
+        assertEquals(0, replayedEvents)
+        lateCollector.cancel()
         scope.cancel()
     }
 

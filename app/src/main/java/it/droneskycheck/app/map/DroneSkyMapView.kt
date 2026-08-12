@@ -27,6 +27,7 @@ import it.droneskycheck.app.data.ZonesRepository
 import it.droneskycheck.app.data.traffic.TrafficAwarenessDefaults
 import it.droneskycheck.app.data.traffic.TrafficAwarenessLogTag
 import it.droneskycheck.app.data.traffic.TrafficAwarenessState
+import it.droneskycheck.app.data.traffic.TrafficAssessment
 import it.droneskycheck.app.data.traffic.coarseTraffic
 import it.droneskycheck.app.ui.map.CameraBounds
 import it.droneskycheck.app.ui.map.DemoZone
@@ -81,6 +82,7 @@ fun DroneSkyMapView(
     authorizationAreaPoints: List<MapPoint>,
     authorizationAreaClosed: Boolean,
     trafficAwareness: TrafficAwarenessState,
+    trafficAssessments: Map<String, TrafficAssessment>,
     userLocation: UserLocation?,
     shouldCenterOnUserLocation: Boolean,
     onUserLocationCentered: () -> Unit,
@@ -163,7 +165,7 @@ fun DroneSkyMapView(
                     )
                     updatePointMarkers(style, selectedPoint, userLocation)
                     updateAuthorizationDrawing(style, authorizationTakeoff, authorizationAreaPoints, authorizationAreaClosed)
-                    updateTrafficAwareness(style, selectedPoint, trafficAwareness)
+                    updateTrafficAwareness(style, selectedPoint, trafficAwareness, trafficAssessments)
                     if (shouldCenterOnUserLocation && userLocation != null) {
                         centerOnUserLocation(map, userLocation)
                         onUserLocationCentered()
@@ -408,6 +410,26 @@ private fun addTrafficAwarenessLayers(style: Style) {
             lineWidth(1.6f)
         )
     )
+    val attentionHaloLayerCreated = style.addLayerBelowIfMissing(
+        MapLayerIds.TRAFFIC_AWARENESS_ATTENTION_HALO_LAYER_ID,
+        CircleLayer(
+            MapLayerIds.TRAFFIC_AWARENESS_ATTENTION_HALO_LAYER_ID,
+            MapLayerIds.TRAFFIC_AWARENESS_SOURCE_ID
+        ).withProperties(
+            circleRadius(TrafficMapStyle.AttentionHaloRadius),
+            circleColor(TRAFFIC_AWARENESS_ATTENTION_COLOR),
+            circleOpacity(0.24f),
+            circleStrokeColor(TRAFFIC_AWARENESS_ATTENTION_COLOR),
+            circleStrokeOpacity(0.76f),
+            circleStrokeWidth(1.4f)
+        ).withFilter(
+            Expression.eq(
+                Expression.get(TrafficAwarenessMapProperties.Relevance),
+                Expression.literal(TrafficRelevanceAttention)
+            )
+        ),
+        MapLayerIds.TRAFFIC_AWARENESS_SYMBOL_LAYER_ID
+    )
     val symbolLayerCreated = style.addLayerIfMissing(
         MapLayerIds.TRAFFIC_AWARENESS_SYMBOL_LAYER_ID,
         SymbolLayer(
@@ -426,11 +448,13 @@ private fun addTrafficAwarenessLayers(style: Style) {
         targetSourceCreated ||
         radiusFillLayerCreated ||
         radiusLineLayerCreated ||
+        attentionHaloLayerCreated ||
         symbolLayerCreated
     ) {
         DscLogger.debug(
             TrafficAwarenessLogTag,
             "map install sourceCreated=$targetSourceCreated symbolLayerCreated=$symbolLayerCreated " +
+                "attentionHaloLayerCreated=$attentionHaloLayerCreated " +
                 "radiusSourceCreated=$radiusSourceCreated radiusLayersCreated=${radiusFillLayerCreated || radiusLineLayerCreated}"
         )
     }
@@ -484,7 +508,8 @@ private fun updatePointMarkers(
 private fun updateTrafficAwareness(
     style: Style,
     selectedPoint: MapPoint?,
-    trafficAwareness: TrafficAwarenessState
+    trafficAwareness: TrafficAwarenessState,
+    trafficAssessments: Map<String, TrafficAssessment>
 ) {
     val enabled = trafficAwareness.enabled
     val targets = if (enabled) {
@@ -494,7 +519,7 @@ private fun updateTrafficAwareness(
     }
     addTrafficAwarenessLayers(style)
 
-    val targetFeatures = trafficTargetsFeatureCollection(targets)
+    val targetFeatures = trafficTargetsFeatureCollection(targets, trafficAssessments)
     val targetUpdated = style.setGeoJsonSourceIfAvailable(
         MapLayerIds.TRAFFIC_AWARENESS_SOURCE_ID,
         targetFeatures
@@ -711,6 +736,18 @@ private fun Style.addGeoJsonSourceIfMissing(sourceId: String, featureCollection:
 private fun Style.addLayerIfMissing(layerId: String, layer: Layer): Boolean =
     if (getLayer(layerId) == null) {
         addLayer(layer)
+        true
+    } else {
+        false
+    }
+
+private fun Style.addLayerBelowIfMissing(layerId: String, layer: Layer, belowLayerId: String): Boolean =
+    if (getLayer(layerId) == null) {
+        if (getLayer(belowLayerId) == null) {
+            addLayer(layer)
+        } else {
+            addLayerBelow(layer, belowLayerId)
+        }
         true
     } else {
         false
@@ -946,6 +983,8 @@ private const val NOTAM_ZEBRA_PATTERN_ID = "dsc-notam-zebra"
 private const val TRAFFIC_AWARENESS_ICON_ID = "dsc-traffic-awareness-aircraft"
 private const val TRAFFIC_AWARENESS_ICON_SIZE_PX = 56
 private const val TRAFFIC_AWARENESS_COLOR = "#455a64"
+private const val TRAFFIC_AWARENESS_ATTENTION_COLOR = "#f9ab00"
+private const val TrafficRelevanceAttention = "ATTENTION"
 private const val NOTAM_ZEBRA_SIZE_PX = 32
 private const val NOTAM_ZEBRA_STEP_PX = 16
 private const val NOTAM_ZEBRA_STROKE_PX = 2.2f
@@ -954,6 +993,7 @@ private const val LOG_TAG = "DroneSkyMap"
 
 private object TrafficMapStyle {
     const val AircraftIconScale = 1.50f
+    const val AttentionHaloRadius = 17.0f
 }
 private val MAIN_HANDLER = Handler(Looper.getMainLooper())
 private val DSC_GEOJSON_EXECUTOR = Executors.newFixedThreadPool(3)
