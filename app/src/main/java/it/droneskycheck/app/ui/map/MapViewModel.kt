@@ -229,7 +229,7 @@ class MapViewModel(
         if (_uiState.value.trafficAwareness.enabled) {
             DscLogger.debug(
                 TrafficAwarenessLogTag,
-                "center changed poll restart=true lat=${selection.point.lat.coarseTraffic()} lon=${selection.point.lon.coarseTraffic()}"
+                "selectedPoint changed pollRestart=true lat=${selection.point.lat.coarseTraffic()} lon=${selection.point.lon.coarseTraffic()}"
             )
             startTrafficAwarenessPolling(selection.point, clearSnapshot = true)
         }
@@ -413,7 +413,7 @@ class MapViewModel(
         if (_uiState.value.selectedPoint == null) {
             DscLogger.debug(
                 TrafficAwarenessLogTag,
-                "using map center as traffic center lat=${point.lat.coarseTraffic()} lon=${point.lon.coarseTraffic()}"
+                "selectedPoint changed source=mapCenter lat=${point.lat.coarseTraffic()} lon=${point.lon.coarseTraffic()}"
             )
             _uiState.value = _uiState.value.copy(selectedPoint = point)
         }
@@ -467,7 +467,7 @@ class MapViewModel(
     }
 
     private suspend fun fetchTrafficAwareness(point: MapPoint) {
-        DscLogger.debug(
+        DscLogger.trace(
             TrafficAwarenessLogTag,
             "poll request lat=${point.lat.coarseTraffic()} lon=${point.lon.coarseTraffic()} " +
                 "radiusKm=${trafficAwarenessRadiusKm.coarseTraffic(0)}"
@@ -492,7 +492,7 @@ class MapViewModel(
         }
 
         result.onSuccess { response ->
-            DscLogger.debug(
+            DscLogger.trace(
                 TrafficAwarenessLogTag,
                 "state updated enabled=true targets=${response.traffic.targets.size}"
             )

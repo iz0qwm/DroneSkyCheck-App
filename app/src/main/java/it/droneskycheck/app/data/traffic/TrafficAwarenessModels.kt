@@ -162,13 +162,13 @@ fun parseTrafficAwarenessResponse(json: JSONObject): TrafficAwarenessResponse {
         providers = json.optJSONObject("providers").toProviderMap(),
         cache = json.optJSONObject("cache")?.toTrafficCacheInfo()
     ).also { response ->
-        DscLogger.debug(
+        DscLogger.trace(
             TrafficAwarenessLogTag,
             "parsed ok=${response.ok} trafficCount=${response.traffic.count} " +
                 "targetsParsed=${response.traffic.targets.size} cacheHit=${response.cache?.hit}"
         )
         response.traffic.targets.forEach { target ->
-            DscLogger.debug(
+            DscLogger.trace(
                 TrafficAwarenessLogTag,
                 "target id=${target.id} callsign=${target.identifiers.callsign ?: target.identifiers.registration ?: target.identifiers.icao24 ?: target.identifiers.sourceId} " +
                     "provider=${target.provider} source=${target.source} " +

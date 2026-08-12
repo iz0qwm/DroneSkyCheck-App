@@ -41,14 +41,14 @@ fun trafficTargetsFeatureCollection(targets: List<TrafficTarget>): FeatureCollec
             addNumberProperty(TrafficAwarenessMapProperties.RotationDeg, target.mapRotationDeg())
             addBooleanProperty(TrafficAwarenessMapProperties.HasRotation, target.hasMapRotation())
         }.also {
-            DscLogger.debug(
+            DscLogger.trace(
                 TrafficAwarenessLogTag,
                 "feature id=${target.id} lat=${target.position.lat.coarseTraffic(4)} " +
                     "lon=${target.position.lon.coarseTraffic(4)} rotation=${target.mapRotationDeg().coarseTraffic(2)}"
             )
         }
     }
-    DscLogger.debug(
+    DscLogger.trace(
         TrafficAwarenessLogTag,
         "GeoJSON build inputTargets=${targets.size} features=${features.size}"
     )

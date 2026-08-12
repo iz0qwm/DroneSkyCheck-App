@@ -381,13 +381,13 @@ fun MapScreen(
             onLayersClick = viewModel::onLayerPanelRequested,
             onTrafficClick = {
                 if (uiState.trafficAwareness.enabled) {
-                    DscLogger.debug(TrafficAwarenessLogTag, "toggle OFF")
+                    DscLogger.debug(TrafficAwarenessLogTag, "Traffic Awareness OFF")
                     viewModel.disableTrafficAwareness()
                 } else {
                     DscLogger.debug(
                         TrafficAwarenessLogTag,
-                        "toggle ON selectedPoint available=${uiState.selectedPoint != null} " +
-                            "cameraCenter available=${uiState.cameraBounds != null} " +
+                        "Traffic Awareness ON selectedPointAvailable=${uiState.selectedPoint != null} " +
+                            "cameraCenterAvailable=${uiState.cameraBounds != null} " +
                             "radiusKm=${TrafficAwarenessDefaults.DefaultRadiusKm.toInt()}"
                     )
                     viewModel.enableTrafficAwareness()

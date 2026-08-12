@@ -32,7 +32,7 @@ class TrafficAwarenessRepository(
             validateQuery(lat, lon, radiusKm)
 
             val url = "$endpointUrl?lat=${encode(lat)}&lon=${encode(lon)}&radius=${encode(radiusKm)}"
-            DscLogger.debug(
+            DscLogger.trace(
                 TrafficAwarenessLogTag,
                 "HTTP request start method=GET endpoint=appTrafficAwareness " +
                     "lat=${lat.coarseTraffic()} lon=${lon.coarseTraffic()} " +
@@ -47,7 +47,7 @@ class TrafficAwarenessRepository(
                 ),
                 timeoutMillis = TimeoutMillis
             )
-            DscLogger.debug(
+            DscLogger.trace(
                 TrafficAwarenessLogTag,
                 "HTTP response code=${response.statusCode} durationMs=${System.currentTimeMillis() - startedAt}"
             )
@@ -66,7 +66,7 @@ class TrafficAwarenessRepository(
 
             try {
                 parseTrafficAwarenessResponse(JSONObject(response.body)).also { parsed ->
-                    DscLogger.debug(
+                    DscLogger.trace(
                         TrafficAwarenessLogTag,
                         "providers ${parsed.providers.entries.joinToString(" ") { "${it.key}=${it.value.status}" }}"
                     )

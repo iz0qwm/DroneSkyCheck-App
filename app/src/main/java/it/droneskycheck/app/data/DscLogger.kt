@@ -10,6 +10,13 @@ internal object DscLogger {
         }
     }
 
+    fun trace(tag: String, message: String) {
+        runCatching {
+            Log.d(tag, message)
+            if (tag != AppLogTag) Log.d(AppLogTag, "[$tag] $message")
+        }
+    }
+
     fun warn(tag: String, message: String, throwable: Throwable? = null) {
         runCatching {
             if (throwable == null) {

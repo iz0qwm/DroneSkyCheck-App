@@ -197,7 +197,7 @@ private fun configureMap(
         it.addImage(NOTAM_ZEBRA_PATTERN_ID, createNotamZebraPattern())
         val trafficIcon = createTrafficAircraftIcon()
         it.addImage(TRAFFIC_AWARENESS_ICON_ID, trafficIcon)
-        DscLogger.debug(
+        DscLogger.trace(
             TrafficAwarenessLogTag,
             "map icon registered id=$TRAFFIC_AWARENESS_ICON_ID width=${trafficIcon.width} height=${trafficIcon.height}"
         )
@@ -221,7 +221,7 @@ private fun configureMap(
                 MapLayerIds.TRAFFIC_AWARENESS_SYMBOL_LAYER_ID
             )
             val trafficTargetId = trafficFeatures.firstNotNullOfOrNull(::featureToTrafficTargetId)
-            DscLogger.debug(
+            DscLogger.trace(
                 TrafficAwarenessLogTag,
                 "target tap featuresHit=${trafficFeatures.size} id=${trafficTargetId ?: "none"}"
             )
@@ -415,22 +415,24 @@ private fun addTrafficAwarenessLayers(style: Style) {
         ).withProperties(
             iconImage(TRAFFIC_AWARENESS_ICON_ID),
             iconRotate(Expression.get(TrafficAwarenessMapProperties.RotationDeg)),
-            iconSize(TRAFFIC_AWARENESS_SYMBOL_ICON_SIZE),
+            iconSize(TrafficMapStyle.AircraftIconScale),
             iconAllowOverlap(true),
             iconIgnorePlacement(true)
         )
     )
-    val alreadyExists = !radiusSourceCreated &&
-        !targetSourceCreated &&
-        !radiusFillLayerCreated &&
-        !radiusLineLayerCreated &&
-        !symbolLayerCreated
-    DscLogger.debug(
-        TrafficAwarenessLogTag,
-        "map install sourceCreated=$targetSourceCreated symbolLayerCreated=$symbolLayerCreated " +
-            "radiusSourceCreated=$radiusSourceCreated radiusLayersCreated=${radiusFillLayerCreated || radiusLineLayerCreated} " +
-            "alreadyExists=$alreadyExists"
-    )
+    if (
+        radiusSourceCreated ||
+        targetSourceCreated ||
+        radiusFillLayerCreated ||
+        radiusLineLayerCreated ||
+        symbolLayerCreated
+    ) {
+        DscLogger.debug(
+            TrafficAwarenessLogTag,
+            "map install sourceCreated=$targetSourceCreated symbolLayerCreated=$symbolLayerCreated " +
+                "radiusSourceCreated=$radiusSourceCreated radiusLayersCreated=${radiusFillLayerCreated || radiusLineLayerCreated}"
+        )
+    }
 }
 
 private fun updateAuthorizationDrawing(
@@ -496,7 +498,7 @@ private fun updateTrafficAwareness(
         MapLayerIds.TRAFFIC_AWARENESS_SOURCE_ID,
         targetFeatures
     )
-    DscLogger.debug(
+    DscLogger.trace(
         TrafficAwarenessLogTag,
         "map source update source=${MapLayerIds.TRAFFIC_AWARENESS_SOURCE_ID} " +
             "features=${targetFeatures.features().orEmpty().size} styleLoaded=true sourceFound=$targetUpdated"
@@ -514,7 +516,7 @@ private fun updateTrafficAwareness(
         MapLayerIds.TRAFFIC_AWARENESS_RADIUS_SOURCE_ID,
         radiusFeatures
     )
-    DscLogger.debug(
+    DscLogger.trace(
         TrafficAwarenessLogTag,
         "radius update center=${selectedPoint?.let { "${it.lat.coarseTraffic()},${it.lon.coarseTraffic()}" } ?: "none"} " +
             "radiusKm=${TrafficAwarenessDefaults.DefaultRadiusKm.coarseTraffic(0)} " +
@@ -942,12 +944,15 @@ private const val USER_LOCATION_PULSE_LAYER_ID = "dsc-user-location-pulse"
 private const val NOTAM_ZEBRA_PATTERN_ID = "dsc-notam-zebra"
 private const val TRAFFIC_AWARENESS_ICON_ID = "dsc-traffic-awareness-aircraft"
 private const val TRAFFIC_AWARENESS_ICON_SIZE_PX = 56
-private const val TRAFFIC_AWARENESS_SYMBOL_ICON_SIZE = 0.92f
 private const val TRAFFIC_AWARENESS_COLOR = "#455a64"
 private const val NOTAM_ZEBRA_SIZE_PX = 32
 private const val NOTAM_ZEBRA_STEP_PX = 16
 private const val NOTAM_ZEBRA_STROKE_PX = 2.2f
 private const val NOTAM_ZEBRA_OPACITY = 0.22f
 private const val LOG_TAG = "DroneSkyMap"
+
+private object TrafficMapStyle {
+    const val AircraftIconScale = 1.24f
+}
 private val MAIN_HANDLER = Handler(Looper.getMainLooper())
 private val DSC_GEOJSON_EXECUTOR = Executors.newFixedThreadPool(3)
