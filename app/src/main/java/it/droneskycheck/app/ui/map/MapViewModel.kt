@@ -196,6 +196,15 @@ class MapViewModel(
         )
     }
 
+    fun onLocationSearchSelected(point: MapPoint) {
+        requestAnalysis(
+            MapTapSelection(
+                point = point,
+                zone = null
+            )
+        )
+    }
+
     private fun requestAnalysis(
         selection: MapTapSelection,
         forceTimeline: Boolean = false

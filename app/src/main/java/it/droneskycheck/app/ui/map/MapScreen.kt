@@ -8,6 +8,8 @@ import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.location.Geocoder
+import android.os.Build
 import android.media.AudioManager
 import android.media.ToneGenerator
 import android.os.Bundle
@@ -46,6 +48,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -77,6 +80,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -108,6 +112,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
@@ -195,8 +200,12 @@ import it.droneskycheck.app.map.DroneSkyMapView
 import it.droneskycheck.app.map.MapLayerIds
 import it.droneskycheck.app.ui.authorization.AuthorizationDraftSheet
 import it.droneskycheck.app.ui.profile.PilotProfileSheet
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import kotlin.coroutines.resume
 import kotlin.math.roundToInt
 import org.json.JSONArray
 import org.json.JSONObject
@@ -232,6 +241,8 @@ fun MapScreen(
         .keys
     val permissionState = currentLocationPermissionState(context)
     var isPilotProfileSheetVisible by remember { mutableStateOf(false) }
+    var isLocationSearchSheetVisible by remember { mutableStateOf(false) }
+    var pendingCameraFocusPoint by remember { mutableStateOf<MapPoint?>(null) }
     var currentDraft by remember { mutableStateOf<AuthorizationDraft?>(null) }
     var isDraftSheetVisible by remember { mutableStateOf(false) }
     var conflictingDraft by remember { mutableStateOf<AuthorizationDraft?>(null) }
@@ -317,7 +328,9 @@ fun MapScreen(
             trafficAssessments = uiState.trafficAssessments,
             userLocation = uiState.userLocation,
             shouldCenterOnUserLocation = uiState.shouldCenterOnUserLocation,
+            cameraFocusPoint = pendingCameraFocusPoint,
             onUserLocationCentered = viewModel::onUserLocationCentered,
+            onCameraFocusHandled = { pendingCameraFocusPoint = null },
             onTrafficTargetTapped = viewModel::onTrafficTargetSelected,
             onMapTapped = { selection ->
                 val draft = currentDraft
@@ -443,6 +456,7 @@ fun MapScreen(
                     else -> viewModel.onLocationPermissionExplanationRequested()
                 }
             },
+            onSearchClick = { isLocationSearchSheetVisible = true },
             onProfileClick = { isPilotProfileSheetVisible = true },
             modifier = Modifier
                 .align(Alignment.BottomEnd)
@@ -488,6 +502,37 @@ fun MapScreen(
                 onAnalyzeHere = viewModel::onAnalyzeUserLocationRequested,
                 onDisable = viewModel::onLocationDisabled,
                 onDismiss = viewModel::onLocationControlDismissed
+            )
+        }
+
+        if (isLocationSearchSheetVisible) {
+            LocationSearchBottomSheet(
+                initialPoint = uiState.selectedPoint ?: uiState.cameraBounds?.toCenterPoint(),
+                onResolvePlace = { query -> resolveLocationSearch(context.applicationContext, query) },
+                onPointSelected = { point ->
+                    pendingCameraFocusPoint = point
+                    val draft = currentDraft
+                    if (draft != null && draft.workflowStep != AuthorizationWorkflowSteps.Form) {
+                        when (draft.workflowStep) {
+                            AuthorizationWorkflowSteps.Takeoff -> {
+                                planningWarning = null
+                                coroutineScope.launch {
+                                    currentDraft = authorizationRepository.setTakeoff(
+                                        id = draft.id,
+                                        lat = point.lat,
+                                        lon = point.lon
+                                    )
+                                }
+                            }
+                            else -> {
+                                planningWarning = validateAreaPointSelection(draft, emptyList())
+                            }
+                        }
+                    } else {
+                        viewModel.onLocationSearchSelected(point)
+                    }
+                },
+                onDismiss = { isLocationSearchSheetVisible = false }
             )
         }
 
@@ -687,6 +732,7 @@ private fun MapControlsToolbar(
     onTrafficClick: () -> Unit,
     onTrafficSettingsClick: () -> Unit,
     onLocationClick: () -> Unit,
+    onSearchClick: () -> Unit,
     onProfileClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -831,6 +877,33 @@ private fun MapControlsToolbar(
             ) {
                 Icon(
                     imageVector = Icons.Default.Settings,
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        }
+
+        AnimatedVisibility(
+            visible = expanded,
+            enter = actionEnter,
+            exit = actionExit,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .offset(x = (-144).dp)
+        ) {
+            MapActionFab(
+                label = "Cerca",
+                direction = MapActionDirection.Left,
+                contentDescription = "Cerca luogo o coordinate",
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                onClick = {
+                    expanded = false
+                    onSearchClick()
+                }
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Search,
                     contentDescription = null,
                     modifier = Modifier.size(24.dp)
                 )
@@ -1346,6 +1419,216 @@ private fun TrafficTargetInfoRow(row: TrafficAwarenessInfoRow) {
             maxLines = 2,
             overflow = TextOverflow.Ellipsis
         )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LocationSearchBottomSheet(
+    initialPoint: MapPoint?,
+    onResolvePlace: suspend (String) -> Result<MapPoint>,
+    onPointSelected: (MapPoint) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val coroutineScope = rememberCoroutineScope()
+    var useCoordinates by remember { mutableStateOf(false) }
+    var query by remember { mutableStateOf("") }
+    var latitude by remember { mutableStateOf(initialPoint?.lat?.formatCoordinate().orEmpty()) }
+    var longitude by remember { mutableStateOf(initialPoint?.lon?.formatCoordinate().orEmpty()) }
+    var isLoading by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    fun selectPoint(point: MapPoint) {
+        error = null
+        onPointSelected(point)
+        onDismiss()
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(start = 24.dp, top = 8.dp, end = 24.dp, bottom = 36.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Text(
+                text = "Cerca un punto",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = "Inserisci una citta, una via o passa alle coordinate per scegliere latitudine e longitudine.",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Surface(
+                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f),
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            text = if (useCoordinates) "Coordinate" else "Luogo",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = if (useCoordinates) {
+                                "Inserimento manuale lat/lon"
+                            } else {
+                                "Ricerca per citta, via, indirizzo"
+                            },
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    Switch(
+                        checked = useCoordinates,
+                        onCheckedChange = {
+                            useCoordinates = it
+                            error = null
+                        }
+                    )
+                }
+            }
+
+            if (useCoordinates) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedTextField(
+                        value = latitude,
+                        onValueChange = {
+                            latitude = it
+                            error = null
+                        },
+                        modifier = Modifier.weight(1f),
+                        label = { Text("Latitudine") },
+                        placeholder = { Text("41.9028") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        isError = error != null
+                    )
+                    OutlinedTextField(
+                        value = longitude,
+                        onValueChange = {
+                            longitude = it
+                            error = null
+                        },
+                        modifier = Modifier.weight(1f),
+                        label = { Text("Longitudine") },
+                        placeholder = { Text("12.4964") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        isError = error != null
+                    )
+                }
+            } else {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = {
+                        query = it
+                        error = null
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Luogo") },
+                    placeholder = { Text("Roma, via del Corso") },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = null
+                        )
+                    },
+                    singleLine = true,
+                    isError = error != null
+                )
+            }
+
+            error?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(
+                    onClick = onDismiss,
+                    enabled = !isLoading
+                ) {
+                    Text("Annulla")
+                }
+                Spacer(modifier = Modifier.width(10.dp))
+                Button(
+                    onClick = {
+                        if (useCoordinates) {
+                            val point = parseLocationCoordinates(latitude, longitude)
+                            if (point == null) {
+                                error = "Inserisci coordinate valide: latitudine da -90 a 90, longitudine da -180 a 180."
+                            } else {
+                                selectPoint(point)
+                            }
+                        } else {
+                            val trimmedQuery = query.trim()
+                            if (trimmedQuery.length < 2) {
+                                error = "Inserisci almeno due caratteri per cercare un luogo."
+                                return@Button
+                            }
+                            isLoading = true
+                            error = null
+                            coroutineScope.launch {
+                                val result = onResolvePlace(trimmedQuery)
+                                isLoading = false
+                                result.fold(
+                                    onSuccess = ::selectPoint,
+                                    onFailure = { failure ->
+                                        error = failure.message ?: "Ricerca non riuscita. Puoi usare le coordinate."
+                                    }
+                                )
+                            }
+                        }
+                    },
+                    enabled = !isLoading
+                ) {
+                    if (isLoading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = LocalContentColor.current
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.size(8.dp))
+                    Text(if (useCoordinates) "Vai al punto" else "Cerca")
+                }
+            }
+        }
     }
 }
 
@@ -5452,6 +5735,75 @@ private fun String.normalizeZoneIdentity(): String =
 
 private fun MapPoint.formatForPlanning(): String =
     "${lat.formatCoordinate()} ${lon.formatCoordinate()}"
+
+private suspend fun resolveLocationSearch(context: Context, query: String): Result<MapPoint> =
+    withContext(Dispatchers.IO) {
+        runCatching {
+            if (!Geocoder.isPresent()) {
+                error("Ricerca luogo non disponibile su questo dispositivo. Puoi inserire le coordinate.")
+            }
+            val addresses = Geocoder(context, Locale.ITALY)
+                .locationResults(query.trim(), 1)
+            val address = addresses.firstOrNull()
+                ?: error("Nessun luogo trovato. Prova con citta e via, oppure usa le coordinate.")
+            MapPoint(
+                lat = address.latitude,
+                lon = address.longitude
+            ).takeIf { it.isValidSearchPoint() }
+                ?: error("Il luogo trovato non contiene coordinate valide.")
+        }
+    }
+
+private suspend fun Geocoder.locationResults(query: String, maxResults: Int): List<android.location.Address> =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        suspendCancellableCoroutine { continuation ->
+            runCatching {
+                getFromLocationName(
+                    query,
+                    maxResults,
+                    object : Geocoder.GeocodeListener {
+                        override fun onGeocode(addresses: MutableList<android.location.Address>) {
+                            if (continuation.isActive) continuation.resume(addresses)
+                        }
+
+                        override fun onError(errorMessage: String?) {
+                            if (continuation.isActive) continuation.resume(emptyList())
+                        }
+                    }
+                )
+            }.onFailure {
+                if (continuation.isActive) continuation.resume(emptyList())
+            }
+        }
+    } else {
+        @Suppress("DEPRECATION")
+        getFromLocationName(query, maxResults).orEmpty()
+    }
+
+private fun parseLocationCoordinates(latitude: String, longitude: String): MapPoint? {
+    val lat = latitude.toUserCoordinateDouble() ?: return null
+    val lon = longitude.toUserCoordinateDouble() ?: return null
+    return MapPoint(lat = lat, lon = lon)
+        .takeIf { it.isValidSearchPoint() }
+}
+
+private fun String.toUserCoordinateDouble(): Double? =
+    trim()
+        .replace(',', '.')
+        .toDoubleOrNull()
+
+private fun MapPoint.isValidSearchPoint(): Boolean =
+    lat.isFinite() &&
+        lon.isFinite() &&
+        lat in -90.0..90.0 &&
+        lon in -180.0..180.0
+
+private fun CameraBounds.toCenterPoint(): MapPoint? {
+    val lat = (north + south) / 2.0
+    val lon = (east + west) / 2.0
+    return MapPoint(lat = lat, lon = lon)
+        .takeIf { it.isValidSearchPoint() }
+}
 
 private fun String.toWorkflowLabel(): String =
     when (this) {

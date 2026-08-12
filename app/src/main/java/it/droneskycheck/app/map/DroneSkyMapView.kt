@@ -85,7 +85,9 @@ fun DroneSkyMapView(
     trafficAssessments: Map<String, TrafficAssessment>,
     userLocation: UserLocation?,
     shouldCenterOnUserLocation: Boolean,
+    cameraFocusPoint: MapPoint?,
     onUserLocationCentered: () -> Unit,
+    onCameraFocusHandled: () -> Unit,
     onTrafficTargetTapped: (String) -> Unit,
     onMapTapped: (MapTapSelection) -> Unit,
     onCameraIdle: (CameraBounds) -> Unit,
@@ -169,6 +171,10 @@ fun DroneSkyMapView(
                     if (shouldCenterOnUserLocation && userLocation != null) {
                         centerOnUserLocation(map, userLocation)
                         onUserLocationCentered()
+                    }
+                    if (cameraFocusPoint != null) {
+                        centerOnPoint(map, cameraFocusPoint, SEARCH_RESULT_CENTER_ZOOM)
+                        onCameraFocusHandled()
                     }
                 }
             }
@@ -551,11 +557,15 @@ private fun updateTrafficAwareness(
 }
 
 private fun centerOnUserLocation(map: MapLibreMap, userLocation: UserLocation) {
+    centerOnPoint(map, userLocation.point, USER_LOCATION_CENTER_ZOOM)
+}
+
+private fun centerOnPoint(map: MapLibreMap, point: MapPoint, minZoom: Double) {
     val currentZoom = map.cameraPosition.zoom
     map.animateCamera(
         CameraUpdateFactory.newLatLngZoom(
-            LatLng(userLocation.point.lat, userLocation.point.lon),
-            maxOf(currentZoom, USER_LOCATION_CENTER_ZOOM)
+            LatLng(point.lat, point.lon),
+            maxOf(currentZoom, minZoom)
         )
     )
 }
@@ -962,6 +972,7 @@ private const val ROME_LATITUDE = 41.9028
 private const val ROME_LONGITUDE = 12.4964
 private const val ROME_ZOOM = 10.0
 private const val USER_LOCATION_CENTER_ZOOM = 15.0
+private const val SEARCH_RESULT_CENTER_ZOOM = 13.5
 private const val DEFAULT_APPROXIMATE_ACCURACY_METERS = 3_000f
 private const val SELECTED_POINT_SOURCE_ID = "dsc-selected-point-source"
 private const val SELECTED_POINT_RING_LAYER_ID = "dsc-selected-point-ring"
