@@ -1,8 +1,10 @@
 package it.droneskycheck.app.map
 
+import it.droneskycheck.app.data.DscApiConfig
+
 object MapLayerIds {
     const val STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
-    const val KWOS_DATA_BASE_URL = "https://www.kwos.org/appoggio/droni/DroneSkyCheck"
+    const val KWOS_DATA_BASE_URL = DscApiConfig.KwosDataBaseUrl
 
     val STATIC_LAYERS = listOf(
         DscMapLayer("p-parks-enr", "split/P_PARKS_ENR_561.geojson", DscLayerCategory.Parks, "Parks ENR 5.6.1", minZoom = 5.0f, zeroLimitOpacity = 0.05f),

@@ -34,6 +34,9 @@ data class DroneOperationalCapabilities(
     val technicalProfileSourceName: String? = null,
     val technicalProfileSourceReference: String? = null,
     val technicalProfileMatchStatus: String? = null,
+    val technicalCatalogSchemaVersion: Int? = null,
+    val technicalCatalogVersion: Int? = null,
+    val technicalCatalogUpdatedAt: String? = null,
     val manualWindResistanceOverride: Boolean = false
 )
 

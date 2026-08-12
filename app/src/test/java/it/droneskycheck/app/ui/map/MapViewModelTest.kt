@@ -23,6 +23,7 @@ import it.droneskycheck.app.data.drone.DroneTechnicalCatalogClient
 import it.droneskycheck.app.data.drone.DroneTechnicalCatalogResolver
 import it.droneskycheck.app.data.drone.InMemoryDroneTechnicalCatalogClient
 import it.droneskycheck.app.data.drone.parseDroneTechnicalCatalog
+import it.droneskycheck.app.data.flight.FlightOpportunityStatus
 import it.droneskycheck.app.data.weather.WeatherForecast
 import it.droneskycheck.app.data.weather.WeatherForecastCacheDto
 import it.droneskycheck.app.data.weather.WeatherForecastClient
@@ -56,7 +57,7 @@ class MapViewModelTest {
     @Test
     fun operationalContextDoesNotStartOnPointSelection() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
-        val weather = FakeWeatherClient()
+        val weather = FakeWeatherClient(forecast = weatherForecast())
         val legal = FakeLegalTimelineClient()
         val viewModel = viewModel(
             scope = scope,
@@ -79,7 +80,7 @@ class MapViewModelTest {
     @Test
     fun requestingOperationalContextStartsTimelineAndWeatherForSelectedPoint() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
-        val weather = FakeWeatherClient()
+        val weather = FakeWeatherClient(forecast = weatherForecast())
         val legal = FakeLegalTimelineClient()
         val viewModel = viewModel(
             scope = scope,
@@ -91,7 +92,7 @@ class MapViewModelTest {
         viewModel.onMapTapped(selection(41.9, 12.5))
         waitUntil { viewModel.uiState.value.selectedPoint != null }
         viewModel.onOperationalContextRequested()
-        waitUntil { weather.calls == 1 }
+        waitUntil { viewModel.uiState.value.flightOpportunityResult != null }
 
         assertTrue(viewModel.uiState.value.isOperationalContextRequested)
         assertTrue(viewModel.uiState.value.isWeatherAnalysisEnabled)
@@ -100,28 +101,39 @@ class MapViewModelTest {
         assertEquals(Instant.parse("2026-08-11T06:00:00Z"), legal.lastFrom)
         assertEquals(Instant.parse("2026-08-16T22:00:00Z"), legal.lastTo)
         assertEquals(MapPoint(41.9, 12.5), weather.lastPoint)
+        assertEquals(FlightOpportunityStatus.PARTIAL, viewModel.uiState.value.flightOpportunityStatus)
         scope.cancel()
     }
 
     @Test
-    fun newSelectionClearsPreviousOperationalContext() = runBlocking {
+    fun newSelectionRecalculatesOperationalContextWhenWeatherAlreadyEnabled() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val weather = FakeWeatherClient(forecast = weatherForecast())
+        val legal = FakeLegalTimelineClient()
         val viewModel = viewModel(
             scope = scope,
-            weather = FakeWeatherClient(),
+            legal = legal,
+            weather = weather,
             preferences = InMemoryMapPreferences()
         )
 
         viewModel.onMapTapped(selection(41.9, 12.5))
         viewModel.onOperationalContextRequested()
-        waitUntil { viewModel.uiState.value.weatherError != null }
+        waitUntil { viewModel.uiState.value.flightOpportunityResult != null }
         viewModel.onMapTapped(selection(42.0, 12.6))
+        waitUntil {
+            legal.calls == 2 &&
+                weather.calls == 2 &&
+                !viewModel.uiState.value.isWeatherAnalysisLoading &&
+                viewModel.uiState.value.flightOpportunityResult != null
+        }
 
-        assertFalse(viewModel.uiState.value.isOperationalContextRequested)
-        assertFalse(viewModel.uiState.value.isWeatherAnalysisEnabled)
+        assertTrue(viewModel.uiState.value.isOperationalContextRequested)
+        assertTrue(viewModel.uiState.value.isWeatherAnalysisEnabled)
         assertFalse(viewModel.uiState.value.isWeatherAnalysisLoading)
-        assertNull(viewModel.uiState.value.weatherForecast)
-        assertNull(viewModel.uiState.value.weatherAssessment)
+        assertEquals(MapPoint(42.0, 12.6), legal.lastPoint)
+        assertEquals(MapPoint(42.0, 12.6), weather.lastPoint)
+        assertEquals(FlightOpportunityStatus.PARTIAL, viewModel.uiState.value.flightOpportunityStatus)
         assertNull(viewModel.uiState.value.weatherError)
         scope.cancel()
     }
@@ -197,12 +209,12 @@ class MapViewModelTest {
     @Test
     fun changingDronePersistsSelectionAndDoesNotRelaunchTimelineOrWeather() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
-        val weather = FakeWeatherClient(forecast = weatherForecast())
+        val weather = FakeWeatherClient(forecast = weatherForecast(windKmh = 10.0, gustKmh = 20.0))
         val legal = FakeLegalTimelineClient()
         val pilotStore = FakePilotStore(
             listOf(
-                LocalDrone(id = "mini", manufacturer = "DJI", model = "Mini", isSelected = true),
-                LocalDrone(id = "air", manufacturer = "DJI", model = "Air")
+                LocalDrone(id = "mini", manufacturer = "DJI", model = "Mini", manualMaxWindResistanceMs = 12.0, isSelected = true),
+                LocalDrone(id = "air", manufacturer = "DJI", model = "Air", manualMaxWindResistanceMs = 4.0)
             )
         )
         val viewModel = viewModel(
@@ -215,17 +227,25 @@ class MapViewModelTest {
 
         viewModel.onMapTapped(selection(41.9, 12.5))
         viewModel.onOperationalContextRequested()
-        waitUntil { weather.calls == 1 && viewModel.uiState.value.weatherForecast != null }
+        waitUntil { weather.calls == 1 && viewModel.uiState.value.flightOpportunityResult?.bestOpportunity != null }
+        val initialDroneScore = viewModel.uiState.value.flightOpportunityResult?.bestOpportunity?.droneScore
         val legalCalls = legal.calls
         val weatherCalls = weather.calls
 
         viewModel.onDroneSelected("air")
-        waitUntil { viewModel.uiState.value.selectedDrone?.id == "air" }
+        waitUntil {
+            viewModel.uiState.value.selectedDrone?.id == "air" &&
+                viewModel.uiState.value.droneOperationalAssessment?.capabilities?.maxWindResistanceMs == 4.0
+        }
 
         assertEquals(1, pilotStore.selectCalls)
         assertEquals(legalCalls, legal.calls)
         assertEquals(weatherCalls, weather.calls)
-        assertEquals(DroneOperationalLevel.UNKNOWN, viewModel.uiState.value.droneOperationalAssessment?.level)
+        assertTrue(initialDroneScore != viewModel.uiState.value.droneOperationalAssessment?.score)
+        assertEquals(
+            viewModel.uiState.value.flightOpportunityStatus,
+            viewModel.uiState.value.flightOpportunityResult?.status
+        )
         scope.cancel()
     }
 
@@ -245,6 +265,75 @@ class MapViewModelTest {
 
         assertFalse(viewModel.uiState.value.isWeatherAnalysisEnabled)
         assertNull(viewModel.uiState.value.droneOperationalAssessment)
+        assertEquals(FlightOpportunityStatus.IDLE, viewModel.uiState.value.flightOpportunityStatus)
+        assertNull(viewModel.uiState.value.flightOpportunityResult)
+        scope.cancel()
+    }
+
+    @Test
+    fun openingOperationalReportDoesNotRelaunchTimelineOrWeather() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val legal = FakeLegalTimelineClient()
+        val weather = FakeWeatherClient(forecast = weatherForecast())
+        val viewModel = viewModel(
+            scope = scope,
+            legal = legal,
+            weather = weather,
+            preferences = InMemoryMapPreferences()
+        )
+
+        viewModel.onMapTapped(selection(41.9, 12.5))
+        viewModel.onOperationalContextRequested()
+        waitUntil { legal.calls == 1 && weather.calls == 1 && !viewModel.uiState.value.isWeatherAnalysisLoading }
+        val legalCalls = legal.calls
+        val weatherCalls = weather.calls
+
+        viewModel.onOperationalReportExpansionChanged(true)
+        viewModel.onOperationalReportExpansionChanged(false)
+
+        assertEquals(legalCalls, legal.calls)
+        assertEquals(weatherCalls, weather.calls)
+        assertFalse(viewModel.uiState.value.isOperationalReportExpanded)
+        scope.cancel()
+    }
+
+    @Test
+    fun flightOpportunityRecommendsBestDroneFromFleetForWind() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val viewModel = viewModel(
+            scope = scope,
+            weather = FakeWeatherClient(forecast = weatherForecast(windKmh = 10.0, gustKmh = 20.0)),
+            preferences = InMemoryMapPreferences(),
+            pilotStore = FakePilotStore(
+                listOf(
+                    LocalDrone(
+                        id = "mini",
+                        manufacturer = "DJI",
+                        model = "Mini 3 Pro",
+                        manualMaxWindResistanceMs = 6.0,
+                        isSelected = true
+                    ),
+                    LocalDrone(
+                        id = "air",
+                        manufacturer = "DJI",
+                        model = "AIR 3S",
+                        manualMaxWindResistanceMs = 12.0
+                    )
+                )
+            )
+        )
+
+        viewModel.onMapTapped(selection(41.9, 12.5))
+        viewModel.onOperationalContextRequested()
+        waitUntil { viewModel.uiState.value.flightOpportunityResult?.droneRecommendation != null }
+
+        val recommendation = viewModel.uiState.value.flightOpportunityResult?.droneRecommendation
+        assertEquals("air", recommendation?.recommended?.droneId)
+        assertEquals(2, recommendation?.compared?.size)
+        assertTrue(
+            (recommendation?.recommended?.droneScore ?: 0) >=
+                (recommendation?.compared?.firstOrNull { it.droneId == "mini" }?.droneScore ?: 0)
+        )
         scope.cancel()
     }
 

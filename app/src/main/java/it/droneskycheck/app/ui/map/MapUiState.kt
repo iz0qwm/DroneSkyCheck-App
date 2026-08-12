@@ -5,6 +5,8 @@ import it.droneskycheck.app.data.LegalTimelineResponse
 import it.droneskycheck.app.data.LocalDrone
 import it.droneskycheck.app.data.drone.DroneCatalogMatchResult
 import it.droneskycheck.app.data.drone.DroneOperationalAssessment
+import it.droneskycheck.app.data.flight.FlightOpportunityResult
+import it.droneskycheck.app.data.flight.FlightOpportunityStatus
 import it.droneskycheck.app.data.weather.WeatherAssessment
 import it.droneskycheck.app.data.weather.WeatherForecast
 import it.droneskycheck.app.map.DscLayerCategory
@@ -35,6 +37,9 @@ data class MapUiState(
     val selectedDrone: LocalDrone? = null,
     val selectedDroneCatalogMatch: DroneCatalogMatchResult? = null,
     val droneOperationalAssessment: DroneOperationalAssessment? = null,
+    val flightOpportunityStatus: FlightOpportunityStatus = FlightOpportunityStatus.IDLE,
+    val flightOpportunityResult: FlightOpportunityResult? = null,
+    val isOperationalReportExpanded: Boolean = false,
     val mapStatusMessage: String? = null,
     val cameraBounds: CameraBounds? = null,
     val layerVisibility: Map<DscLayerCategory, Boolean> = DscLayerCategory.defaultVisibility,

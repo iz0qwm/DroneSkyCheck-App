@@ -80,6 +80,7 @@ class DroneTechnicalCatalogResolverTest {
     @Test
     fun catalogValidation() {
         assertEquals(2, catalog.version)
+        assertEquals(1, catalog.catalogVersion)
         assertTrue(catalog.drones.size >= 40)
 
         val canonical = mutableSetOf<String>()
@@ -133,6 +134,15 @@ class DroneTechnicalCatalogResolverTest {
     }
 
     @Test
+    fun jsonNullIpRatingIsTreatedAsMissingIpRating() {
+        val neo = resolver.resolve("DJI", "Neo").matchedDrone
+
+        assertNotNull(neo)
+        assertNull(neo?.ingressProtectionRating)
+        assertTrue(validateDroneTechnicalCatalog(catalog).isEmpty())
+    }
+
+    @Test
     fun existingRecordsWereReverifiedAndMappedToV2Wind() {
         val expected = mapOf(
             "Neo" to 8.0,
@@ -166,6 +176,8 @@ class DroneTechnicalCatalogResolverTest {
         assertEquals(12.0, catalogCapabilities.maxWindResistanceMs ?: -1.0, 0.0)
         assertEquals(OperationalWindResistanceBasis.GENERAL, catalogCapabilities.operationalWindResistanceBasis)
         assertEquals(DroneCapabilitySource.MANUFACTURER, catalogCapabilities.windResistanceSource)
+        assertEquals(2, catalogCapabilities.technicalCatalogSchemaVersion)
+        assertEquals(1, catalogCapabilities.technicalCatalogVersion)
 
         val manualOverride = resolver.capabilitiesFor(catalogDrone.copy(manualMaxWindResistanceMs = 9.5)).first
         assertEquals(9.5, manualOverride.maxWindResistanceMs ?: -1.0, 0.0)

@@ -38,6 +38,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
@@ -151,6 +152,15 @@ import it.droneskycheck.app.data.drone.DroneOperationalLevel
 import it.droneskycheck.app.data.drone.DroneTechnicalCatalogRepository
 import it.droneskycheck.app.data.drone.formatOneDecimal
 import it.droneskycheck.app.data.drone.msToKmh
+import it.droneskycheck.app.data.flight.FlightOpportunity
+import it.droneskycheck.app.data.flight.FlightOpportunityDroneCandidate
+import it.droneskycheck.app.data.flight.FlightOpportunityDroneRecommendation
+import it.droneskycheck.app.data.flight.FlightOpportunityDroneRecommendationReason
+import it.droneskycheck.app.data.flight.FlightOpportunityLevel
+import it.droneskycheck.app.data.flight.FlightOpportunityReasonCode
+import it.droneskycheck.app.data.flight.FlightOpportunityResult
+import it.droneskycheck.app.data.flight.FlightOpportunityStatus
+import it.droneskycheck.app.data.flight.FlightOpportunityWarning
 import it.droneskycheck.app.data.formatLocalRange
 import it.droneskycheck.app.data.weather.WeatherAssessment
 import it.droneskycheck.app.data.weather.WeatherAssessmentEngine
@@ -487,9 +497,13 @@ fun MapScreen(
                 selectedDrone = uiState.selectedDrone,
                 selectedDroneCatalogMatch = uiState.selectedDroneCatalogMatch,
                 droneOperationalAssessment = uiState.droneOperationalAssessment,
+                flightOpportunityStatus = uiState.flightOpportunityStatus,
+                flightOpportunityResult = uiState.flightOpportunityResult,
+                isOperationalReportExpanded = uiState.isOperationalReportExpanded,
                 draftError = draftError,
                 onRetry = viewModel::onZoneCheckRetryRequested,
                 onOperationalContextRequested = viewModel::onOperationalContextRequested,
+                onOperationalReportExpansionChanged = viewModel::onOperationalReportExpansionChanged,
                 onDroneSelected = viewModel::onDroneSelected,
                 onAuthorizationRequest = { zoneInfo ->
                     draftError = null
@@ -1337,9 +1351,13 @@ private fun ZoneBottomSheet(
     selectedDrone: LocalDrone?,
     selectedDroneCatalogMatch: DroneCatalogMatchResult?,
     droneOperationalAssessment: DroneOperationalAssessment?,
+    flightOpportunityStatus: FlightOpportunityStatus,
+    flightOpportunityResult: FlightOpportunityResult?,
+    isOperationalReportExpanded: Boolean,
     draftError: String?,
     onRetry: () -> Unit,
     onOperationalContextRequested: () -> Unit,
+    onOperationalReportExpansionChanged: (Boolean) -> Unit,
     onDroneSelected: (String) -> Unit,
     onAuthorizationRequest: (ZoneInfo) -> Unit,
     onDismiss: () -> Unit
@@ -1391,20 +1409,28 @@ private fun ZoneBottomSheet(
                     )
                 }
                 if (isOperationalContextRequested) {
-                    OperationalReportSection(
-                        isLoading = isLegalTimelineLoading,
-                        timeline = legalTimeline,
-                        timelineError = legalTimelineError,
-                        isWeatherLoading = isWeatherAnalysisLoading,
+                    FlightOpportunitySummaryCard(
+                        status = flightOpportunityStatus,
+                        result = flightOpportunityResult,
                         forecast = weatherForecast,
-                        assessment = weatherAssessment,
-                        weatherError = weatherError,
-                        droneFleet = droneFleet,
-                        selectedDrone = selectedDrone,
-                        selectedDroneCatalogMatch = selectedDroneCatalogMatch,
-                        droneOperationalAssessment = droneOperationalAssessment,
-                        onDroneSelected = onDroneSelected
+                        onReportClick = { onOperationalReportExpansionChanged(!isOperationalReportExpanded) }
                     )
+                    if (isOperationalReportExpanded) {
+                        OperationalReportSection(
+                            isLoading = isLegalTimelineLoading,
+                            timeline = legalTimeline,
+                            timelineError = legalTimelineError,
+                            isWeatherLoading = isWeatherAnalysisLoading,
+                            forecast = weatherForecast,
+                            assessment = weatherAssessment,
+                            weatherError = weatherError,
+                            droneFleet = droneFleet,
+                            selectedDrone = selectedDrone,
+                            selectedDroneCatalogMatch = selectedDroneCatalogMatch,
+                            droneOperationalAssessment = droneOperationalAssessment,
+                            onDroneSelected = onDroneSelected
+                        )
+                    }
                 } else {
                     OperationalContextActionSection(
                         onClick = onOperationalContextRequested
@@ -1483,6 +1509,219 @@ private fun ZoneBottomSheet(
 }
 
 @Composable
+private fun FlightOpportunitySummaryCard(
+    status: FlightOpportunityStatus,
+    result: FlightOpportunityResult?,
+    forecast: WeatherForecast?,
+    onReportClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Default.WbSunny, contentDescription = null)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Opportunita di volo",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = flightOpportunityStatusText(status, result),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = LocalContentColor.current.copy(alpha = 0.78f)
+                    )
+                }
+            }
+
+            if (status == FlightOpportunityStatus.LOADING) {
+                FlightOpportunityLoadingRows()
+            } else {
+                val best = result?.bestOpportunity
+                if (best != null) {
+                    FlightOpportunityMainWindow(best, forecast)
+                    result.nextOpportunity
+                        ?.takeIf { it.from != best.from }
+                        ?.let { next ->
+                            IconTextRow(
+                                icon = Icons.Default.Schedule,
+                                text = "Prima finestra disponibile: ${next.compactRangeText(forecast)}"
+                            )
+                        }
+                    FlightOpportunityReasons(best)
+                    result.droneRecommendation?.let { recommendation ->
+                        FlightOpportunityDroneRecommendationRow(recommendation)
+                    }
+                    FlightOpportunityWeekend(result, forecast)
+                } else {
+                    IconTextRow(
+                        icon = Icons.Default.Info,
+                        text = result?.noOpportunityText() ?: "Analisi opportunita non disponibile."
+                    )
+                }
+            }
+
+            OutlinedButton(onClick = onReportClick) {
+                Icon(
+                    imageVector = Icons.Default.Search,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Report operativo")
+            }
+        }
+    }
+}
+
+@Composable
+private fun FlightOpportunityLoadingRows() {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+            Text("Analisi opportunita di volo...", style = MaterialTheme.typography.bodyMedium)
+        }
+        IconTextRow(Icons.Default.Schedule, "Finestre OPEN")
+        IconTextRow(Icons.Default.Cloud, "Meteo")
+        IconTextRow(Icons.Default.Air, "Drone")
+    }
+}
+
+@Composable
+private fun FlightOpportunityMainWindow(opportunity: FlightOpportunity, forecast: WeatherForecast?) {
+    Surface(
+        shape = MaterialTheme.shapes.small,
+        color = opportunity.opportunityLevel.color(),
+        contentColor = readableContentColor(opportunity.opportunityLevel.color())
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                text = "Migliore finestra",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = opportunity.fullRangeText(forecast),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = listOfNotNull(
+                    opportunity.opportunityLevel.toUserText().uppercase(Locale.ROOT),
+                    opportunity.opportunityScore?.let { "$it/100" }
+                ).joinToString(" - "),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            IconTextRow(Icons.Default.Speed, opportunity.legalSummaryText())
+            IconTextRow(Icons.Default.Cloud, "Affidabilita previsione: ${opportunity.forecastConfidence.toUserText()}")
+        }
+    }
+}
+
+@Composable
+private fun FlightOpportunityReasons(opportunity: FlightOpportunity) {
+    val reasons = opportunity.reasons
+        .filter { it.isUsefulSummaryReason() }
+        .take(3)
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        reasons.forEach { reason ->
+            IconTextRow(reason.summaryIcon(), reason.toUserText())
+        }
+        opportunity.warnings.firstOrNull()?.let { warning ->
+            IconTextRow(Icons.Default.Info, warning.toUserText())
+        }
+    }
+}
+
+@Composable
+private fun FlightOpportunityDroneRecommendationRow(recommendation: FlightOpportunityDroneRecommendation) {
+    val recommended = recommendation.recommended
+    val comparison = recommendation.compared
+        .filter { it.droneId != recommended.droneId }
+        .take(2)
+        .joinToString(" - ") { it.compactDroneComparisonText() }
+        .takeIf { it.isNotBlank() }
+    val text = buildString {
+        append("Drone consigliato: ${recommended.displayName}")
+        recommended.droneScore?.let { append(" ($it/100)") }
+        append(". ")
+        append(recommendation.reason.toUserText())
+        comparison?.let { append(" Confronto: $it.") }
+    }
+    IconTextRow(Icons.Default.Air, text)
+}
+
+@Composable
+private fun FlightOpportunityWeekend(result: FlightOpportunityResult, forecast: WeatherForecast?) {
+    val weekend = result.weekendOpportunities.take(2)
+    if (weekend.isEmpty()) return
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.Schedule, contentDescription = null, modifier = Modifier.size(18.dp))
+            Text("Weekend", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+        }
+        weekend.forEach { opportunity ->
+            Surface(
+                shape = MaterialTheme.shapes.small,
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
+                contentColor = MaterialTheme.colorScheme.onSurface
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.WbSunny, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Text(
+                        text = opportunity.compactRangeText(forecast),
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        text = listOfNotNull(
+                            opportunity.opportunityLevel.toUserText(),
+                            opportunity.opportunityScore?.let { "$it" }
+                        ).joinToString(" - "),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun IconTextRow(icon: ImageVector, text: String) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
+        Text(text = text, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
 private fun OperationalReportSection(
     isLoading: Boolean,
     timeline: LegalTimelineResponse?,
@@ -1515,6 +1754,11 @@ private fun OperationalReportSection(
                 onToggle = { expanded = !expanded }
             )
             if (expanded) {
+                Text(
+                    text = "Questa valutazione e' stata ottenuta incrociando finestre OPEN della zona, condizioni meteorologiche previste e compatibilita con il drone selezionato.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 LegalTimelineSection(
                     isLoading = isLoading,
                     timeline = timeline,
@@ -4000,6 +4244,165 @@ private fun DroneDailyOperationalTrend.droneTrendNote(): String? =
         level == DroneOperationalLevel.UNKNOWN -> "Profilo tecnico incompleto"
         else -> null
     }
+
+private fun flightOpportunityStatusText(
+    status: FlightOpportunityStatus,
+    result: FlightOpportunityResult?
+): String =
+    when (status) {
+        FlightOpportunityStatus.IDLE -> "Avvia il controllo meteo per cercare una finestra OPEN."
+        FlightOpportunityStatus.LOADING -> "Sto incrociando zona, meteo e drone selezionato."
+        FlightOpportunityStatus.READY -> "Finestra OPEN trovata."
+        FlightOpportunityStatus.PARTIAL -> "Valutazione parziale: alcuni dati drone non sono completi."
+        FlightOpportunityStatus.NO_OPEN_WINDOW -> "Nessuna finestra OPEN nell'orizzonte disponibile."
+        FlightOpportunityStatus.NO_FAVORABLE_WEATHER -> "Sono presenti finestre OPEN, ma il meteo non e' favorevole."
+        FlightOpportunityStatus.DRONE_UNFAVORABLE -> "Meteo disponibile, ma il drone selezionato e' il punto critico."
+        FlightOpportunityStatus.INSUFFICIENT_DATA -> "Dati insufficienti per una valutazione completa."
+        FlightOpportunityStatus.ERROR -> "Controllo meteo non disponibile."
+    }.let { base ->
+        result?.horizonTo?.let { "$base Orizzonte: fino al ${it.formatOpportunityHorizon(result.bestOpportunity)}." } ?: base
+    }
+
+private fun FlightOpportunityResult.noOpportunityText(): String =
+    when (status) {
+        FlightOpportunityStatus.NO_OPEN_WINDOW -> "Nessuna finestra OPEN disponibile nell'orizzonte analizzato."
+        FlightOpportunityStatus.NO_FAVORABLE_WEATHER -> "Sono presenti finestre OPEN, ma le condizioni meteorologiche risultano sfavorevoli."
+        FlightOpportunityStatus.DRONE_UNFAVORABLE -> "Le condizioni meteo generali sono utilizzabili, ma risultano poco compatibili con il drone selezionato."
+        FlightOpportunityStatus.INSUFFICIENT_DATA -> "Non ci sono dati sufficienti per una valutazione completa."
+        FlightOpportunityStatus.ERROR -> "Controllo meteo non disponibile."
+        else -> blockers.firstOrNull()?.toUserText() ?: "Nessuna opportunita favorevole trovata."
+    }
+
+private fun FlightOpportunity.fullRangeText(forecast: WeatherForecast?): String {
+    val zoneId = forecast?.timezone ?: ZoneId.systemDefault()
+    val start = from.atZone(zoneId)
+    val end = to.atZone(zoneId)
+    return "${start.toLocalDate().dayTitle()}\n${start.toLocalTime().formatHourMinute()} - ${end.toLocalTime().formatHourMinute()}"
+}
+
+private fun FlightOpportunity.compactRangeText(forecast: WeatherForecast?): String {
+    val zoneId = forecast?.timezone ?: ZoneId.systemDefault()
+    val start = from.atZone(zoneId)
+    val end = to.atZone(zoneId)
+    return "${start.toLocalDate().dayTitle()} ${start.toLocalTime().formatHourMinute()}-${end.toLocalTime().formatHourMinute()}"
+}
+
+private fun FlightOpportunity.legalSummaryText(): String =
+    listOfNotNull(
+        "OPEN",
+        maxAltitudeAgl?.let { "max $it m AGL" }
+    ).joinToString(" - ")
+
+@Composable
+private fun FlightOpportunityLevel.color(): Color =
+    when (this) {
+        FlightOpportunityLevel.EXCELLENT -> dscAltitudeColor(120)
+        FlightOpportunityLevel.GOOD -> MaterialTheme.colorScheme.secondaryContainer
+        FlightOpportunityLevel.MARGINAL -> MaterialTheme.colorScheme.tertiaryContainer
+        FlightOpportunityLevel.POOR -> dscAltitudeColor(0)
+        FlightOpportunityLevel.PARTIAL -> MaterialTheme.colorScheme.surfaceContainerHigh
+    }
+
+private fun FlightOpportunityLevel.toUserText(): String =
+    when (this) {
+        FlightOpportunityLevel.EXCELLENT -> "Ottima"
+        FlightOpportunityLevel.GOOD -> "Buona"
+        FlightOpportunityLevel.MARGINAL -> "Discreta"
+        FlightOpportunityLevel.POOR -> "Poco favorevole"
+        FlightOpportunityLevel.PARTIAL -> "Valutazione parziale"
+    }
+
+private fun FlightOpportunityReasonCode.isUsefulSummaryReason(): Boolean =
+    this in setOf(
+        FlightOpportunityReasonCode.ALTITUDE_LIMIT,
+        FlightOpportunityReasonCode.DAYTIME_WINDOW,
+        FlightOpportunityReasonCode.EVENING_OR_NIGHT_WINDOW,
+        FlightOpportunityReasonCode.WEATHER_FAVORABLE,
+        FlightOpportunityReasonCode.LOW_WIND,
+        FlightOpportunityReasonCode.LOW_GUSTS,
+        FlightOpportunityReasonCode.NO_PRECIPITATION,
+        FlightOpportunityReasonCode.DRONE_COMPATIBLE,
+        FlightOpportunityReasonCode.DRONE_PARTIAL
+    )
+
+private fun FlightOpportunityReasonCode.summaryIcon(): ImageVector =
+    when (this) {
+        FlightOpportunityReasonCode.DAYTIME_WINDOW,
+        FlightOpportunityReasonCode.EVENING_OR_NIGHT_WINDOW -> Icons.Default.Schedule
+        FlightOpportunityReasonCode.ALTITUDE_LIMIT -> Icons.Default.Speed
+        FlightOpportunityReasonCode.DRONE_COMPATIBLE,
+        FlightOpportunityReasonCode.DRONE_PARTIAL,
+        FlightOpportunityReasonCode.DRONE_UNFAVORABLE -> Icons.Default.Air
+        FlightOpportunityReasonCode.LOW_WIND,
+        FlightOpportunityReasonCode.LOW_GUSTS -> Icons.Default.Air
+        FlightOpportunityReasonCode.NO_PRECIPITATION -> Icons.Default.Opacity
+        FlightOpportunityReasonCode.WEATHER_FAVORABLE,
+        FlightOpportunityReasonCode.WEATHER_CAUTION,
+        FlightOpportunityReasonCode.WEATHER_UNFAVORABLE,
+        FlightOpportunityReasonCode.WEATHER_DATA_MISSING -> Icons.Default.Cloud
+        else -> Icons.Default.Info
+    }
+
+private fun FlightOpportunityReasonCode.toUserText(): String =
+    when (this) {
+        FlightOpportunityReasonCode.LEGAL_OPEN -> "Finestra OPEN"
+        FlightOpportunityReasonCode.DAYTIME_WINDOW -> "Finestra in orario diurno"
+        FlightOpportunityReasonCode.EVENING_OR_NIGHT_WINDOW -> "Finestra serale/notturna"
+        FlightOpportunityReasonCode.ALTITUDE_LIMIT -> "Limite quota da rispettare"
+        FlightOpportunityReasonCode.WEATHER_FAVORABLE -> "Meteo favorevole"
+        FlightOpportunityReasonCode.WEATHER_CAUTION -> "Meteo da valutare"
+        FlightOpportunityReasonCode.WEATHER_UNFAVORABLE -> "Meteo sfavorevole"
+        FlightOpportunityReasonCode.LOW_WIND -> "Vento contenuto"
+        FlightOpportunityReasonCode.LOW_GUSTS -> "Raffiche contenute"
+        FlightOpportunityReasonCode.NO_PRECIPITATION -> "Nessuna pioggia prevista"
+        FlightOpportunityReasonCode.DRONE_COMPATIBLE -> "Drone compatibile"
+        FlightOpportunityReasonCode.DRONE_PARTIAL -> "Compatibilita drone non verificata completamente"
+        FlightOpportunityReasonCode.DRONE_UNFAVORABLE -> "Drone poco compatibile"
+        FlightOpportunityReasonCode.FORECAST_CONFIDENCE_HIGH -> "Affidabilita alta"
+        FlightOpportunityReasonCode.FORECAST_CONFIDENCE_MEDIUM -> "Affidabilita media"
+        FlightOpportunityReasonCode.FORECAST_CONFIDENCE_LOW -> "Affidabilita bassa"
+        FlightOpportunityReasonCode.FORECAST_CONFIDENCE_INDICATIVE -> "Previsione indicativa"
+        FlightOpportunityReasonCode.SHORT_WINDOW -> "Finestra breve"
+        FlightOpportunityReasonCode.AUTHORIZATION_REQUIRED -> "In queste fasce sarebbe necessaria autorizzazione"
+        FlightOpportunityReasonCode.LEGAL_UNAVAILABLE -> "Zona non OPEN"
+        FlightOpportunityReasonCode.LEGAL_UNKNOWN -> "Stato legale non determinato"
+        FlightOpportunityReasonCode.WEATHER_DATA_MISSING -> "Meteo incompleto"
+    }
+
+private fun FlightOpportunityWarning.toUserText(): String =
+    when (this) {
+        FlightOpportunityWarning.SHORT_WINDOW -> "Finestra breve."
+        FlightOpportunityWarning.EVENING_OR_NIGHT_OPERATION -> "Finestra serale/notturna: verifica abilitazione al volo notturno e luce verde lampeggiante sempre attiva."
+        FlightOpportunityWarning.VARIABLE_DAY_CAP -> "Giornata variabile: punteggio abbassato sul valore prudenziale meteo/drone della giornata."
+        FlightOpportunityWarning.DRONE_NOT_EVALUATED -> "Compatibilita con il drone non valutata."
+        FlightOpportunityWarning.DRONE_PROFILE_INCOMPLETE -> "Profilo tecnico drone incompleto."
+        FlightOpportunityWarning.FORECAST_CONFIDENCE_LOW -> "Affidabilita previsione bassa."
+        FlightOpportunityWarning.FORECAST_CONFIDENCE_INDICATIVE -> "Previsione indicativa."
+        FlightOpportunityWarning.WEATHER_UNFAVORABLE -> "Meteo sfavorevole."
+        FlightOpportunityWarning.DRONE_UNFAVORABLE -> "Drone poco compatibile con le condizioni."
+        FlightOpportunityWarning.HORIZON_LIMITED -> "Orizzonte dati limitato."
+    }
+
+private fun Instant.formatOpportunityHorizon(reference: FlightOpportunity?): String {
+    val zoneId = reference?.from?.atZone(ZoneId.systemDefault())?.zone ?: ZoneId.systemDefault()
+    val local = atZone(zoneId)
+    return "${local.toLocalDate().dayTitle()} ${local.toLocalTime().formatHourMinute()}"
+    }
+
+private fun FlightOpportunityDroneRecommendationReason.toUserText(): String =
+    when (this) {
+        FlightOpportunityDroneRecommendationReason.WIND_MARGIN -> "Margine vento migliore per questa finestra."
+        FlightOpportunityDroneRecommendationReason.ONLY_USABLE -> "E' l'unico con una finestra utilizzabile."
+        FlightOpportunityDroneRecommendationReason.BETTER_WINDOW -> "Ha una finestra migliore rispetto al drone selezionato."
+        FlightOpportunityDroneRecommendationReason.NO_CLEAR_ADVANTAGE -> "Differenza contenuta, ma resta il profilo piu prudente."
+    }
+
+private fun FlightOpportunityDroneCandidate.compactDroneComparisonText(): String =
+    listOfNotNull(
+        displayName,
+        droneScore?.let { "$it/100" },
+        windResistanceMs?.let { "${it.formatOneDecimal()} m/s" }
+    ).joinToString(" ")
 
 private fun DroneCatalogMatchResult?.catalogMatchUserText(): String? =
     when (this?.status) {

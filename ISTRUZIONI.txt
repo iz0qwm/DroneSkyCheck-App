@@ -4,3 +4,16 @@ Drone Sky Check App:
     name: "Drone Sky Check App", 
     tier: "free" 
   }
+
+
+Per creare l'SHA dei file:
+C:\Users\raffa\AndroidStudioProjects\DroneSkyCheck\kwos\catalog
+drone_catalog_manifest.json
+drone_technical_catalog.json
+
+Da inviare su:
+https://www.kwos.org/appoggio/droni/DroneSkyCheck/catalog
+
+Utility per creare l'SHA del file
+C:\Users\raffa\AndroidStudioProjects\DroneSkyCheck\tools
+update_drone_catalog_manifest.py

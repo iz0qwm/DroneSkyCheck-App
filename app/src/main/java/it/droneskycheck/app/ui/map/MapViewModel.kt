@@ -8,6 +8,7 @@ import it.droneskycheck.app.data.LegalTimelineClient
 import it.droneskycheck.app.data.LegalTimelineRepository
 import it.droneskycheck.app.data.DscLogger
 import it.droneskycheck.app.data.LegalTimelineRepositoryError
+import it.droneskycheck.app.data.LegalTimelineResponse
 import it.droneskycheck.app.data.LocalDrone
 import it.droneskycheck.app.data.LocalPilotStore
 import it.droneskycheck.app.data.MapPreferences
@@ -17,6 +18,15 @@ import it.droneskycheck.app.data.drone.DroneOperationalAssessmentEngine
 import it.droneskycheck.app.data.drone.DroneTechnicalCatalogClient
 import it.droneskycheck.app.data.drone.DroneTechnicalCatalogResolver
 import it.droneskycheck.app.data.drone.InMemoryDroneTechnicalCatalogClient
+import it.droneskycheck.app.data.flight.FlightOpportunityEngine
+import it.droneskycheck.app.data.flight.FlightOpportunityDroneCandidate
+import it.droneskycheck.app.data.flight.FlightOpportunityDroneRecommendation
+import it.droneskycheck.app.data.flight.FlightOpportunityDroneRecommendationReason
+import it.droneskycheck.app.data.flight.FlightOpportunityInput
+import it.droneskycheck.app.data.flight.FlightOpportunityLevel
+import it.droneskycheck.app.data.flight.FlightOpportunityResult
+import it.droneskycheck.app.data.flight.FlightOpportunityStatus
+import it.droneskycheck.app.data.flight.FlightOpportunityWeatherSlot
 import it.droneskycheck.app.data.weather.WeatherAssessmentEngine
 import it.droneskycheck.app.data.weather.WeatherForecast
 import it.droneskycheck.app.data.weather.WeatherForecastClient
@@ -43,6 +53,7 @@ class MapViewModel(
     private val weatherForecastRepository: WeatherForecastClient = WeatherForecastRepository(),
     private val weatherAssessmentEngine: WeatherAssessmentEngine = WeatherAssessmentEngine(),
     private val droneAssessmentEngine: DroneOperationalAssessmentEngine = DroneOperationalAssessmentEngine(),
+    private val flightOpportunityEngine: FlightOpportunityEngine = FlightOpportunityEngine(),
     private val droneTechnicalCatalog: DroneTechnicalCatalogClient = InMemoryDroneTechnicalCatalogClient(),
     private val mapPreferences: MapPreferences = InMemoryMapPreferences(),
     private val localPilotStore: LocalPilotStore = InMemoryLocalPilotStore(),
@@ -104,6 +115,9 @@ class MapViewModel(
             weatherForecast = null,
             weatherAssessment = null,
             droneOperationalAssessment = null,
+            flightOpportunityStatus = FlightOpportunityStatus.LOADING,
+            flightOpportunityResult = null,
+            isOperationalReportExpanded = false,
             weatherError = null
         )
         DscLogger.debug(
@@ -133,6 +147,9 @@ class MapViewModel(
                 weatherForecast = null,
                 weatherAssessment = null,
                 droneOperationalAssessment = null,
+                flightOpportunityStatus = FlightOpportunityStatus.IDLE,
+                flightOpportunityResult = null,
+                isOperationalReportExpanded = false,
                 weatherError = null
             )
             return
@@ -155,6 +172,8 @@ class MapViewModel(
         selection: MapTapSelection,
         forceTimeline: Boolean = false
     ) {
+        val shouldKeepOperationalContext =
+            _uiState.value.isOperationalContextRequested || _uiState.value.isWeatherAnalysisEnabled
         selectionRequestId += 1
         val requestId = selectionRequestId
         val windowStart = clock.instant()
@@ -165,7 +184,8 @@ class MapViewModel(
             to = windowEnd
         )
         val shouldRequestTimeline = forceTimeline || timelineRequest != lastLegalTimelineRequest
-        if (forceTimeline) lastLegalTimelineRequest = timelineRequest
+        val shouldRequestOperationalContext = forceTimeline || shouldKeepOperationalContext
+        if (shouldRequestOperationalContext) lastLegalTimelineRequest = timelineRequest
 
         verdictJob?.cancel()
         legalTimelineJob?.cancel()
@@ -187,16 +207,22 @@ class MapViewModel(
             weatherForecast = null,
             weatherAssessment = null,
             droneOperationalAssessment = null,
+            flightOpportunityStatus = FlightOpportunityStatus.IDLE,
+            flightOpportunityResult = null,
+            isOperationalReportExpanded = false,
             weatherError = null
         )
 
         launchZoneVerdict(requestId, selection.point)
-        if (forceTimeline && shouldRequestTimeline) {
+        if (shouldRequestOperationalContext && shouldRequestTimeline) {
             _uiState.value = _uiState.value.copy(
                 isOperationalContextRequested = true,
                 isWeatherAnalysisEnabled = true,
                 isLegalTimelineLoading = true,
-                isWeatherAnalysisLoading = true
+                isWeatherAnalysisLoading = true,
+                flightOpportunityStatus = FlightOpportunityStatus.LOADING,
+                flightOpportunityResult = null,
+                isOperationalReportExpanded = false
             )
             launchLegalTimeline(
                 requestId = requestId,
@@ -260,6 +286,10 @@ class MapViewModel(
                     isLegalTimelineLoading = false,
                     legalTimeline = response,
                     legalTimelineError = null
+                ).withFlightOpportunity(
+                    timeline = response,
+                    forecast = _uiState.value.weatherForecast,
+                    selectedDrone = _uiState.value.selectedDrone
                 )
             }.onFailure { error ->
                 DscLogger.warn(
@@ -272,7 +302,9 @@ class MapViewModel(
                 _uiState.value = _uiState.value.copy(
                     isLegalTimelineLoading = false,
                     legalTimeline = null,
-                    legalTimelineError = "Previsione temporale non disponibile"
+                    legalTimelineError = "Previsione temporale non disponibile",
+                    flightOpportunityStatus = FlightOpportunityStatus.ERROR,
+                    flightOpportunityResult = null
                 )
             }
         }
@@ -285,6 +317,8 @@ class MapViewModel(
             weatherForecast = null,
             weatherAssessment = null,
             droneOperationalAssessment = null,
+            flightOpportunityStatus = FlightOpportunityStatus.LOADING,
+            flightOpportunityResult = null,
             weatherError = null
         )
 
@@ -319,6 +353,10 @@ class MapViewModel(
                     weatherAssessment = assessment,
                     droneOperationalAssessment = currentDroneAssessment(forecast, assessment),
                     weatherError = null
+                ).withFlightOpportunity(
+                    timeline = _uiState.value.legalTimeline,
+                    forecast = forecast,
+                    selectedDrone = _uiState.value.selectedDrone
                 )
             }.onFailure { error ->
                 DscLogger.warn(
@@ -332,6 +370,8 @@ class MapViewModel(
                     weatherForecast = null,
                     weatherAssessment = null,
                     droneOperationalAssessment = null,
+                    flightOpportunityStatus = FlightOpportunityStatus.ERROR,
+                    flightOpportunityResult = null,
                     weatherError = "Meteo non disponibile"
                 )
             }
@@ -340,24 +380,35 @@ class MapViewModel(
 
     fun onDroneSelected(droneId: String) {
         scope.launch {
-            withContext(Dispatchers.IO) {
+            val loaded = withContext(Dispatchers.IO) {
                 localPilotStore.selectDrone(droneId)
+                droneTechnicalCatalog.resolver() to localPilotStore.getDrones()
             }
-            val drones = withContext(Dispatchers.IO) {
-                localPilotStore.getDrones()
-            }
+            catalogResolver = loaded.first
+            val drones = loaded.second
             val selected = drones.firstOrNull { it.isSelected } ?: drones.firstOrNull { it.id == droneId }
+            val match = selected?.let { catalogResolver.resolve(it.manufacturer, it.model) }
+            logDroneCatalogMatch(selected, match)
             _uiState.value = _uiState.value.copy(
                 droneFleet = drones,
                 selectedDrone = selected,
-                selectedDroneCatalogMatch = selected?.let { catalogResolver.resolve(it.manufacturer, it.model) },
+                selectedDroneCatalogMatch = match,
                 droneOperationalAssessment = currentDroneAssessment(
                     forecast = _uiState.value.weatherForecast,
                     weatherAssessment = _uiState.value.weatherAssessment,
                     selectedDrone = selected
                 )
+            ).withFlightOpportunity(
+                timeline = _uiState.value.legalTimeline,
+                forecast = _uiState.value.weatherForecast,
+                selectedDrone = selected
             )
+            launchCatalogUpdateIfDue()
         }
+    }
+
+    fun onOperationalReportExpansionChanged(expanded: Boolean) {
+        _uiState.value = _uiState.value.copy(isOperationalReportExpanded = expanded)
     }
 
     private fun loadDroneCatalogAndFleet() {
@@ -368,17 +419,242 @@ class MapViewModel(
             catalogResolver = loaded.first
             val drones = loaded.second
             val selected = drones.firstOrNull { it.isSelected } ?: drones.firstOrNull()
+            val match = selected?.let { catalogResolver.resolve(it.manufacturer, it.model) }
+            logDroneCatalogMatch(selected, match)
             _uiState.value = _uiState.value.copy(
                 droneFleet = drones,
                 selectedDrone = selected,
-                selectedDroneCatalogMatch = selected?.let { catalogResolver.resolve(it.manufacturer, it.model) },
+                selectedDroneCatalogMatch = match,
                 droneOperationalAssessment = currentDroneAssessment(
                     forecast = _uiState.value.weatherForecast,
                     weatherAssessment = _uiState.value.weatherAssessment,
                     selectedDrone = selected
                 )
+            ).withFlightOpportunity(
+                timeline = _uiState.value.legalTimeline,
+                forecast = _uiState.value.weatherForecast,
+                selectedDrone = selected
+            )
+            launchCatalogUpdateIfDue()
+        }
+    }
+
+    private fun launchCatalogUpdateIfDue() {
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                droneTechnicalCatalog.checkForUpdatesIfDue()
+            }
+            if (result !is it.droneskycheck.app.data.drone.DroneCatalogUpdateResult.Installed) return@launch
+            catalogResolver = withContext(Dispatchers.IO) {
+                droneTechnicalCatalog.resolver()
+            }
+            val selected = _uiState.value.selectedDrone
+            val match = selected?.let { catalogResolver.resolve(it.manufacturer, it.model) }
+            logDroneCatalogMatch(selected, match)
+            _uiState.value = _uiState.value.copy(
+                selectedDroneCatalogMatch = match,
+                droneOperationalAssessment = currentDroneAssessment(
+                    forecast = _uiState.value.weatherForecast,
+                    weatherAssessment = _uiState.value.weatherAssessment,
+                    selectedDrone = selected
+                )
+            ).withFlightOpportunity(
+                timeline = _uiState.value.legalTimeline,
+                forecast = _uiState.value.weatherForecast,
+                selectedDrone = selected
             )
         }
+    }
+
+    private fun logDroneCatalogMatch(
+        drone: LocalDrone?,
+        match: it.droneskycheck.app.data.drone.DroneCatalogMatchResult?
+    ) {
+        if (drone == null) {
+            DscLogger.debug(LogTag, "DroneCatalog: no selected drone to resolve")
+            return
+        }
+        DscLogger.debug(
+            LogTag,
+            "DroneCatalog: resolve selected drone manufacturer='${drone.manufacturer}' model='${drone.model}' " +
+                "catalogSchema=${catalogResolver.catalog.schemaVersion} catalogVersion=${catalogResolver.catalog.catalogVersion} " +
+                "drones=${catalogResolver.catalog.drones.size} status=${match?.status} " +
+            "matched='${match?.matchedDrone?.displayName}' suggestions=${match?.suggestions?.joinToString { it.displayName }}"
+        )
+    }
+
+    private fun MapUiState.withFlightOpportunity(
+        timeline: LegalTimelineResponse?,
+        forecast: WeatherForecast?,
+        selectedDrone: LocalDrone?
+    ): MapUiState {
+        if (!isWeatherAnalysisEnabled && !isOperationalContextRequested) {
+            return copy(
+                flightOpportunityStatus = FlightOpportunityStatus.IDLE,
+                flightOpportunityResult = null
+            )
+        }
+        if (legalTimelineError != null || weatherError != null) {
+            return copy(
+                flightOpportunityStatus = FlightOpportunityStatus.ERROR,
+                flightOpportunityResult = null
+            )
+        }
+        if (timeline == null || forecast == null) {
+            return copy(
+                flightOpportunityStatus = FlightOpportunityStatus.LOADING,
+                flightOpportunityResult = null
+            )
+        }
+
+        val now = clock.instant()
+        val result = flightOpportunityEngine.evaluate(
+            FlightOpportunityInput(
+                legalSegments = timeline.segments,
+                weatherSlots = forecast.toFlightOpportunityWeatherSlots(
+                    now = now,
+                    selectedDrone = selectedDrone
+                ),
+                zoneId = forecast.timezone ?: timelineZoneId,
+                now = now
+            )
+        )
+        val resultWithDroneAdvice = result.withDroneRecommendation(
+            timeline = timeline,
+            forecast = forecast,
+            now = now,
+            zoneId = forecast.timezone ?: timelineZoneId,
+            selectedDrone = selectedDrone
+        )
+        return copy(
+            flightOpportunityStatus = resultWithDroneAdvice.status,
+            flightOpportunityResult = resultWithDroneAdvice
+        )
+    }
+
+    private fun FlightOpportunityResult.withDroneRecommendation(
+        timeline: LegalTimelineResponse,
+        forecast: WeatherForecast,
+        now: Instant,
+        zoneId: ZoneId,
+        selectedDrone: LocalDrone?
+    ): FlightOpportunityResult {
+        val drones = _uiState.value.droneFleet
+            .distinctBy { it.id }
+            .takeIf { it.size > 1 }
+            ?: return this
+        val compared = drones.map { drone ->
+            val capabilities = catalogResolver.capabilitiesFor(drone).first
+            val evaluated = flightOpportunityEngine.evaluate(
+                FlightOpportunityInput(
+                    legalSegments = timeline.segments,
+                    weatherSlots = forecast.toFlightOpportunityWeatherSlots(
+                        now = now,
+                        selectedDrone = drone
+                    ),
+                    zoneId = zoneId,
+                    now = now
+                )
+            )
+            val best = evaluated.bestOpportunity
+            FlightOpportunityDroneCandidate(
+                droneId = drone.id,
+                displayName = drone.displayName,
+                opportunityScore = best?.opportunityScore,
+                opportunityLevel = best?.opportunityLevel,
+                droneScore = best?.droneScore,
+                droneLevel = best?.droneLevel,
+                windResistanceMs = capabilities.maxWindResistanceMs,
+                bestFrom = best?.from,
+                bestTo = best?.to
+            )
+        }.sortedWith(
+            compareByDescending<FlightOpportunityDroneCandidate> { it.candidateRank() }
+                .thenBy { it.bestFrom ?: Instant.MAX }
+        )
+        val recommended = compared.firstOrNull { it.isUsableRecommendation() } ?: return this
+        val selectedCandidate = selectedDrone?.let { drone ->
+            compared.firstOrNull { it.droneId == drone.id }
+        }
+        val reason = when {
+            compared.count { it.isUsableRecommendation() } == 1 -> FlightOpportunityDroneRecommendationReason.ONLY_USABLE
+            selectedCandidate != null &&
+                recommended.bestFrom != null &&
+                selectedCandidate.bestFrom != null &&
+                recommended.bestFrom != selectedCandidate.bestFrom -> FlightOpportunityDroneRecommendationReason.BETTER_WINDOW
+            recommended.windResistanceMs != null &&
+                compared.drop(1).any { (recommended.windResistanceMs ?: 0.0) > (it.windResistanceMs ?: 0.0) } ->
+                FlightOpportunityDroneRecommendationReason.WIND_MARGIN
+            else -> FlightOpportunityDroneRecommendationReason.NO_CLEAR_ADVANTAGE
+        }
+        return copy(
+            droneRecommendation = FlightOpportunityDroneRecommendation(
+                recommended = recommended,
+                compared = compared,
+                reason = reason
+            )
+        )
+    }
+
+    private fun FlightOpportunityDroneCandidate.isUsableRecommendation(): Boolean =
+        opportunityScore != null &&
+            opportunityLevel != FlightOpportunityLevel.POOR &&
+            bestFrom != null &&
+            bestTo != null
+
+    private fun FlightOpportunityDroneCandidate.candidateRank(): Int {
+        val base = opportunityScore ?: -100
+        val drone = droneScore ?: -50
+        val wind = windResistanceMs?.times(2)?.toInt() ?: 0
+        val levelBonus = when (opportunityLevel) {
+            FlightOpportunityLevel.EXCELLENT -> 40
+            FlightOpportunityLevel.GOOD -> 25
+            FlightOpportunityLevel.MARGINAL -> 10
+            FlightOpportunityLevel.PARTIAL -> -20
+            FlightOpportunityLevel.POOR,
+            null -> -40
+        }
+        return base + drone + wind + levelBonus
+    }
+
+    private fun WeatherForecast.toFlightOpportunityWeatherSlots(
+        now: Instant,
+        selectedDrone: LocalDrone?
+    ): List<FlightOpportunityWeatherSlot> {
+        val slotDuration = defaultForecastSlotDuration()
+        val sortedHours = hours
+            .filter { it.instant.plus(slotDuration).isAfter(now) }
+            .sortedBy { it.instant }
+        if (sortedHours.isEmpty()) return emptyList()
+        val capabilities = selectedDrone?.let { catalogResolver.capabilitiesFor(it).first }
+
+        return sortedHours.mapIndexed { index, hour ->
+            val nextInstant = sortedHours.getOrNull(index + 1)?.instant
+            val to = nextInstant?.takeIf { it.isAfter(hour.instant) }
+                ?: hour.instant.plus(slotDuration)
+            val metrics = hour.toWeatherMetrics()
+            val weather = weatherAssessmentEngine.assess(metrics)
+            FlightOpportunityWeatherSlot(
+                from = hour.instant,
+                to = to,
+                weatherAssessment = weather,
+                droneAssessment = capabilities?.let {
+                    droneAssessmentEngine.assess(
+                        metrics = metrics,
+                        capabilities = it,
+                        weatherAssessment = weather
+                    )
+                }
+            )
+        }
+    }
+
+    private fun WeatherForecast.defaultForecastSlotDuration(): Duration {
+        val sorted = hours.map { it.instant }.sorted()
+        return sorted.zipWithNext()
+            .map { (from, to) -> Duration.between(from, to) }
+            .firstOrNull { !it.isZero && !it.isNegative }
+            ?: Duration.ofHours(1)
     }
 
     private fun currentDroneAssessment(

@@ -106,6 +106,7 @@ import androidx.core.graphics.createBitmap
 import androidx.core.net.toUri
 import it.droneskycheck.app.data.AuthorizationDraft
 import it.droneskycheck.app.data.AuthorizationDraftStatuses
+import it.droneskycheck.app.data.DscLogger
 import it.droneskycheck.app.data.LocalAuthorizationRepository
 import it.droneskycheck.app.data.LocalDrone
 import it.droneskycheck.app.data.LocalOperatorTypes
@@ -115,10 +116,11 @@ import it.droneskycheck.app.data.LocalPilotRepository
 import it.droneskycheck.app.data.LocalPilotSnapshot
 import it.droneskycheck.app.data.LocalUasOperator
 import it.droneskycheck.app.data.drone.DroneCatalogMatchStatus
+import it.droneskycheck.app.data.drone.DroneCatalogUpdateResult
+import it.droneskycheck.app.data.drone.DroneTechnicalCatalogRepository
 import it.droneskycheck.app.data.drone.DroneTechnicalCatalogResolver
 import it.droneskycheck.app.data.drone.formatOneDecimal
 import it.droneskycheck.app.data.drone.msToKmh
-import it.droneskycheck.app.data.drone.parseDroneTechnicalCatalog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -1302,7 +1304,26 @@ private fun DroneForm(
     onSave: () -> Unit
 ) {
     val context = LocalContext.current
-    val catalogResolver = remember(context) { context.loadDroneTechnicalCatalogResolver() }
+    val catalogRepository = remember(context) { DroneTechnicalCatalogRepository(context.applicationContext) }
+    var catalogResolver by remember { mutableStateOf(DroneTechnicalCatalogResolver.empty()) }
+    LaunchedEffect(catalogRepository) {
+        catalogResolver = withContext(Dispatchers.IO) { catalogRepository.resolver() }
+        DscLogger.debug(
+            "DroneCatalog",
+            "DroneCatalog: profile sheet using catalog schema=${catalogResolver.catalog.schemaVersion} " +
+                "catalog=${catalogResolver.catalog.catalogVersion} drones=${catalogResolver.catalog.drones.size}"
+        )
+        val update = withContext(Dispatchers.IO) { catalogRepository.checkForUpdatesIfDue() }
+        DscLogger.debug("DroneCatalog", "DroneCatalog: profile sheet update result=$update")
+        if (update is DroneCatalogUpdateResult.Installed) {
+            catalogResolver = withContext(Dispatchers.IO) { catalogRepository.resolver() }
+            DscLogger.debug(
+                "DroneCatalog",
+                "DroneCatalog: profile sheet switched to catalog schema=${catalogResolver.catalog.schemaVersion} " +
+                    "catalog=${catalogResolver.catalog.catalogVersion} drones=${catalogResolver.catalog.drones.size}"
+            )
+        }
+    }
     val catalogMatch = remember(catalogResolver, draft.manufacturer, draft.model) {
         catalogResolver.resolve(draft.manufacturer, draft.model)
     }
@@ -2070,15 +2091,6 @@ private fun decodeBitmap(context: Context, uri: Uri): Bitmap? =
             context.contentResolver.openInputStream(uri)?.use(BitmapFactory::decodeStream)
         }
     }.getOrNull()
-
-private fun Context.loadDroneTechnicalCatalogResolver(): DroneTechnicalCatalogResolver =
-    runCatching {
-        assets.open("drone_technical_catalog.json")
-            .bufferedReader(Charsets.UTF_8)
-            .use { it.readText() }
-            .let(::parseDroneTechnicalCatalog)
-            .let(::DroneTechnicalCatalogResolver)
-    }.getOrDefault(DroneTechnicalCatalogResolver.empty())
 
 private fun it.droneskycheck.app.data.drone.DroneCatalogMatchResult.profileSummaryText(): String =
     when (status) {
