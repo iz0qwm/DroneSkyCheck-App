@@ -5,6 +5,11 @@ import it.droneskycheck.app.data.DscApiConfig
 object MapLayerIds {
     const val STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
     const val KWOS_DATA_BASE_URL = DscApiConfig.KwosDataBaseUrl
+    const val TRAFFIC_AWARENESS_SOURCE_ID = "traffic-awareness-source"
+    const val TRAFFIC_AWARENESS_SYMBOL_LAYER_ID = "traffic-awareness-symbol-layer"
+    const val TRAFFIC_AWARENESS_RADIUS_SOURCE_ID = "traffic-awareness-radius-source"
+    const val TRAFFIC_AWARENESS_RADIUS_FILL_LAYER_ID = "traffic-awareness-radius-fill-layer"
+    const val TRAFFIC_AWARENESS_RADIUS_LINE_LAYER_ID = "traffic-awareness-radius-line-layer"
 
     val STATIC_LAYERS = listOf(
         DscMapLayer("p-parks-enr", "split/P_PARKS_ENR_561.geojson", DscLayerCategory.Parks, "Parks ENR 5.6.1", minZoom = 5.0f, zeroLimitOpacity = 0.05f),

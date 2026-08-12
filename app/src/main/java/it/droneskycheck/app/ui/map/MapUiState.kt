@@ -7,6 +7,8 @@ import it.droneskycheck.app.data.drone.DroneCatalogMatchResult
 import it.droneskycheck.app.data.drone.DroneOperationalAssessment
 import it.droneskycheck.app.data.flight.FlightOpportunityResult
 import it.droneskycheck.app.data.flight.FlightOpportunityStatus
+import it.droneskycheck.app.data.traffic.TrafficAwarenessState
+import it.droneskycheck.app.data.traffic.TrafficTarget
 import it.droneskycheck.app.data.weather.WeatherAssessment
 import it.droneskycheck.app.data.weather.WeatherForecast
 import it.droneskycheck.app.map.DscLayerCategory
@@ -33,6 +35,8 @@ data class MapUiState(
     val weatherForecast: WeatherForecast? = null,
     val weatherAssessment: WeatherAssessment? = null,
     val weatherError: String? = null,
+    val trafficAwareness: TrafficAwarenessState = TrafficAwarenessState(),
+    val selectedTrafficTarget: TrafficTarget? = null,
     val droneFleet: List<LocalDrone> = emptyList(),
     val selectedDrone: LocalDrone? = null,
     val selectedDroneCatalogMatch: DroneCatalogMatchResult? = null,

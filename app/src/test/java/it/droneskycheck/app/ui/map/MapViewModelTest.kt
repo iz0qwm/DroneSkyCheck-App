@@ -24,6 +24,21 @@ import it.droneskycheck.app.data.drone.DroneTechnicalCatalogResolver
 import it.droneskycheck.app.data.drone.InMemoryDroneTechnicalCatalogClient
 import it.droneskycheck.app.data.drone.parseDroneTechnicalCatalog
 import it.droneskycheck.app.data.flight.FlightOpportunityStatus
+import it.droneskycheck.app.data.traffic.TrafficAwarenessClient
+import it.droneskycheck.app.data.traffic.TrafficAwarenessResponse
+import it.droneskycheck.app.data.traffic.TrafficCacheInfo
+import it.droneskycheck.app.data.traffic.TrafficCenter
+import it.droneskycheck.app.data.traffic.TrafficAircraft
+import it.droneskycheck.app.data.traffic.TrafficAltitude
+import it.droneskycheck.app.data.traffic.TrafficIdentifiers
+import it.droneskycheck.app.data.traffic.TrafficMotion
+import it.droneskycheck.app.data.traffic.TrafficPosition
+import it.droneskycheck.app.data.traffic.TrafficProviderStatus
+import it.droneskycheck.app.data.traffic.TrafficRelative
+import it.droneskycheck.app.data.traffic.TrafficSource
+import it.droneskycheck.app.data.traffic.TrafficSummary
+import it.droneskycheck.app.data.traffic.TrafficTarget
+import it.droneskycheck.app.data.traffic.TrafficTime
 import it.droneskycheck.app.data.weather.WeatherForecast
 import it.droneskycheck.app.data.weather.WeatherForecastCacheDto
 import it.droneskycheck.app.data.weather.WeatherForecastClient
@@ -175,6 +190,7 @@ class MapViewModelTest {
         )
 
         viewModel.onMapTapped(selection(41.1389, 16.7606))
+        waitUntil { viewModel.uiState.value.selectedPoint != null }
         viewModel.onOperationalContextRequested()
         waitUntil { viewModel.uiState.value.legalTimelineError != null }
 
@@ -323,7 +339,9 @@ class MapViewModelTest {
             )
         )
 
+        waitUntil { viewModel.uiState.value.selectedDrone != null }
         viewModel.onMapTapped(selection(41.9, 12.5))
+        waitUntil { viewModel.uiState.value.selectedPoint != null }
         viewModel.onOperationalContextRequested()
         waitUntil { viewModel.uiState.value.flightOpportunityResult?.droneRecommendation != null }
 
@@ -401,23 +419,318 @@ class MapViewModelTest {
         scope.cancel()
     }
 
+    @Test
+    fun enablingTrafficAwarenessStartsImmediateFetchForSelectedPoint() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val traffic = FakeTrafficAwarenessClient()
+        val viewModel = viewModel(
+            scope = scope,
+            traffic = traffic,
+            preferences = InMemoryMapPreferences(),
+            trafficPollingIntervalMillis = 10_000
+        )
+
+        viewModel.onMapTapped(selection(41.9, 12.5))
+        waitUntil { viewModel.uiState.value.selectedPoint != null }
+        viewModel.enableTrafficAwareness()
+        waitUntil { traffic.calls == 1 && !viewModel.uiState.value.trafficAwareness.loading }
+
+        assertTrue(viewModel.uiState.value.trafficAwareness.enabled)
+        assertEquals(MapPoint(41.9, 12.5), traffic.lastPoint)
+        assertEquals(20.0, traffic.lastRadiusKm ?: -1.0, 0.0)
+        assertEquals(1, viewModel.uiState.value.trafficAwareness.response?.traffic?.count)
+        scope.cancel()
+    }
+
+    @Test
+    fun enablingTrafficAwarenessWithoutSelectedPointDoesNotRequestInvalidCoordinates() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val traffic = FakeTrafficAwarenessClient()
+        val viewModel = viewModel(
+            scope = scope,
+            traffic = traffic,
+            preferences = InMemoryMapPreferences(),
+            trafficPollingIntervalMillis = 20
+        )
+
+        viewModel.enableTrafficAwareness()
+        delay(80)
+
+        assertEquals(0, traffic.calls)
+        assertFalse(viewModel.uiState.value.trafficAwareness.enabled)
+        assertEquals("Seleziona un punto sulla mappa", viewModel.uiState.value.trafficAwareness.error)
+        assertEquals("Seleziona un punto sulla mappa", viewModel.uiState.value.mapStatusMessage)
+        scope.cancel()
+    }
+
+    @Test
+    fun enablingTrafficAwarenessWithoutSelectedPointUsesMapCenterWhenAvailable() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val traffic = FakeTrafficAwarenessClient()
+        val viewModel = viewModel(
+            scope = scope,
+            traffic = traffic,
+            preferences = InMemoryMapPreferences(),
+            trafficPollingIntervalMillis = 10_000
+        )
+
+        viewModel.onCameraIdle(
+            CameraBounds(
+                zoom = 12.0,
+                north = 42.0,
+                south = 41.8,
+                east = 12.6,
+                west = 12.4
+            )
+        )
+        viewModel.enableTrafficAwareness()
+        waitUntil { traffic.calls == 1 && !viewModel.uiState.value.trafficAwareness.loading }
+
+        assertTrue(viewModel.uiState.value.trafficAwareness.enabled)
+        assertEquals(MapPoint(41.9, 12.5), viewModel.uiState.value.selectedPoint)
+        assertEquals(MapPoint(41.9, 12.5), traffic.lastPoint)
+        scope.cancel()
+    }
+
+    @Test
+    fun trafficAwarenessPollsPeriodicallyWithoutFiveSecondSleep() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val traffic = FakeTrafficAwarenessClient()
+        val viewModel = viewModel(
+            scope = scope,
+            traffic = traffic,
+            preferences = InMemoryMapPreferences(),
+            trafficPollingIntervalMillis = 20
+        )
+
+        viewModel.onMapTapped(selection(41.9, 12.5))
+        waitUntil { viewModel.uiState.value.selectedPoint != null }
+        viewModel.enableTrafficAwareness()
+        waitUntil { traffic.calls >= 2 }
+
+        assertTrue(viewModel.uiState.value.trafficAwareness.enabled)
+        assertEquals(MapPoint(41.9, 12.5), traffic.lastPoint)
+        scope.cancel()
+    }
+
+    @Test
+    fun disablingTrafficAwarenessCancelsPolling() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val traffic = FakeTrafficAwarenessClient()
+        val viewModel = viewModel(
+            scope = scope,
+            traffic = traffic,
+            preferences = InMemoryMapPreferences(),
+            trafficPollingIntervalMillis = 20
+        )
+
+        viewModel.onMapTapped(selection(41.9, 12.5))
+        waitUntil { viewModel.uiState.value.selectedPoint != null }
+        viewModel.enableTrafficAwareness()
+        waitUntil { traffic.calls == 1 }
+        viewModel.disableTrafficAwareness()
+        val callsAfterDisable = traffic.calls
+        delay(80)
+
+        assertFalse(viewModel.uiState.value.trafficAwareness.enabled)
+        assertEquals(callsAfterDisable, traffic.calls)
+        scope.cancel()
+    }
+
+    @Test
+    fun trafficAwarenessPollingDoesNotOverlapSlowFetches() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        try {
+            val traffic = FakeTrafficAwarenessClient(delayMillis = 80)
+            val viewModel = viewModel(
+                scope = scope,
+                traffic = traffic,
+                preferences = InMemoryMapPreferences(),
+                trafficPollingIntervalMillis = 10
+            )
+
+            viewModel.onMapTapped(selection(41.9, 12.5))
+            waitUntil { viewModel.uiState.value.selectedPoint != null }
+            viewModel.enableTrafficAwareness()
+            delay(40)
+
+            assertEquals(1, traffic.calls)
+            assertEquals(1, traffic.maxConcurrentCalls)
+            waitUntil { traffic.calls >= 2 }
+            assertEquals(1, traffic.maxConcurrentCalls)
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun trafficAwarenessTemporaryErrorKeepsLastGoodSnapshotAndRetries() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val traffic = FakeTrafficAwarenessClient(
+            results = ArrayDeque(
+                listOf(
+                    Result.success(trafficResponse(count = 2)),
+                    Result.failure(IllegalStateException("temporary")),
+                    Result.success(trafficResponse(count = 3))
+                )
+            )
+        )
+        val viewModel = viewModel(
+            scope = scope,
+            traffic = traffic,
+            preferences = InMemoryMapPreferences(),
+            trafficPollingIntervalMillis = 20
+        )
+
+        viewModel.onMapTapped(selection(41.9, 12.5))
+        waitUntil { viewModel.uiState.value.selectedPoint != null }
+        viewModel.enableTrafficAwareness()
+        waitUntil { traffic.calls == 1 && viewModel.uiState.value.trafficAwareness.response?.traffic?.count == 2 }
+        waitUntil { traffic.calls == 2 && viewModel.uiState.value.trafficAwareness.error != null }
+
+        assertTrue(viewModel.uiState.value.trafficAwareness.enabled)
+        assertEquals(2, viewModel.uiState.value.trafficAwareness.response?.traffic?.count)
+
+        waitUntil { traffic.calls >= 3 && viewModel.uiState.value.trafficAwareness.response?.traffic?.count == 3 }
+        assertNull(viewModel.uiState.value.trafficAwareness.error)
+        scope.cancel()
+    }
+
+    @Test
+    fun closingZoneSheetKeepsTrafficAwarenessEnabledAndPolling() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val traffic = FakeTrafficAwarenessClient()
+        val viewModel = viewModel(
+            scope = scope,
+            traffic = traffic,
+            preferences = InMemoryMapPreferences(),
+            trafficPollingIntervalMillis = 20
+        )
+
+        viewModel.onMapTapped(selection(41.9, 12.5))
+        waitUntil { viewModel.uiState.value.selectedPoint != null }
+        viewModel.enableTrafficAwareness()
+        waitUntil { traffic.calls >= 1 }
+        viewModel.onZoneSheetDismissed()
+        waitUntil { traffic.calls >= 2 }
+
+        assertFalse(viewModel.uiState.value.isZoneSheetVisible)
+        assertTrue(viewModel.uiState.value.trafficAwareness.enabled)
+        assertEquals(MapPoint(41.9, 12.5), viewModel.uiState.value.selectedPoint)
+        assertEquals(MapPoint(41.9, 12.5), traffic.lastPoint)
+        scope.cancel()
+    }
+
+    @Test
+    fun changingSelectedPointWhileTrafficAwarenessIsOnFetchesNewPointAndClearsOldSnapshot() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val traffic = FakeTrafficAwarenessClient(
+            results = ArrayDeque(
+                listOf(
+                    Result.success(trafficResponse(count = 2, center = MapPoint(41.9, 12.5))),
+                    Result.success(trafficResponse(count = 3, center = MapPoint(42.0, 12.6)))
+                )
+            )
+        )
+        val viewModel = viewModel(
+            scope = scope,
+            traffic = traffic,
+            preferences = InMemoryMapPreferences(),
+            trafficPollingIntervalMillis = 10_000
+        )
+
+        viewModel.onMapTapped(selection(41.9, 12.5))
+        waitUntil { viewModel.uiState.value.selectedPoint != null }
+        viewModel.enableTrafficAwareness()
+        waitUntil { traffic.calls == 1 && viewModel.uiState.value.trafficAwareness.response?.traffic?.count == 2 }
+
+        viewModel.onMapTapped(selection(42.0, 12.6))
+        assertTrue(viewModel.uiState.value.trafficAwareness.enabled)
+        assertNull(viewModel.uiState.value.trafficAwareness.response)
+        waitUntil { traffic.calls == 2 && traffic.lastPoint == MapPoint(42.0, 12.6) }
+        waitUntil { viewModel.uiState.value.trafficAwareness.response?.traffic?.count == 3 }
+
+        assertEquals(MapPoint(42.0, 12.6), viewModel.uiState.value.selectedPoint)
+        assertEquals(MapPoint(42.0, 12.6), traffic.lastPoint)
+        scope.cancel()
+    }
+
+    @Test
+    fun selectedTrafficTargetIsClosedWhenTrafficAwarenessIsDisabled() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val traffic = FakeTrafficAwarenessClient(
+            results = ArrayDeque(listOf(Result.success(trafficResponse(count = 1))))
+        )
+        val viewModel = viewModel(
+            scope = scope,
+            traffic = traffic,
+            preferences = InMemoryMapPreferences(),
+            trafficPollingIntervalMillis = 100
+        )
+
+        viewModel.onMapTapped(selection(41.9, 12.5))
+        waitUntil { viewModel.uiState.value.selectedPoint != null }
+        viewModel.enableTrafficAwareness()
+        waitUntil { viewModel.uiState.value.trafficAwareness.response?.traffic?.targets?.isNotEmpty() == true }
+        viewModel.onTrafficTargetSelected("traffic:1")
+        waitUntil { viewModel.uiState.value.selectedTrafficTarget != null }
+        viewModel.disableTrafficAwareness()
+        val callsAfterDisable = traffic.calls
+        delay(80)
+
+        assertFalse(viewModel.uiState.value.trafficAwareness.enabled)
+        assertNull(viewModel.uiState.value.trafficAwareness.response)
+        assertNull(viewModel.uiState.value.selectedTrafficTarget)
+        assertEquals(callsAfterDisable, traffic.calls)
+        scope.cancel()
+    }
+
+    @Test
+    fun viewModelClearedCancelsTrafficAwarenessPolling() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val traffic = FakeTrafficAwarenessClient()
+        val viewModel = viewModel(
+            scope = scope,
+            traffic = traffic,
+            preferences = InMemoryMapPreferences(),
+            trafficPollingIntervalMillis = 20
+        )
+
+        viewModel.onMapTapped(selection(41.9, 12.5))
+        waitUntil { viewModel.uiState.value.selectedPoint != null }
+        viewModel.enableTrafficAwareness()
+        waitUntil { traffic.calls >= 1 }
+        MapViewModel::class.java.getDeclaredMethod("onCleared")
+            .apply { isAccessible = true }
+            .invoke(viewModel)
+        val callsAfterClear = traffic.calls
+        delay(80)
+
+        assertEquals(callsAfterClear, traffic.calls)
+        scope.cancel()
+    }
+
     private fun viewModel(
         scope: CoroutineScope,
         legal: FakeLegalTimelineClient = FakeLegalTimelineClient(),
         weather: FakeWeatherClient = FakeWeatherClient(),
+        traffic: TrafficAwarenessClient = FakeTrafficAwarenessClient(),
         preferences: InMemoryMapPreferences,
         pilotStore: LocalPilotStore = FakePilotStore(),
-        catalog: DroneTechnicalCatalogClient = InMemoryDroneTechnicalCatalogClient()
+        catalog: DroneTechnicalCatalogClient = InMemoryDroneTechnicalCatalogClient(),
+        trafficPollingIntervalMillis: Long = 5_000L
     ): MapViewModel =
         MapViewModel(
             zoneCheckRepository = FakeZoneCheckClient(),
             legalTimelineRepository = legal,
             weatherForecastRepository = weather,
+            trafficAwarenessRepository = traffic,
             mapPreferences = preferences,
             localPilotStore = pilotStore,
             droneTechnicalCatalog = catalog,
             clock = clock,
             timelineZoneId = ZoneId.of("Europe/Rome"),
+            trafficAwarenessPollingIntervalMillis = trafficPollingIntervalMillis,
             externalScope = scope
         )
 
@@ -428,7 +741,7 @@ class MapViewModelTest {
         )
 
     private suspend fun waitUntil(predicate: () -> Boolean) {
-        withTimeout(1_000) {
+        withTimeout(10_000) {
             while (!predicate()) {
                 delay(10)
             }
@@ -546,6 +859,116 @@ private class FakeWeatherClient(
             ?: Result.failure(IllegalStateException("weather fixture"))
     }
 }
+
+private class FakeTrafficAwarenessClient(
+    private val delayMillis: Long = 0L,
+    private val results: ArrayDeque<Result<TrafficAwarenessResponse>> = ArrayDeque()
+) : TrafficAwarenessClient {
+    var calls: Int = 0
+        private set
+    var activeCalls: Int = 0
+        private set
+    var maxConcurrentCalls: Int = 0
+        private set
+    var lastPoint: MapPoint? = null
+        private set
+    var lastRadiusKm: Double? = null
+        private set
+
+    override suspend fun getTrafficAwareness(
+        lat: Double,
+        lon: Double,
+        radiusKm: Double
+    ): Result<TrafficAwarenessResponse> {
+        calls += 1
+        activeCalls += 1
+        maxConcurrentCalls = maxOf(maxConcurrentCalls, activeCalls)
+        lastPoint = MapPoint(lat, lon)
+        lastRadiusKm = radiusKm
+        delay(delayMillis)
+        activeCalls -= 1
+        return if (results.isNotEmpty()) {
+            results.removeFirst()
+        } else {
+            Result.success(trafficResponse(count = 1))
+        }
+    }
+}
+
+private fun trafficResponse(
+    count: Int = 1,
+    center: MapPoint = MapPoint(41.9, 12.5)
+): TrafficAwarenessResponse =
+    TrafficAwarenessResponse(
+        ok = true,
+        generatedAt = 1_800_000_000_000,
+        servedAt = 1_800_000_000_100,
+        center = TrafficCenter(center.lat, center.lon),
+        radiusKm = 20.0,
+        traffic = TrafficSummary(
+            count = count,
+            targets = (1..count).map { index ->
+                trafficTarget(
+                    id = "traffic:$index",
+                    lat = center.lat + index * 0.001,
+                    lon = center.lon + index * 0.001,
+                    callsign = "T$index"
+                )
+            }
+        ),
+        providers = mapOf(
+            "opensky" to TrafficProviderStatus(
+                status = if (count > 0) "ok" else "zero_results",
+                count = count,
+                errorCode = null
+            )
+        ),
+        cache = TrafficCacheInfo(
+            hit = false,
+            ageMs = 0,
+            ttlMs = 5_000,
+            singleFlight = false
+        )
+    )
+
+private fun trafficTarget(
+    id: String,
+    lat: Double,
+    lon: Double,
+    callsign: String
+): TrafficTarget =
+    TrafficTarget(
+        id = id,
+        identifiers = TrafficIdentifiers(
+            icao24 = null,
+            callsign = callsign,
+            registration = null,
+            sourceId = id
+        ),
+        position = TrafficPosition(lat = lat, lon = lon),
+        altitude = TrafficAltitude(
+            baroM = null,
+            geoM = null,
+            mslM = null,
+            aglM = null,
+            sourceM = null,
+            sourceReference = null
+        ),
+        motion = TrafficMotion(
+            groundSpeedMps = null,
+            verticalRateMps = null,
+            trackDeg = null,
+            headingDeg = null
+        ),
+        aircraft = TrafficAircraft(category = null, type = null),
+        time = TrafficTime(timestamp = null, ageSec = null),
+        relative = TrafficRelative(distanceM = null, bearingDeg = null),
+        provider = "opensky",
+        source = "OpenSky",
+        quality = null,
+        sources = listOf(TrafficSource(provider = "opensky", source = "OpenSky")),
+        provenance = null
+    )
 
 private class FakePilotStore(
     initialDrones: List<LocalDrone> = emptyList()

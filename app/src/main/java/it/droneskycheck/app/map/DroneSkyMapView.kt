@@ -22,7 +22,12 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import it.droneskycheck.app.data.CachedGeoJsonRepository
+import it.droneskycheck.app.data.DscLogger
 import it.droneskycheck.app.data.ZonesRepository
+import it.droneskycheck.app.data.traffic.TrafficAwarenessDefaults
+import it.droneskycheck.app.data.traffic.TrafficAwarenessLogTag
+import it.droneskycheck.app.data.traffic.TrafficAwarenessState
+import it.droneskycheck.app.data.traffic.coarseTraffic
 import it.droneskycheck.app.ui.map.CameraBounds
 import it.droneskycheck.app.ui.map.DemoZone
 import it.droneskycheck.app.ui.map.MapPoint
@@ -41,6 +46,7 @@ import org.maplibre.android.style.layers.FillLayer
 import org.maplibre.android.style.layers.Layer
 import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.Property
+import org.maplibre.android.style.layers.SymbolLayer
 import org.maplibre.android.style.layers.PropertyFactory.circleBlur
 import org.maplibre.android.style.layers.PropertyFactory.circleColor
 import org.maplibre.android.style.layers.PropertyFactory.circleOpacity
@@ -51,6 +57,11 @@ import org.maplibre.android.style.layers.PropertyFactory.circleStrokeWidth
 import org.maplibre.android.style.layers.PropertyFactory.fillColor
 import org.maplibre.android.style.layers.PropertyFactory.fillOpacity
 import org.maplibre.android.style.layers.PropertyFactory.fillPattern
+import org.maplibre.android.style.layers.PropertyFactory.iconAllowOverlap
+import org.maplibre.android.style.layers.PropertyFactory.iconIgnorePlacement
+import org.maplibre.android.style.layers.PropertyFactory.iconImage
+import org.maplibre.android.style.layers.PropertyFactory.iconRotate
+import org.maplibre.android.style.layers.PropertyFactory.iconSize
 import org.maplibre.android.style.layers.PropertyFactory.lineColor
 import org.maplibre.android.style.layers.PropertyFactory.lineOpacity
 import org.maplibre.android.style.layers.PropertyFactory.lineWidth
@@ -69,9 +80,11 @@ fun DroneSkyMapView(
     authorizationTakeoff: MapPoint?,
     authorizationAreaPoints: List<MapPoint>,
     authorizationAreaClosed: Boolean,
+    trafficAwareness: TrafficAwarenessState,
     userLocation: UserLocation?,
     shouldCenterOnUserLocation: Boolean,
     onUserLocationCentered: () -> Unit,
+    onTrafficTargetTapped: (String) -> Unit,
     onMapTapped: (MapTapSelection) -> Unit,
     onCameraIdle: (CameraBounds) -> Unit,
     onMapDataDegraded: () -> Unit,
@@ -83,7 +96,15 @@ fun DroneSkyMapView(
         MapView(context).apply {
             onCreate(Bundle())
             getMapAsync { map ->
-                configureMap(this, map, visibleLayerCategories, onMapTapped, onCameraIdle, onMapDataDegraded)
+                configureMap(
+                    this,
+                    map,
+                    visibleLayerCategories,
+                    onTrafficTargetTapped,
+                    onMapTapped,
+                    onCameraIdle,
+                    onMapDataDegraded
+                )
             }
         }
     }
@@ -131,6 +152,7 @@ fun DroneSkyMapView(
         update = { view ->
             view.getMapAsync { map ->
                 map.getStyle { style ->
+                    addTrafficAwarenessLayers(style)
                     applyLayerVisibility(style, visibleLayerCategories)
                     loadDynamicZonesSources(
                         zonesRepository = ZonesRepository(view.context.applicationContext),
@@ -141,6 +163,7 @@ fun DroneSkyMapView(
                     )
                     updatePointMarkers(style, selectedPoint, userLocation)
                     updateAuthorizationDrawing(style, authorizationTakeoff, authorizationAreaPoints, authorizationAreaClosed)
+                    updateTrafficAwareness(style, selectedPoint, trafficAwareness)
                     if (shouldCenterOnUserLocation && userLocation != null) {
                         centerOnUserLocation(map, userLocation)
                         onUserLocationCentered()
@@ -156,6 +179,7 @@ private fun configureMap(
     mapView: MapView,
     map: MapLibreMap,
     visibleLayerCategories: Set<DscLayerCategory>,
+    onTrafficTargetTapped: (String) -> Unit,
     onMapTapped: (MapTapSelection) -> Unit,
     onCameraIdle: (CameraBounds) -> Unit,
     onMapDataDegraded: () -> Unit
@@ -171,7 +195,14 @@ private fun configureMap(
 
     map.setStyle(styleBuilder) {
         it.addImage(NOTAM_ZEBRA_PATTERN_ID, createNotamZebraPattern())
+        val trafficIcon = createTrafficAircraftIcon()
+        it.addImage(TRAFFIC_AWARENESS_ICON_ID, trafficIcon)
+        DscLogger.debug(
+            TrafficAwarenessLogTag,
+            "map icon registered id=$TRAFFIC_AWARENESS_ICON_ID width=${trafficIcon.width} height=${trafficIcon.height}"
+        )
         addDscLayers(it)
+        addTrafficAwarenessLayers(it)
         addPointMarkerLayers(it)
         updatePointMarkers(it, null, null)
         loadDscGeoJsonSources(geoJsonRepository, it, onMapDataDegraded)
@@ -185,6 +216,20 @@ private fun configureMap(
         applyLayerVisibility(it, visibleLayerCategories)
 
         map.addOnMapClickListener { latLng ->
+            val trafficFeatures = map.queryRenderedFeatures(
+                touchAreaForLatLng(map, latLng),
+                MapLayerIds.TRAFFIC_AWARENESS_SYMBOL_LAYER_ID
+            )
+            val trafficTargetId = trafficFeatures.firstNotNullOfOrNull(::featureToTrafficTargetId)
+            DscLogger.debug(
+                TrafficAwarenessLogTag,
+                "target tap featuresHit=${trafficFeatures.size} id=${trafficTargetId ?: "none"}"
+            )
+            if (trafficTargetId != null) {
+                onTrafficTargetTapped(trafficTargetId)
+                return@addOnMapClickListener true
+            }
+
             val zones = map.queryRenderedFeatures(
                 touchAreaForLatLng(map, latLng),
                 *interactiveLayerIds()
@@ -331,6 +376,63 @@ private fun addPointMarkerLayers(style: Style) {
     )
 }
 
+private fun addTrafficAwarenessLayers(style: Style) {
+    val radiusSourceCreated = style.addGeoJsonSourceIfMissing(
+        MapLayerIds.TRAFFIC_AWARENESS_RADIUS_SOURCE_ID,
+        emptyTrafficFeatureCollection()
+    )
+    val targetSourceCreated = style.addGeoJsonSourceIfMissing(
+        MapLayerIds.TRAFFIC_AWARENESS_SOURCE_ID,
+        emptyTrafficFeatureCollection()
+    )
+
+    val radiusFillLayerCreated = style.addLayerIfMissing(
+        MapLayerIds.TRAFFIC_AWARENESS_RADIUS_FILL_LAYER_ID,
+        FillLayer(
+            MapLayerIds.TRAFFIC_AWARENESS_RADIUS_FILL_LAYER_ID,
+            MapLayerIds.TRAFFIC_AWARENESS_RADIUS_SOURCE_ID
+        ).withProperties(
+            fillColor(TRAFFIC_AWARENESS_COLOR),
+            fillOpacity(0.045f)
+        )
+    )
+    val radiusLineLayerCreated = style.addLayerIfMissing(
+        MapLayerIds.TRAFFIC_AWARENESS_RADIUS_LINE_LAYER_ID,
+        LineLayer(
+            MapLayerIds.TRAFFIC_AWARENESS_RADIUS_LINE_LAYER_ID,
+            MapLayerIds.TRAFFIC_AWARENESS_RADIUS_SOURCE_ID
+        ).withProperties(
+            lineColor(TRAFFIC_AWARENESS_COLOR),
+            lineOpacity(0.72f),
+            lineWidth(1.6f)
+        )
+    )
+    val symbolLayerCreated = style.addLayerIfMissing(
+        MapLayerIds.TRAFFIC_AWARENESS_SYMBOL_LAYER_ID,
+        SymbolLayer(
+            MapLayerIds.TRAFFIC_AWARENESS_SYMBOL_LAYER_ID,
+            MapLayerIds.TRAFFIC_AWARENESS_SOURCE_ID
+        ).withProperties(
+            iconImage(TRAFFIC_AWARENESS_ICON_ID),
+            iconRotate(Expression.get(TrafficAwarenessMapProperties.RotationDeg)),
+            iconSize(TRAFFIC_AWARENESS_SYMBOL_ICON_SIZE),
+            iconAllowOverlap(true),
+            iconIgnorePlacement(true)
+        )
+    )
+    val alreadyExists = !radiusSourceCreated &&
+        !targetSourceCreated &&
+        !radiusFillLayerCreated &&
+        !radiusLineLayerCreated &&
+        !symbolLayerCreated
+    DscLogger.debug(
+        TrafficAwarenessLogTag,
+        "map install sourceCreated=$targetSourceCreated symbolLayerCreated=$symbolLayerCreated " +
+            "radiusSourceCreated=$radiusSourceCreated radiusLayersCreated=${radiusFillLayerCreated || radiusLineLayerCreated} " +
+            "alreadyExists=$alreadyExists"
+    )
+}
+
 private fun updateAuthorizationDrawing(
     style: Style,
     takeoff: MapPoint?,
@@ -373,6 +475,50 @@ private fun updatePointMarkers(
     style.setGeoJsonSourceIfAvailable(
         USER_LOCATION_SOURCE_ID,
         userLocation?.toFeatureCollection() ?: emptyFeatureCollection()
+    )
+}
+
+private fun updateTrafficAwareness(
+    style: Style,
+    selectedPoint: MapPoint?,
+    trafficAwareness: TrafficAwarenessState
+) {
+    val enabled = trafficAwareness.enabled
+    val targets = if (enabled) {
+        trafficAwareness.response?.traffic?.targets.orEmpty()
+    } else {
+        emptyList()
+    }
+    addTrafficAwarenessLayers(style)
+
+    val targetFeatures = trafficTargetsFeatureCollection(targets)
+    val targetUpdated = style.setGeoJsonSourceIfAvailable(
+        MapLayerIds.TRAFFIC_AWARENESS_SOURCE_ID,
+        targetFeatures
+    )
+    DscLogger.debug(
+        TrafficAwarenessLogTag,
+        "map source update source=${MapLayerIds.TRAFFIC_AWARENESS_SOURCE_ID} " +
+            "features=${targetFeatures.features().orEmpty().size} styleLoaded=true sourceFound=$targetUpdated"
+    )
+
+    val radiusFeatures = if (enabled) {
+        trafficRadiusFeatureCollection(
+            center = selectedPoint,
+            radiusKm = TrafficAwarenessDefaults.DefaultRadiusKm
+        )
+    } else {
+        emptyTrafficFeatureCollection()
+    }
+    val radiusUpdated = style.setGeoJsonSourceIfAvailable(
+        MapLayerIds.TRAFFIC_AWARENESS_RADIUS_SOURCE_ID,
+        radiusFeatures
+    )
+    DscLogger.debug(
+        TrafficAwarenessLogTag,
+        "radius update center=${selectedPoint?.let { "${it.lat.coarseTraffic()},${it.lon.coarseTraffic()}" } ?: "none"} " +
+            "radiusKm=${TrafficAwarenessDefaults.DefaultRadiusKm.coarseTraffic(0)} " +
+            "features=${radiusFeatures.features().orEmpty().size} sourceFound=$radiusUpdated"
     )
 }
 
@@ -529,11 +675,43 @@ private fun applyLayerVisibility(style: Style, visibleLayerCategories: Set<DscLa
 
 private fun Style.setGeoJsonSourceIfAvailable(sourceId: String, featureCollection: FeatureCollection): Boolean =
     runCatching {
-        getSourceAs<GeoJsonSource>(sourceId)
-            ?.setGeoJson(featureCollection) != null
+        val source = getSourceAs<GeoJsonSource>(sourceId)
+        if (source == null) {
+            if (sourceId == MapLayerIds.TRAFFIC_AWARENESS_SOURCE_ID ||
+                sourceId == MapLayerIds.TRAFFIC_AWARENESS_RADIUS_SOURCE_ID
+            ) {
+                DscLogger.warn(TrafficAwarenessLogTag, "map source missing source=$sourceId")
+            }
+            false
+        } else {
+            source.setGeoJson(featureCollection)
+            true
+        }
     }.onFailure { error ->
-        Log.w(LOG_TAG, "Skipped GeoJSON update for source=$sourceId because the map style is not ready", error)
+        if (sourceId == MapLayerIds.TRAFFIC_AWARENESS_SOURCE_ID ||
+            sourceId == MapLayerIds.TRAFFIC_AWARENESS_RADIUS_SOURCE_ID
+        ) {
+            DscLogger.warn(TrafficAwarenessLogTag, "map style not ready source=$sourceId", error)
+        } else {
+            Log.w(LOG_TAG, "Skipped GeoJSON update for source=$sourceId because the map style is not ready", error)
+        }
     }.getOrDefault(false)
+
+private fun Style.addGeoJsonSourceIfMissing(sourceId: String, featureCollection: FeatureCollection): Boolean =
+    if (getSourceAs<GeoJsonSource>(sourceId) == null) {
+        addSource(GeoJsonSource(sourceId, featureCollection))
+        true
+    } else {
+        false
+    }
+
+private fun Style.addLayerIfMissing(layerId: String, layer: Layer): Boolean =
+    if (getLayer(layerId) == null) {
+        addLayer(layer)
+        true
+    } else {
+        false
+    }
 
 private fun <T : Layer> T.withZoomRange(layer: DscMapLayer): T {
     minZoom = layer.minZoom
@@ -590,6 +768,9 @@ private fun featureToDemoZone(feature: Feature): DemoZone {
             ?: properties?.stringValue("message")
     )
 }
+
+private fun featureToTrafficTargetId(feature: Feature): String? =
+    feature.properties()?.stringValue(TrafficAwarenessMapProperties.TargetId)
 
 private fun DemoZone.identityKey(): String =
     listOf(id, name, type)
@@ -675,6 +856,43 @@ private fun createNotamZebraPattern(): Bitmap {
     return bitmap
 }
 
+private fun createTrafficAircraftIcon(): Bitmap {
+    val bitmap = Bitmap.createBitmap(TRAFFIC_AWARENESS_ICON_SIZE_PX, TRAFFIC_AWARENESS_ICON_SIZE_PX, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor(TRAFFIC_AWARENESS_COLOR)
+        style = Paint.Style.FILL
+    }
+    val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        style = Paint.Style.STROKE
+        strokeWidth = 2.2f
+    }
+    val cx = TRAFFIC_AWARENESS_ICON_SIZE_PX / 2f
+    val path = android.graphics.Path().apply {
+        moveTo(cx, 4f)
+        lineTo(cx + 7f, 22f)
+        lineTo(cx + 19f, 27f)
+        lineTo(cx + 19f, 34f)
+        lineTo(cx + 4f, 31f)
+        lineTo(cx + 4f, 43f)
+        lineTo(cx + 10f, 47f)
+        lineTo(cx + 10f, 52f)
+        lineTo(cx, 49f)
+        lineTo(cx - 10f, 52f)
+        lineTo(cx - 10f, 47f)
+        lineTo(cx - 4f, 43f)
+        lineTo(cx - 4f, 31f)
+        lineTo(cx - 19f, 34f)
+        lineTo(cx - 19f, 27f)
+        lineTo(cx - 7f, 22f)
+        close()
+    }
+    canvas.drawPath(path, paint)
+    canvas.drawPath(path, stroke)
+    return bitmap
+}
+
 private fun com.google.gson.JsonObject.stringValue(key: String): String? =
     get(key)
         ?.takeIf { !it.isJsonNull }
@@ -722,6 +940,10 @@ private const val USER_LOCATION_ACCURACY_LAYER_ID = "dsc-user-location-accuracy"
 private const val USER_LOCATION_DOT_LAYER_ID = "dsc-user-location-dot"
 private const val USER_LOCATION_PULSE_LAYER_ID = "dsc-user-location-pulse"
 private const val NOTAM_ZEBRA_PATTERN_ID = "dsc-notam-zebra"
+private const val TRAFFIC_AWARENESS_ICON_ID = "dsc-traffic-awareness-aircraft"
+private const val TRAFFIC_AWARENESS_ICON_SIZE_PX = 56
+private const val TRAFFIC_AWARENESS_SYMBOL_ICON_SIZE = 0.92f
+private const val TRAFFIC_AWARENESS_COLOR = "#455a64"
 private const val NOTAM_ZEBRA_SIZE_PX = 32
 private const val NOTAM_ZEBRA_STEP_PX = 16
 private const val NOTAM_ZEBRA_STROKE_PX = 2.2f

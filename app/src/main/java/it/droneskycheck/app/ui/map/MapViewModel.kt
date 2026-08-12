@@ -32,6 +32,13 @@ import it.droneskycheck.app.data.weather.WeatherForecast
 import it.droneskycheck.app.data.weather.WeatherForecastClient
 import it.droneskycheck.app.data.weather.WeatherForecastRepository
 import it.droneskycheck.app.data.weather.toWeatherMetrics
+import it.droneskycheck.app.data.traffic.TrafficAwarenessClient
+import it.droneskycheck.app.data.traffic.TrafficAwarenessDefaults
+import it.droneskycheck.app.data.traffic.TrafficAwarenessLogTag
+import it.droneskycheck.app.data.traffic.TrafficAwarenessRepository
+import it.droneskycheck.app.data.traffic.TrafficAwarenessState
+import it.droneskycheck.app.data.traffic.coarseTraffic
+import it.droneskycheck.app.data.traffic.toTrafficAwarenessDiagnosticReason
 import it.droneskycheck.app.map.DscLayerCategory
 import java.time.Clock
 import java.time.Duration
@@ -51,6 +58,7 @@ class MapViewModel(
     private val zoneCheckRepository: ZoneCheckV3Client = ZoneCheckV3Repository(),
     private val legalTimelineRepository: LegalTimelineClient = LegalTimelineRepository(),
     private val weatherForecastRepository: WeatherForecastClient = WeatherForecastRepository(),
+    private val trafficAwarenessRepository: TrafficAwarenessClient = TrafficAwarenessRepository(),
     private val weatherAssessmentEngine: WeatherAssessmentEngine = WeatherAssessmentEngine(),
     private val droneAssessmentEngine: DroneOperationalAssessmentEngine = DroneOperationalAssessmentEngine(),
     private val flightOpportunityEngine: FlightOpportunityEngine = FlightOpportunityEngine(),
@@ -59,6 +67,8 @@ class MapViewModel(
     private val localPilotStore: LocalPilotStore = InMemoryLocalPilotStore(),
     private val clock: Clock = Clock.systemUTC(),
     private val timelineZoneId: ZoneId = ZoneId.systemDefault(),
+    private val trafficAwarenessPollingIntervalMillis: Long = TrafficAwarenessDefaults.PollingIntervalMillis,
+    private val trafficAwarenessRadiusKm: Double = TrafficAwarenessDefaults.DefaultRadiusKm,
     externalScope: CoroutineScope? = null
 ) : ViewModel() {
     private val scope = externalScope ?: viewModelScope
@@ -69,6 +79,7 @@ class MapViewModel(
     private var verdictJob: Job? = null
     private var legalTimelineJob: Job? = null
     private var weatherJob: Job? = null
+    private var trafficAwarenessJob: Job? = null
     private var lastLegalTimelineRequest: LegalTimelineRequestKey? = null
     private var catalogResolver: DroneTechnicalCatalogResolver = DroneTechnicalCatalogResolver.empty()
 
@@ -210,10 +221,18 @@ class MapViewModel(
             flightOpportunityStatus = FlightOpportunityStatus.IDLE,
             flightOpportunityResult = null,
             isOperationalReportExpanded = false,
-            weatherError = null
+            weatherError = null,
+            selectedTrafficTarget = null
         )
 
         launchZoneVerdict(requestId, selection.point)
+        if (_uiState.value.trafficAwareness.enabled) {
+            DscLogger.debug(
+                TrafficAwarenessLogTag,
+                "center changed poll restart=true lat=${selection.point.lat.coarseTraffic()} lon=${selection.point.lon.coarseTraffic()}"
+            )
+            startTrafficAwarenessPolling(selection.point, clearSnapshot = true)
+        }
         if (shouldRequestOperationalContext && shouldRequestTimeline) {
             _uiState.value = _uiState.value.copy(
                 isOperationalContextRequested = true,
@@ -377,6 +396,157 @@ class MapViewModel(
             }
         }
     }
+
+    fun enableTrafficAwareness() {
+        val point = _uiState.value.selectedPoint ?: _uiState.value.cameraBounds?.centerPoint() ?: run {
+            DscLogger.warn(TrafficAwarenessLogTag, "cannot enable: selectedPoint missing")
+            _uiState.value = _uiState.value.copy(
+                trafficAwareness = _uiState.value.trafficAwareness.copy(
+                    enabled = false,
+                    loading = false,
+                    error = "Seleziona un punto sulla mappa"
+                ),
+                mapStatusMessage = "Seleziona un punto sulla mappa"
+            )
+            return
+        }
+        if (_uiState.value.selectedPoint == null) {
+            DscLogger.debug(
+                TrafficAwarenessLogTag,
+                "using map center as traffic center lat=${point.lat.coarseTraffic()} lon=${point.lon.coarseTraffic()}"
+            )
+            _uiState.value = _uiState.value.copy(selectedPoint = point)
+        }
+
+        startTrafficAwarenessPolling(point)
+    }
+
+    fun disableTrafficAwareness() {
+        trafficAwarenessJob?.cancel()
+        trafficAwarenessJob = null
+        _uiState.value = _uiState.value.copy(
+            trafficAwareness = TrafficAwarenessState(enabled = false),
+            selectedTrafficTarget = null
+        )
+    }
+
+    private fun startTrafficAwarenessPolling(
+        point: MapPoint,
+        clearSnapshot: Boolean = false
+    ) {
+        trafficAwarenessJob?.cancel()
+        val currentTraffic = _uiState.value.trafficAwareness
+        _uiState.value = _uiState.value.copy(
+            trafficAwareness = currentTraffic.copy(
+                enabled = true,
+                loading = true,
+                response = if (clearSnapshot) null else currentTraffic.response,
+                error = null
+            ),
+            selectedTrafficTarget = if (clearSnapshot) null else _uiState.value.selectedTrafficTarget
+        )
+        DscLogger.debug(
+            TrafficAwarenessLogTag,
+            "polling started lat=${point.lat.coarseTraffic()} lon=${point.lon.coarseTraffic()} " +
+                "radiusKm=${trafficAwarenessRadiusKm.coarseTraffic(0)} clearSnapshot=$clearSnapshot"
+        )
+
+        trafficAwarenessJob = scope.launch {
+            try {
+                while (_uiState.value.trafficAwareness.enabled && _uiState.value.selectedPoint == point) {
+                    fetchTrafficAwareness(point)
+                    delay(trafficAwarenessPollingIntervalMillis)
+                }
+            } finally {
+                DscLogger.debug(
+                    TrafficAwarenessLogTag,
+                    "polling stopped reason=${trafficAwarenessStopReason(point)}"
+                )
+            }
+        }
+    }
+
+    private suspend fun fetchTrafficAwareness(point: MapPoint) {
+        DscLogger.debug(
+            TrafficAwarenessLogTag,
+            "poll request lat=${point.lat.coarseTraffic()} lon=${point.lon.coarseTraffic()} " +
+                "radiusKm=${trafficAwarenessRadiusKm.coarseTraffic(0)}"
+        )
+        _uiState.value = _uiState.value.copy(
+            trafficAwareness = _uiState.value.trafficAwareness.copy(
+                loading = true,
+                error = null
+            )
+        )
+
+        val result = withContext(Dispatchers.IO) {
+            trafficAwarenessRepository.getTrafficAwareness(
+                lat = point.lat,
+                lon = point.lon,
+                radiusKm = trafficAwarenessRadiusKm
+            )
+        }
+
+        if (!_uiState.value.trafficAwareness.enabled || _uiState.value.selectedPoint != point) {
+            return
+        }
+
+        result.onSuccess { response ->
+            DscLogger.debug(
+                TrafficAwarenessLogTag,
+                "state updated enabled=true targets=${response.traffic.targets.size}"
+            )
+            _uiState.value = _uiState.value.copy(
+                trafficAwareness = _uiState.value.trafficAwareness.copy(
+                    enabled = true,
+                    loading = false,
+                    response = response,
+                    error = null,
+                    lastUpdatedAt = clock.millis()
+                ),
+                selectedTrafficTarget = _uiState.value.selectedTrafficTarget?.let { selected ->
+                    response.traffic.targets.firstOrNull { it.id == selected.id }
+                }
+            )
+        }.onFailure { error ->
+            DscLogger.warn(
+                TrafficAwarenessLogTag,
+                "state error keepingLastSnapshot=${_uiState.value.trafficAwareness.response != null} " +
+                    "reason=${error.toTrafficAwarenessDiagnosticReason()}",
+                error
+            )
+            _uiState.value = _uiState.value.copy(
+                trafficAwareness = _uiState.value.trafficAwareness.copy(
+                    enabled = true,
+                    loading = false,
+                    error = "Traffic Awareness non disponibile"
+                )
+            )
+        }
+    }
+
+    fun onTrafficTargetSelected(targetId: String) {
+        val target = _uiState.value.trafficAwareness.response
+            ?.traffic
+            ?.targets
+            ?.firstOrNull { it.id == targetId }
+            ?: return
+        _uiState.value = _uiState.value.copy(
+            selectedTrafficTarget = target,
+            isZoneSheetVisible = false
+        )
+    }
+
+    fun onTrafficTargetSheetDismissed() {
+        _uiState.value = _uiState.value.copy(selectedTrafficTarget = null)
+    }
+
+    private fun trafficAwarenessStopReason(point: MapPoint): String =
+        when {
+            !_uiState.value.trafficAwareness.enabled -> "disabled"
+            _uiState.value.selectedPoint != point -> "center_changed"
+            else -> "cancelled"
+        }
 
     fun onDroneSelected(droneId: String) {
         scope.launch {
@@ -697,9 +867,10 @@ class MapViewModel(
         verdictJob?.cancel()
         legalTimelineJob?.cancel()
         weatherJob?.cancel()
+        val trafficEnabled = _uiState.value.trafficAwareness.enabled
         _uiState.value = _uiState.value.copy(
             selectedZone = null,
-            selectedPoint = null,
+            selectedPoint = if (trafficEnabled) _uiState.value.selectedPoint else null,
             isZoneSheetVisible = false,
             isVerdictLoading = false,
             verdict = null,
@@ -712,7 +883,8 @@ class MapViewModel(
             weatherForecast = null,
             weatherAssessment = null,
             droneOperationalAssessment = null,
-            weatherError = null
+            weatherError = null,
+            selectedTrafficTarget = _uiState.value.selectedTrafficTarget
         )
     }
 
@@ -842,6 +1014,11 @@ class MapViewModel(
         const val CachedMapDataMessage = "Dati mappa salvati"
         const val StatusMessageMillis = 8_000L
     }
+
+    override fun onCleared() {
+        trafficAwarenessJob?.cancel()
+        super.onCleared()
+    }
 }
 
 private fun Throwable.toMapLegalTimelineReason(): String =
@@ -860,6 +1037,13 @@ private fun Throwable.toMapLegalTimelineReason(): String =
         is LegalTimelineRepositoryError.InvalidWindow -> "REPOSITORY_INPUT"
         else -> "REPOSITORY_INTERNAL"
     }
+
+private fun CameraBounds.centerPoint(): MapPoint? {
+    val lat = (north + south) / 2.0
+    val lon = (east + west) / 2.0
+    return MapPoint(lat = lat, lon = lon)
+        .takeIf { it.lat.isFinite() && it.lon.isFinite() }
+}
 
 private fun Throwable.toMapWeatherReason(): String =
     when (this) {

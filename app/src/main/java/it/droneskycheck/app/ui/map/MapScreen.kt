@@ -49,6 +49,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Flight
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LocationOff
 import androidx.compose.material.icons.filled.MyLocation
@@ -99,6 +100,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -120,6 +123,7 @@ import it.droneskycheck.app.data.AuthorizationWorkflowSteps
 import it.droneskycheck.app.data.AuthorizationZoneReference
 import it.droneskycheck.app.data.AuthorityInfo
 import it.droneskycheck.app.data.CreateAuthorizationDraftResult
+import it.droneskycheck.app.data.DscLogger
 import it.droneskycheck.app.data.EnrInfo
 import it.droneskycheck.app.data.Issue
 import it.droneskycheck.app.data.KeyValueInfo
@@ -140,6 +144,11 @@ import it.droneskycheck.app.data.ValidityInfo
 import it.droneskycheck.app.data.ZoneCheckV3Response
 import it.droneskycheck.app.data.ZoneInfo
 import it.droneskycheck.app.data.ZoneCheckV3Repository
+import it.droneskycheck.app.data.traffic.TrafficAwarenessDefaults
+import it.droneskycheck.app.data.traffic.TrafficAwarenessLogTag
+import it.droneskycheck.app.data.traffic.TrafficAwarenessRepository
+import it.droneskycheck.app.data.traffic.TrafficAwarenessState
+import it.droneskycheck.app.data.traffic.TrafficTarget
 import it.droneskycheck.app.data.drone.DroneDataCompleteness
 import it.droneskycheck.app.data.drone.DroneCatalogMatchResult
 import it.droneskycheck.app.data.drone.DroneCatalogMatchStatus
@@ -268,9 +277,11 @@ fun MapScreen(
             authorizationTakeoff = currentDraft?.operationData?.takeoffMapPoint(),
             authorizationAreaPoints = currentDraft?.operationData?.areaPoints.orEmpty().map { MapPoint(it.lat, it.lon) },
             authorizationAreaClosed = currentDraft?.operationData?.areaClosed == true,
+            trafficAwareness = uiState.trafficAwareness,
             userLocation = uiState.userLocation,
             shouldCenterOnUserLocation = uiState.shouldCenterOnUserLocation,
             onUserLocationCentered = viewModel::onUserLocationCentered,
+            onTrafficTargetTapped = viewModel::onTrafficTargetSelected,
             onMapTapped = { selection ->
                 val draft = currentDraft
                 if (draft != null && draft.workflowStep != AuthorizationWorkflowSteps.Form) {
@@ -366,7 +377,22 @@ fun MapScreen(
             hiddenCount = uiState.layerVisibility.count { !it.value },
             isLocationEnabled = uiState.isUserLocationEnabled,
             hasUserLocation = uiState.userLocation != null,
+            trafficAwareness = uiState.trafficAwareness,
             onLayersClick = viewModel::onLayerPanelRequested,
+            onTrafficClick = {
+                if (uiState.trafficAwareness.enabled) {
+                    DscLogger.debug(TrafficAwarenessLogTag, "toggle OFF")
+                    viewModel.disableTrafficAwareness()
+                } else {
+                    DscLogger.debug(
+                        TrafficAwarenessLogTag,
+                        "toggle ON selectedPoint available=${uiState.selectedPoint != null} " +
+                            "cameraCenter available=${uiState.cameraBounds != null} " +
+                            "radiusKm=${TrafficAwarenessDefaults.DefaultRadiusKm.toInt()}"
+                    )
+                    viewModel.enableTrafficAwareness()
+                }
+            },
             onLocationClick = {
                 when {
                     uiState.isUserLocationEnabled -> viewModel.onLocationControlRequested()
@@ -380,6 +406,16 @@ fun MapScreen(
                 .windowInsetsPadding(WindowInsets.safeDrawing)
                 .padding(16.dp)
         )
+
+        trafficAwarenessUnavailableMessage(uiState.trafficAwareness)?.let { message ->
+            TrafficAwarenessStatusPill(
+                message = message,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
+                    .padding(top = 124.dp, start = 16.dp, end = 16.dp)
+            )
+        }
 
         if (uiState.isLayerSheetVisible) {
             LayerVisibilityBottomSheet(
@@ -409,6 +445,13 @@ fun MapScreen(
                 onAnalyzeHere = viewModel::onAnalyzeUserLocationRequested,
                 onDisable = viewModel::onLocationDisabled,
                 onDismiss = viewModel::onLocationControlDismissed
+            )
+        }
+
+        uiState.selectedTrafficTarget?.let { target ->
+            TrafficTargetBottomSheet(
+                target = target,
+                onDismiss = viewModel::onTrafficTargetSheetDismissed
             )
         }
 
@@ -557,11 +600,37 @@ private fun LayerStackIcon(modifier: Modifier = Modifier) {
 }
 
 @Composable
+private fun TrafficAwarenessStatusPill(
+    message: String,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier,
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        tonalElevation = 4.dp,
+        shadowElevation = 4.dp
+    ) {
+        Text(
+            text = message,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
 private fun MapControlsToolbar(
     hiddenCount: Int,
     isLocationEnabled: Boolean,
     hasUserLocation: Boolean,
+    trafficAwareness: TrafficAwarenessState,
     onLayersClick: () -> Unit,
+    onTrafficClick: () -> Unit,
     onLocationClick: () -> Unit,
     onProfileClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -661,6 +730,37 @@ private fun MapControlsToolbar(
             exit = actionExit,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
+                .offset(y = (-200).dp)
+        ) {
+            MapActionFab(
+                label = "Traffico",
+                direction = MapActionDirection.Up,
+                contentDescription = trafficAwarenessButtonContentDescription(trafficAwareness),
+                containerColor = if (trafficAwareness.enabled) {
+                    MaterialTheme.colorScheme.primaryContainer
+                } else {
+                    MaterialTheme.colorScheme.surface
+                },
+                contentColor = if (trafficAwareness.enabled) {
+                    MaterialTheme.colorScheme.onPrimaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
+                onClick = {
+                    expanded = false
+                    onTrafficClick()
+                }
+            ) {
+                TrafficAwarenessButtonContent(trafficAwareness)
+            }
+        }
+
+        AnimatedVisibility(
+            visible = expanded,
+            enter = actionEnter,
+            exit = actionExit,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
                 .offset(x = (-72).dp)
         ) {
             MapActionFab(
@@ -706,6 +806,7 @@ private fun MapActionFab(
     direction: MapActionDirection,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    contentDescription: String = label,
     containerColor: Color = MaterialTheme.colorScheme.surface,
     contentColor: Color = MaterialTheme.colorScheme.onSurface,
     icon: @Composable () -> Unit
@@ -720,6 +821,7 @@ private fun MapActionFab(
                 MapActionLabel(label)
                 MapActionButton(
                     onClick = onClick,
+                    contentDescription = contentDescription,
                     containerColor = containerColor,
                     contentColor = contentColor,
                     icon = icon
@@ -735,6 +837,7 @@ private fun MapActionFab(
                 MapActionLabel(label)
                 MapActionButton(
                     onClick = onClick,
+                    contentDescription = contentDescription,
                     containerColor = containerColor,
                     contentColor = contentColor,
                     icon = icon
@@ -766,17 +869,71 @@ private fun MapActionLabel(label: String) {
 @Composable
 private fun MapActionButton(
     onClick: () -> Unit,
+    contentDescription: String,
     containerColor: Color,
     contentColor: Color,
     icon: @Composable () -> Unit
 ) {
     FloatingActionButton(
         onClick = onClick,
-        modifier = Modifier.size(48.dp),
+        modifier = Modifier
+            .size(48.dp)
+            .semantics { this.contentDescription = contentDescription },
         containerColor = containerColor,
         contentColor = contentColor
     ) {
         icon()
+    }
+}
+
+@Composable
+private fun TrafficAwarenessButtonContent(state: TrafficAwarenessState) {
+    Box(contentAlignment = Alignment.Center) {
+        Icon(
+            imageVector = Icons.Default.Flight,
+            contentDescription = null,
+            modifier = Modifier.size(24.dp)
+        )
+        if (state.loading) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(36.dp),
+                strokeWidth = 2.dp,
+                color = LocalContentColor.current
+            )
+        }
+        val count = trafficAwarenessTargetCount(state)
+        if (state.enabled && count > 0) {
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .offset(x = 10.dp, y = (-10).dp)
+                    .heightIn(min = 18.dp)
+                    .widthIn(min = 18.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+            ) {
+                Box(
+                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = count.toString(),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1
+                    )
+                }
+            }
+        } else if (state.enabled && state.error != null) {
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .size(9.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.tertiary
+            ) {}
+        }
     }
 }
 
@@ -871,6 +1028,78 @@ private fun ExpandCornerIcon(
         drawLine(color, upEnd, Offset(upEnd.x + size.width * 0.12f, upEnd.y + size.height * 0.13f), strokeWidth = strokeWidth, cap = StrokeCap.Round)
         drawLine(color, leftEnd, Offset(leftEnd.x + size.width * 0.13f, leftEnd.y - size.height * 0.12f), strokeWidth = strokeWidth, cap = StrokeCap.Round)
         drawLine(color, leftEnd, Offset(leftEnd.x + size.width * 0.13f, leftEnd.y + size.height * 0.12f), strokeWidth = strokeWidth, cap = StrokeCap.Round)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TrafficTargetBottomSheet(
+    target: TrafficTarget,
+    onDismiss: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val rows = target.trafficSheetRows()
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 24.dp, top = 8.dp, end = 24.dp, bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Text(
+                text = target.trafficSheetTitle(),
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (rows.isEmpty()) {
+                Text(
+                    text = "Dettagli traffico non disponibili.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    rows.forEach { row ->
+                        TrafficTargetInfoRow(row)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TrafficTargetInfoRow(row: TrafficAwarenessInfoRow) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.Top
+    ) {
+        Text(
+            text = row.label,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = row.value,
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 16.dp),
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
@@ -5159,6 +5388,7 @@ private class MapViewModelFactory(
                 zoneCheckRepository = ZoneCheckV3Repository(),
                 legalTimelineRepository = LegalTimelineRepository(),
                 weatherForecastRepository = WeatherForecastRepository(),
+                trafficAwarenessRepository = TrafficAwarenessRepository(),
                 weatherAssessmentEngine = WeatherAssessmentEngine(),
                 mapPreferences = MapPreferencesRepository(context),
                 localPilotStore = LocalPilotRepository(context),
