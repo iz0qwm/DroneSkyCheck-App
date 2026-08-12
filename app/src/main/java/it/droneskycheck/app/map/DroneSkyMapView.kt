@@ -192,6 +192,7 @@ private fun configureMap(
     val styleBuilder = Style.Builder().fromUri(MapLayerIds.STYLE_URL)
     val geoJsonRepository = CachedGeoJsonRepository(mapView.context.applicationContext)
     val zonesRepository = ZonesRepository(mapView.context.applicationContext)
+    val touchDensity = mapView.context.resources.displayMetrics.density
 
     map.setStyle(styleBuilder) {
         it.addImage(NOTAM_ZEBRA_PATTERN_ID, createNotamZebraPattern())
@@ -217,7 +218,7 @@ private fun configureMap(
 
         map.addOnMapClickListener { latLng ->
             val trafficFeatures = map.queryRenderedFeatures(
-                touchAreaForLatLng(map, latLng),
+                touchAreaForLatLng(map, latLng, touchDensity),
                 MapLayerIds.TRAFFIC_AWARENESS_SYMBOL_LAYER_ID
             )
             val trafficTargetId = trafficFeatures.firstNotNullOfOrNull(::featureToTrafficTargetId)
@@ -231,7 +232,7 @@ private fun configureMap(
             }
 
             val zones = map.queryRenderedFeatures(
-                touchAreaForLatLng(map, latLng),
+                touchAreaForLatLng(map, latLng, touchDensity),
                 *interactiveLayerIds()
             ).map(::featureToDemoZone)
                 .distinctBy { zone -> zone.identityKey() }
@@ -736,13 +737,14 @@ private fun MapLibreMap.currentCameraBounds(): CameraBounds {
     )
 }
 
-private fun touchAreaForLatLng(map: MapLibreMap, latLng: LatLng): RectF {
+private fun touchAreaForLatLng(map: MapLibreMap, latLng: LatLng, density: Float): RectF {
     val center: PointF = map.projection.toScreenLocation(latLng)
+    val hitBox = trafficTapHitBoxForScreenPoint(center.x, center.y, density)
     return RectF(
-        center.x - TAP_HIT_SLOP_PX,
-        center.y - TAP_HIT_SLOP_PX,
-        center.x + TAP_HIT_SLOP_PX,
-        center.y + TAP_HIT_SLOP_PX
+        hitBox.left,
+        hitBox.top,
+        hitBox.right,
+        hitBox.bottom
     )
 }
 
@@ -924,7 +926,6 @@ private const val ROME_LONGITUDE = 12.4964
 private const val ROME_ZOOM = 10.0
 private const val USER_LOCATION_CENTER_ZOOM = 15.0
 private const val DEFAULT_APPROXIMATE_ACCURACY_METERS = 3_000f
-private const val TAP_HIT_SLOP_PX = 18.0f
 private const val SELECTED_POINT_SOURCE_ID = "dsc-selected-point-source"
 private const val SELECTED_POINT_RING_LAYER_ID = "dsc-selected-point-ring"
 private const val SELECTED_POINT_DOT_LAYER_ID = "dsc-selected-point-dot"
@@ -952,7 +953,7 @@ private const val NOTAM_ZEBRA_OPACITY = 0.22f
 private const val LOG_TAG = "DroneSkyMap"
 
 private object TrafficMapStyle {
-    const val AircraftIconScale = 1.24f
+    const val AircraftIconScale = 1.50f
 }
 private val MAIN_HANDLER = Handler(Looper.getMainLooper())
 private val DSC_GEOJSON_EXECUTOR = Executors.newFixedThreadPool(3)

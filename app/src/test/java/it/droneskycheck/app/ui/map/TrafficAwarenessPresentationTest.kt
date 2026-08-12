@@ -4,12 +4,15 @@ import it.droneskycheck.app.data.traffic.TrafficAircraft
 import it.droneskycheck.app.data.traffic.TrafficAltitude
 import it.droneskycheck.app.data.traffic.TrafficAwarenessResponse
 import it.droneskycheck.app.data.traffic.TrafficAwarenessState
+import it.droneskycheck.app.data.traffic.TrafficAssessment
+import it.droneskycheck.app.data.traffic.TrafficCalculationConfidence
 import it.droneskycheck.app.data.traffic.TrafficCenter
 import it.droneskycheck.app.data.traffic.TrafficIdentifiers
 import it.droneskycheck.app.data.traffic.TrafficMotion
 import it.droneskycheck.app.data.traffic.TrafficPosition
 import it.droneskycheck.app.data.traffic.TrafficProviderStatus
 import it.droneskycheck.app.data.traffic.TrafficRelative
+import it.droneskycheck.app.data.traffic.TrafficRelevance
 import it.droneskycheck.app.data.traffic.TrafficSource
 import it.droneskycheck.app.data.traffic.TrafficSummary
 import it.droneskycheck.app.data.traffic.TrafficTarget
@@ -108,6 +111,29 @@ class TrafficAwarenessPresentationTest {
     @Test
     fun distanceUsesMetersBelowOneKilometer() {
         assertEquals("740 m", formatTrafficDistance(740.4))
+    }
+
+    @Test
+    fun targetSheetShowsDiscreteOperationalRelevanceRows() {
+        val rows = trafficTarget().trafficSheetRows(
+            TrafficAssessment(
+                relevance = TrafficRelevance.ATTENTION,
+                currentDistanceM = 2_500.0,
+                converging = true,
+                relativeBearingDeg = 0.0,
+                trackDifferenceDeg = 0.0,
+                cpaDistanceM = 1_800.0,
+                timeToCpaSec = 80.0,
+                calculationConfidence = TrafficCalculationConfidence.HIGH,
+                reasons = emptyList()
+            )
+        )
+
+        assertEquals("Rilevanza operativa" to "Attenzione", rows[0].toPair())
+        assertEquals("Traiettoria" to "In avvicinamento", rows[1].toPair())
+        assertEquals("Passaggio minimo stimato" to "1,8 km", rows[2].toPair())
+        assertEquals("Tempo stimato" to "1 min 20 s", rows[3].toPair())
+        assertEquals("Calcolo traiettoria" to "Stima completa", rows[4].toPair())
     }
 }
 

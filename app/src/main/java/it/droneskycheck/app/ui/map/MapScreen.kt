@@ -148,6 +148,7 @@ import it.droneskycheck.app.data.traffic.TrafficAwarenessDefaults
 import it.droneskycheck.app.data.traffic.TrafficAwarenessLogTag
 import it.droneskycheck.app.data.traffic.TrafficAwarenessRepository
 import it.droneskycheck.app.data.traffic.TrafficAwarenessState
+import it.droneskycheck.app.data.traffic.TrafficAssessment
 import it.droneskycheck.app.data.traffic.TrafficTarget
 import it.droneskycheck.app.data.drone.DroneDataCompleteness
 import it.droneskycheck.app.data.drone.DroneCatalogMatchResult
@@ -451,6 +452,7 @@ fun MapScreen(
         uiState.selectedTrafficTarget?.let { target ->
             TrafficTargetBottomSheet(
                 target = target,
+                assessment = uiState.trafficAssessments[target.id],
                 onDismiss = viewModel::onTrafficTargetSheetDismissed
             )
         }
@@ -1035,10 +1037,11 @@ private fun ExpandCornerIcon(
 @Composable
 private fun TrafficTargetBottomSheet(
     target: TrafficTarget,
+    assessment: TrafficAssessment?,
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val rows = target.trafficSheetRows()
+    val rows = target.trafficSheetRows(assessment)
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,

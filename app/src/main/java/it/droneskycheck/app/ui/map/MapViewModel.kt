@@ -37,6 +37,8 @@ import it.droneskycheck.app.data.traffic.TrafficAwarenessDefaults
 import it.droneskycheck.app.data.traffic.TrafficAwarenessLogTag
 import it.droneskycheck.app.data.traffic.TrafficAwarenessRepository
 import it.droneskycheck.app.data.traffic.TrafficAwarenessState
+import it.droneskycheck.app.data.traffic.TrafficOperationCenter
+import it.droneskycheck.app.data.traffic.TrafficRelevanceEngine
 import it.droneskycheck.app.data.traffic.coarseTraffic
 import it.droneskycheck.app.data.traffic.toTrafficAwarenessDiagnosticReason
 import it.droneskycheck.app.map.DscLayerCategory
@@ -82,6 +84,7 @@ class MapViewModel(
     private var trafficAwarenessJob: Job? = null
     private var lastLegalTimelineRequest: LegalTimelineRequestKey? = null
     private var catalogResolver: DroneTechnicalCatalogResolver = DroneTechnicalCatalogResolver.empty()
+    private val trafficRelevanceEngine = TrafficRelevanceEngine()
 
     init {
         loadDroneCatalogAndFleet()
@@ -222,6 +225,7 @@ class MapViewModel(
             flightOpportunityResult = null,
             isOperationalReportExpanded = false,
             weatherError = null,
+            trafficAssessments = emptyMap(),
             selectedTrafficTarget = null
         )
 
@@ -426,6 +430,7 @@ class MapViewModel(
         trafficAwarenessJob = null
         _uiState.value = _uiState.value.copy(
             trafficAwareness = TrafficAwarenessState(enabled = false),
+            trafficAssessments = emptyMap(),
             selectedTrafficTarget = null
         )
     }
@@ -443,6 +448,7 @@ class MapViewModel(
                 response = if (clearSnapshot) null else currentTraffic.response,
                 error = null
             ),
+            trafficAssessments = if (clearSnapshot) emptyMap() else _uiState.value.trafficAssessments,
             selectedTrafficTarget = if (clearSnapshot) null else _uiState.value.selectedTrafficTarget
         )
         DscLogger.debug(
@@ -496,14 +502,29 @@ class MapViewModel(
                 TrafficAwarenessLogTag,
                 "state updated enabled=true targets=${response.traffic.targets.size}"
             )
+            val nowMillis = clock.millis()
+            val assessments = trafficRelevanceEngine.assessTrafficBatch(
+                targets = response.traffic.targets,
+                operationCenter = TrafficOperationCenter(point.lat, point.lon),
+                nowMillis = nowMillis
+            )
+            assessments.forEach { (id, assessment) ->
+                DscLogger.trace(
+                    TrafficAwarenessLogTag,
+                    "assessment id=$id relevance=${assessment.relevance} " +
+                        "distance=${assessment.currentDistanceM?.toInt()} " +
+                        "cpa=${assessment.cpaDistanceM?.toInt()} tcpa=${assessment.timeToCpaSec?.toInt()}"
+                )
+            }
             _uiState.value = _uiState.value.copy(
                 trafficAwareness = _uiState.value.trafficAwareness.copy(
                     enabled = true,
                     loading = false,
                     response = response,
                     error = null,
-                    lastUpdatedAt = clock.millis()
+                    lastUpdatedAt = nowMillis
                 ),
+                trafficAssessments = assessments,
                 selectedTrafficTarget = _uiState.value.selectedTrafficTarget?.let { selected ->
                     response.traffic.targets.firstOrNull { it.id == selected.id }
                 }
@@ -884,6 +905,7 @@ class MapViewModel(
             weatherAssessment = null,
             droneOperationalAssessment = null,
             weatherError = null,
+            trafficAssessments = if (trafficEnabled) _uiState.value.trafficAssessments else emptyMap(),
             selectedTrafficTarget = _uiState.value.selectedTrafficTarget
         )
     }

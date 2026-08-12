@@ -1,6 +1,9 @@
 package it.droneskycheck.app.ui.map
 
 import it.droneskycheck.app.data.traffic.TrafficAwarenessState
+import it.droneskycheck.app.data.traffic.TrafficAssessment
+import it.droneskycheck.app.data.traffic.TrafficCalculationConfidence
+import it.droneskycheck.app.data.traffic.TrafficRelevance
 import it.droneskycheck.app.data.traffic.TrafficTarget
 import it.droneskycheck.app.map.displayName
 import java.util.Locale
@@ -30,8 +33,9 @@ fun trafficAwarenessUnavailableMessage(state: TrafficAwarenessState): String? =
 
 fun TrafficTarget.trafficSheetTitle(): String = displayName()
 
-fun TrafficTarget.trafficSheetRows(): List<TrafficAwarenessInfoRow> =
+fun TrafficTarget.trafficSheetRows(assessment: TrafficAssessment? = null): List<TrafficAwarenessInfoRow> =
     buildList {
+        assessment?.trafficAssessmentRows()?.let(::addAll)
         relative.distanceM?.let { add(TrafficAwarenessInfoRow("Distanza", formatTrafficDistance(it))) }
         relative.bearingDeg?.let { add(TrafficAwarenessInfoRow("Direzione", formatTrafficDegrees(it))) }
         altitude.aglM?.let { add(TrafficAwarenessInfoRow("Quota AGL", formatTrafficMeters(it))) }
@@ -42,6 +46,26 @@ fun TrafficTarget.trafficSheetRows(): List<TrafficAwarenessInfoRow> =
         motion.trackDeg?.let { add(TrafficAwarenessInfoRow("Rotta", formatTrafficDegrees(it))) }
             ?: motion.headingDeg?.let { add(TrafficAwarenessInfoRow("Heading", formatTrafficDegrees(it))) }
         trafficSourceText()?.let { add(TrafficAwarenessInfoRow("Sorgente", it)) }
+    }
+
+fun TrafficAssessment.trafficAssessmentRows(): List<TrafficAwarenessInfoRow> =
+    buildList {
+        add(TrafficAwarenessInfoRow("Rilevanza operativa", relevance.presentationLabel()))
+        converging?.let {
+            add(
+                TrafficAwarenessInfoRow(
+                    "Traiettoria",
+                    if (it) "In avvicinamento" else "In allontanamento"
+                )
+            )
+        }
+        cpaDistanceM?.let {
+            add(TrafficAwarenessInfoRow("Passaggio minimo stimato", formatTrafficDistance(it)))
+        }
+        timeToCpaSec?.let {
+            add(TrafficAwarenessInfoRow("Tempo stimato", formatTrafficDuration(it)))
+        }
+        add(TrafficAwarenessInfoRow("Calcolo traiettoria", calculationConfidence.presentationLabel()))
     }
 
 fun TrafficTarget.trafficSourceText(): String? {
@@ -73,6 +97,31 @@ fun formatTrafficDegrees(degrees: Double): String =
 
 private fun formatTrafficMeters(meters: Double): String =
     "${meters.roundToInt()} m"
+
+fun formatTrafficDuration(seconds: Double): String {
+    val totalSeconds = seconds.roundToInt().coerceAtLeast(0)
+    val minutes = totalSeconds / 60
+    val remainingSeconds = totalSeconds % 60
+    return if (minutes > 0) {
+        "${minutes} min ${remainingSeconds} s"
+    } else {
+        "$remainingSeconds s"
+    }
+}
+
+private fun TrafficRelevance.presentationLabel(): String =
+    when (this) {
+        TrafficRelevance.INFORMATION -> "Informativo"
+        TrafficRelevance.MONITOR -> "Da monitorare"
+        TrafficRelevance.ATTENTION -> "Attenzione"
+    }
+
+private fun TrafficCalculationConfidence.presentationLabel(): String =
+    when (this) {
+        TrafficCalculationConfidence.HIGH -> "Stima completa"
+        TrafficCalculationConfidence.PARTIAL -> "Stima parziale"
+        TrafficCalculationConfidence.INSUFFICIENT -> "Dati insufficienti"
+    }
 
 private fun sourcePair(provider: String?, source: String?): String? {
     val providerText = provider?.takeIf { it.isNotBlank() }

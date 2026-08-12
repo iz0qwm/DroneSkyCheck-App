@@ -686,6 +686,50 @@ class MapViewModelTest {
     }
 
     @Test
+    fun trafficAssessmentsAreComputedForLatestSnapshotAndSelectedPoint() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val traffic = FakeTrafficAwarenessClient(
+            results = ArrayDeque(
+                listOf(
+                    Result.success(
+                        trafficResponse(
+                            center = MapPoint(41.9, 12.5),
+                            targets = listOf(
+                                trafficTarget(
+                                    id = "traffic:attention",
+                                    lat = 41.9 + metersToLatDegreesForTest(2_000.0),
+                                    lon = 12.5,
+                                    callsign = "T1",
+                                    speedMps = 40.0,
+                                    trackDeg = 180.0,
+                                    ageSec = 2.0
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+        val viewModel = viewModel(
+            scope = scope,
+            traffic = traffic,
+            preferences = InMemoryMapPreferences(),
+            trafficPollingIntervalMillis = 10_000
+        )
+
+        viewModel.onMapTapped(selection(41.9, 12.5))
+        waitUntil { viewModel.uiState.value.selectedPoint != null }
+        viewModel.enableTrafficAwareness()
+        waitUntil { viewModel.uiState.value.trafficAssessments["traffic:attention"] != null }
+
+        assertEquals(
+            it.droneskycheck.app.data.traffic.TrafficRelevance.ATTENTION,
+            viewModel.uiState.value.trafficAssessments["traffic:attention"]?.relevance
+        )
+        scope.cancel()
+    }
+
+    @Test
     fun viewModelClearedCancelsTrafficAwarenessPolling() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val traffic = FakeTrafficAwarenessClient()
@@ -897,7 +941,8 @@ private class FakeTrafficAwarenessClient(
 
 private fun trafficResponse(
     count: Int = 1,
-    center: MapPoint = MapPoint(41.9, 12.5)
+    center: MapPoint = MapPoint(41.9, 12.5),
+    targets: List<TrafficTarget>? = null
 ): TrafficAwarenessResponse =
     TrafficAwarenessResponse(
         ok = true,
@@ -906,8 +951,8 @@ private fun trafficResponse(
         center = TrafficCenter(center.lat, center.lon),
         radiusKm = 20.0,
         traffic = TrafficSummary(
-            count = count,
-            targets = (1..count).map { index ->
+            count = targets?.size ?: count,
+            targets = targets ?: (1..count).map { index ->
                 trafficTarget(
                     id = "traffic:$index",
                     lat = center.lat + index * 0.001,
@@ -935,7 +980,11 @@ private fun trafficTarget(
     id: String,
     lat: Double,
     lon: Double,
-    callsign: String
+    callsign: String,
+    speedMps: Double? = null,
+    trackDeg: Double? = null,
+    headingDeg: Double? = null,
+    ageSec: Double? = null
 ): TrafficTarget =
     TrafficTarget(
         id = id,
@@ -955,13 +1004,13 @@ private fun trafficTarget(
             sourceReference = null
         ),
         motion = TrafficMotion(
-            groundSpeedMps = null,
+            groundSpeedMps = speedMps,
             verticalRateMps = null,
-            trackDeg = null,
-            headingDeg = null
+            trackDeg = trackDeg,
+            headingDeg = headingDeg
         ),
         aircraft = TrafficAircraft(category = null, type = null),
-        time = TrafficTime(timestamp = null, ageSec = null),
+        time = TrafficTime(timestamp = null, ageSec = ageSec),
         relative = TrafficRelative(distanceM = null, bearingDeg = null),
         provider = "opensky",
         source = "OpenSky",
@@ -969,6 +1018,9 @@ private fun trafficTarget(
         sources = listOf(TrafficSource(provider = "opensky", source = "OpenSky")),
         provenance = null
     )
+
+private fun metersToLatDegreesForTest(meters: Double): Double =
+    meters / 111_320.0
 
 private class FakePilotStore(
     initialDrones: List<LocalDrone> = emptyList()
