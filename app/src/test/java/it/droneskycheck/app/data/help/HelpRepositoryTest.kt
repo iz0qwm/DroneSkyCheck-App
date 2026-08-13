@@ -140,6 +140,23 @@ class HelpRepositoryTest {
         assertEquals(0, http.calls.size)
     }
 
+    @Test
+    fun manualUpdateIgnoresFreshMetadata() = runBlocking {
+        val storage = storage(embeddedVersion = 1)
+        storage.writeMetadata(HelpManifestMetadata(lastCheckedAt = clock.instant().minus(Duration.ofHours(2)).toString()))
+        val http = FakeHelpHttpClient(
+            responses = mapOf(ManifestUrl to HelpManifestHttpResponse(200, manifestJson(contentVersion = 4, title = "Manuale")))
+        )
+        val repository = repository(storage = storage, http = http)
+
+        val update = repository.checkForUpdatesNow()
+
+        assertTrue(update is HelpManifestUpdateResult.Installed)
+        assertEquals(1, http.calls.size)
+        assertEquals(4, repository.getCurrentManifest().contentVersion)
+        assertEquals("Manuale", repository.getCurrentManifest().topics.single().title)
+    }
+
     private fun repository(
         embeddedVersion: Int = 1,
         storage: TestHelpStorage = storage(embeddedVersion),

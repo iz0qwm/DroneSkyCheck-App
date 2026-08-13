@@ -57,7 +57,9 @@ data class MapUiState(
     val isLayerSheetVisible: Boolean = false,
     val helpManifest: HelpManifest = HelpManifest.empty(),
     val activeHelpOnboarding: ActiveHelpOnboarding? = null,
-    val helpTourOverlayRevision: Int = 0
+    val helpTourOverlayRevision: Int = 0,
+    val isHelpManifestRefreshing: Boolean = false,
+    val helpManifestRefreshMessage: String? = null
 )
 
 data class MapTapSelection(

@@ -19,6 +19,7 @@ import java.time.Instant
 interface HelpManifestClient {
     suspend fun getCurrentManifest(): HelpManifest
     suspend fun checkForUpdatesIfDue(): HelpManifestUpdateResult
+    suspend fun checkForUpdatesNow(): HelpManifestUpdateResult
 }
 
 class InMemoryHelpManifestClient(
@@ -27,6 +28,9 @@ class InMemoryHelpManifestClient(
     override suspend fun getCurrentManifest(): HelpManifest = manifest
 
     override suspend fun checkForUpdatesIfDue(): HelpManifestUpdateResult =
+        HelpManifestUpdateResult.Skipped("No remote updater configured")
+
+    override suspend fun checkForUpdatesNow(): HelpManifestUpdateResult =
         HelpManifestUpdateResult.Skipped("No remote updater configured")
 
     fun setManifest(next: HelpManifest) {
@@ -66,9 +70,19 @@ class HelpRepository(
     )
 
     override suspend fun getCurrentManifest(): HelpManifest {
-        cachedManifest?.let { return it }
+        cachedManifest?.let {
+            DscLogger.debug(
+                LogTag,
+                "Help manifest current source=memory content=${it.contentVersion} onboarding=${it.onboardingVersion} topics=${it.topics.size} steps=${it.onboardingSteps.size}"
+            )
+            return it
+        }
         val loaded = loadBestAvailableManifest()
         cachedManifest = loaded
+        DscLogger.debug(
+            LogTag,
+            "Help manifest current source=storage content=${loaded.contentVersion} onboarding=${loaded.onboardingVersion} topics=${loaded.topics.size} steps=${loaded.onboardingSteps.size}"
+        )
         return loaded
     }
 
@@ -77,23 +91,50 @@ class HelpRepository(
         val metadata = storage.readMetadata()
         val lastChecked = metadata?.lastCheckedAt?.let { runCatching { Instant.parse(it) }.getOrNull() }
         val hasUsableManifest = installed.schemaVersion > 0 && installed.contentVersion > 0
+        DscLogger.debug(
+            LogTag,
+            "Help manifest update check requested url=$manifestUrl installedContent=${installed.contentVersion} installedOnboarding=${installed.onboardingVersion} lastChecked=${lastChecked ?: "never"} intervalHours=${checkInterval.toHours()}"
+        )
         if (hasUsableManifest && lastChecked != null && Duration.between(lastChecked, clock.instant()) < checkInterval) {
+            val nextCheckInMinutes = checkInterval
+                .minus(Duration.between(lastChecked, clock.instant()))
+                .toMinutes()
+                .coerceAtLeast(0)
+            DscLogger.debug(
+                LogTag,
+                "Help manifest update skipped reason=fresh_cache nextCheckInMinutes=$nextCheckInMinutes"
+            )
             return HelpManifestUpdateResult.Skipped("Last check is still fresh")
         }
 
+        DscLogger.debug(LogTag, "Help manifest remote check starting url=$manifestUrl")
         storage.writeMetadata((metadata ?: HelpManifestMetadata()).copy(lastCheckedAt = clock.instant().toString()))
+        return checkForUpdates()
+    }
+
+    override suspend fun checkForUpdatesNow(): HelpManifestUpdateResult {
+        DscLogger.debug(LogTag, "Help manifest manual refresh requested url=$manifestUrl")
         return checkForUpdates()
     }
 
     suspend fun checkForUpdates(): HelpManifestUpdateResult {
         val installed = getCurrentManifest()
         return runCatching {
+            DscLogger.debug(
+                LogTag,
+                "Help manifest remote request start url=$manifestUrl installedContent=${installed.contentVersion}"
+            )
             val response = httpClient.get(
                 url = manifestUrl,
                 headers = mapOf("Accept" to "application/json"),
                 timeoutMillis = TimeoutMillis
             )
+            DscLogger.debug(
+                LogTag,
+                "Help manifest remote response status=${response.statusCode} bytes=${response.body.length}"
+            )
             if (response.statusCode !in 200..299) {
+                DscLogger.warn(LogTag, "Help manifest remote rejected status=${response.statusCode}")
                 return HelpManifestUpdateResult.Failed("HTTP_${response.statusCode}")
             }
             installManifest(response.body, installed)
@@ -113,6 +154,10 @@ class HelpRepository(
             DscLogger.debug(LogTag, "Help: manifest warning ${warning.code}: ${warning.message}")
         }
         val current = installed ?: loadBestAvailableManifest()
+        DscLogger.debug(
+            LogTag,
+            "Help manifest remote parsed remoteContent=${manifest.contentVersion} remoteOnboarding=${manifest.onboardingVersion} remoteUpdatedAt=${manifest.updatedAt ?: "unknown"} currentContent=${current.contentVersion} currentOnboarding=${current.onboardingVersion}"
+        )
         if (current.contentVersion > 0 && manifest.contentVersion < current.contentVersion) {
             DscLogger.debug(
                 LogTag,
@@ -128,6 +173,10 @@ class HelpRepository(
                     updatedAt = manifest.updatedAt
                 )
             )
+            DscLogger.debug(
+                LogTag,
+                "Help manifest update skipped reason=not_newer remoteContent=${manifest.contentVersion} currentContent=${current.contentVersion}"
+            )
             return HelpManifestUpdateResult.Skipped("Remote manifest is not newer")
         }
 
@@ -142,7 +191,10 @@ class HelpRepository(
             )
         )
         cachedManifest = manifest
-        DscLogger.debug(LogTag, "Help: manifest v${manifest.contentVersion} installed")
+        DscLogger.debug(
+            LogTag,
+            "Help manifest installed content=${manifest.contentVersion} onboarding=${manifest.onboardingVersion} topics=${manifest.topics.size} steps=${manifest.onboardingSteps.size}"
+        )
         return HelpManifestUpdateResult.Installed(manifest.contentVersion)
     }
 
@@ -153,7 +205,12 @@ class HelpRepository(
         }
         val embedded = loadValidatedManifest(storage.readEmbeddedManifestJson(), source = "embedded")
         if (cached != null && embedded != null) {
-            return if (embedded.contentVersion > cached.contentVersion) embedded else cached
+            val selected = if (embedded.contentVersion > cached.contentVersion) embedded else cached
+            DscLogger.debug(
+                LogTag,
+                "Help manifest selected cachedContent=${cached.contentVersion} embeddedContent=${embedded.contentVersion} selectedContent=${selected.contentVersion}"
+            )
+            return selected
         }
         cached?.let { return it }
         embedded?.let { return it }

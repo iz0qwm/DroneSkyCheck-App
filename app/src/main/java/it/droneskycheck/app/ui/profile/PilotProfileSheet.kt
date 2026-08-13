@@ -307,6 +307,9 @@ private val DroneSaver = listSaver<LocalDrone, String>(
 @Composable
 fun PilotProfileSheet(
     helpManifest: HelpManifest = HelpManifest.empty(),
+    isHelpRefreshing: Boolean = false,
+    helpRefreshMessage: String? = null,
+    onRefreshHelp: () -> Unit = {},
     onRepeatTour: () -> Unit = {},
     onDismiss: () -> Unit
 ) {
@@ -623,6 +626,9 @@ fun PilotProfileSheet(
     if (isHelpSheetVisible) {
         HelpBottomSheet(
             manifest = helpManifest,
+            isRefreshInProgress = isHelpRefreshing,
+            refreshMessage = helpRefreshMessage,
+            onRefresh = onRefreshHelp,
             onDismiss = { isHelpSheetVisible = false }
         )
     }

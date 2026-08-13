@@ -142,6 +142,27 @@ class MapViewModel(
         }
     }
 
+    fun refreshHelpManifestNow() {
+        if (_uiState.value.isHelpManifestRefreshing) return
+        scope.launch {
+            _uiState.value = _uiState.value.copy(
+                isHelpManifestRefreshing = true,
+                helpManifestRefreshMessage = null
+            )
+            val update = withContext(Dispatchers.IO) {
+                helpRepository.checkForUpdatesNow()
+            }
+            val manifest = withContext(Dispatchers.IO) {
+                helpRepository.getCurrentManifest()
+            }
+            _uiState.value = _uiState.value.copy(
+                helpManifest = manifest,
+                isHelpManifestRefreshing = false,
+                helpManifestRefreshMessage = update.toHelpRefreshMessage()
+            )
+        }
+    }
+
     fun onHelpOnboardingNext(profileSheetVisible: Boolean = false) {
         val active = _uiState.value.activeHelpOnboarding ?: return
         if (active.isLastStep) {
@@ -1368,6 +1389,18 @@ sealed interface HelpTourUiCommand {
     data object OpenProfile : HelpTourUiCommand
     data object CloseProfile : HelpTourUiCommand
 }
+
+private fun HelpManifestUpdateResult.toHelpRefreshMessage(): String =
+    when (this) {
+        is HelpManifestUpdateResult.Installed -> "Guida aggiornata alla versione $contentVersion."
+        is HelpManifestUpdateResult.Skipped -> when (reason) {
+            "Remote manifest is not newer" -> "Guida gia aggiornata."
+            "Remote manifest is older than cache" -> "La guida online e meno recente di quella installata."
+            "No remote updater configured" -> "Aggiornamento guida non disponibile."
+            else -> "Nessun aggiornamento guida disponibile."
+        }
+        is HelpManifestUpdateResult.Failed -> "Non riesco ad aggiornare la guida."
+    }
 
 private fun Throwable.toMapLegalTimelineReason(): String =
     when (this) {

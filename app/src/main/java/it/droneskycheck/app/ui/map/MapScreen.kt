@@ -597,6 +597,9 @@ fun MapScreen(
         if (isPilotProfileSheetVisible) {
             PilotProfileSheet(
                 helpManifest = uiState.helpManifest,
+                isHelpRefreshing = uiState.isHelpManifestRefreshing,
+                helpRefreshMessage = uiState.helpManifestRefreshMessage,
+                onRefreshHelp = viewModel::refreshHelpManifestNow,
                 onRepeatTour = {
                     isPilotProfileSheetVisible = false
                     viewModel.onHelpTourProfileVisibilityChanged(false)
