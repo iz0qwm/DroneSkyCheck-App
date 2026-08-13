@@ -356,36 +356,30 @@ class ZonePresentationTest {
     }
 
     @Test
-    fun notamPresentationShowsReasonFromOfficialFieldE() {
-        val presentation = NotamInfo(
-            code = "W1234/26",
-            fir = "LIXX",
-            location = null,
-            zoneReference = null,
-            activityType = null,
-            severity = "HARD",
-            summary = null,
-            explanation = null,
-            operationalMeaning = null,
-            blockingReason = "ACTIVE_HARD_NOTAM",
-            schedule = ScheduleInfo(
-                raw = "DAILY 1000-SS",
-                human = null,
-                activeNow = true,
-                explanation = null
-            ),
-            official = OfficialInfo(
-                sourceText = "W1234/26 NOTAMN Q) LIXX/QXXXX A) LIXX E) UAS ACTIVITY WILL TAKE PLACE",
-                sourceReference = null,
-                qLine = null,
-                fields = listOf(KeyValueInfo("E", "UAS ACTIVITY WILL TAKE PLACE"))
-            ),
-            validity = null
-        ).presentation()
+    fun notamPresentationSimplifiesReasonFromOfficialFieldE() {
+        val presentation = notamPresentationForReason("UAS ACTIVITY WILL TAKE PLACE")
 
         assertEquals("Restrizione temporanea", presentation.statusLabel)
-        assertEquals("UAS ACTIVITY WILL TAKE PLACE", presentation.reasonText)
+        assertEquals("Operazioni con droni nella zona delimitata dal NOTAM", presentation.reasonText)
         assertFalse(presentation.body.contains("non puÃ² determinare automaticamente"))
+    }
+
+    @Test
+    fun notamPresentationSimplifiesCommonTechnicalReasons() {
+        val cases = listOf(
+            "GLIDERS COMPETITION WILL TAKE PLACE WITHIN AREA BOUNDED BY LINE JOINING FOLLOW POINTS:" to
+                "Competizione di alianti nella zona delimitata dal NOTAM",
+            "MIL UNMANNED ACFT ACT WILL TAKE PLACE WI FLW AREA:" to
+                "Utilizzo di aeromobili militari a pilotaggio remoto",
+            "MILITARY FIRING AREA" to
+                "Esercitazioni militari a fuoco",
+            "ASCENT OF FREE BALLOONS WILL TAKE PLACE" to
+                "Palloni aerostatici nell'area"
+        )
+
+        cases.forEach { (rawReason, expectedReason) ->
+            assertEquals(expectedReason, notamPresentationForReason(rawReason).reasonText)
+        }
     }
 
     @Test
@@ -477,4 +471,31 @@ class ZonePresentationTest {
             weekSchedule = weekSchedule,
             daySchedule = daySchedule
         )
+
+    private fun notamPresentationForReason(reason: String): NotamPresentation =
+        NotamInfo(
+            code = "W1234/26",
+            fir = "LIXX",
+            location = null,
+            zoneReference = null,
+            activityType = null,
+            severity = "HARD",
+            summary = null,
+            explanation = null,
+            operationalMeaning = null,
+            blockingReason = "ACTIVE_HARD_NOTAM",
+            schedule = ScheduleInfo(
+                raw = "DAILY 1000-SS",
+                human = null,
+                activeNow = true,
+                explanation = null
+            ),
+            official = OfficialInfo(
+                sourceText = "W1234/26 NOTAMN Q) LIXX/QXXXX A) LIXX E) $reason",
+                sourceReference = null,
+                qLine = null,
+                fields = listOf(KeyValueInfo("E", reason))
+            ),
+            validity = null
+        ).presentation()
 }

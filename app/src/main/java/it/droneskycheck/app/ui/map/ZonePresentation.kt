@@ -143,12 +143,20 @@ internal fun NotamInfo.presentation(): NotamPresentation {
         code = code.orEmpty(),
         statusLabel = status,
         body = displayBody.cleanItalianUiText(),
-        reasonText = official.notamReasonText().cleanItalianUiTextOrNull(),
+        reasonText = notamReasonForUi(),
         activitySchedule = schedule.cleanItalianUiTextOrNull(),
         validity = validity?.validityRangeLabel(),
         operationalStatus = blockingReason?.toDscUserText(),
         official = official
     )
+}
+
+private fun NotamInfo.notamReasonForUi(): String? {
+    val officialReason = official.notamReasonText()
+    return officialReason.toSimpleNotamReasonText()
+        ?: activityType.toSimpleNotamReasonText()
+        ?: activityType.cleanItalianUiTextOrNull()
+        ?: officialReason.cleanItalianUiTextOrNull()
 }
 
 internal fun AuthorizationInfo.notamTemporaryRestrictionNotice(): String? {
@@ -568,7 +576,50 @@ private fun it.droneskycheck.app.data.OfficialInfo?.notamReasonText(): String? {
             ?.takeIf { it.isNotBlank() }
             ?.let { return it }
     }
+    sourceText
+        ?.takeUnless { Regex("""(?:^|\s)(?:Q|A|B|C|D|E|F|G)\)""", RegexOption.IGNORE_CASE).containsMatchIn(it) }
+        ?.trim()
+        ?.takeIf { it.isNotBlank() }
+        ?.let { return it }
     return null
+}
+
+private fun String?.toSimpleNotamReasonText(): String? {
+    val normalized = this
+        ?.trim()
+        ?.takeIf { it.isNotBlank() && !it.equals("NIL", ignoreCase = true) }
+        ?.uppercase()
+        ?.replace(Regex("\\s+"), " ")
+        ?: return null
+
+    return when {
+        Regex("""\bGLIDERS?\s+COMPETITION\b|\bGLIDERS?\b.*\bCOMPETITION\b""").containsMatchIn(normalized) ->
+            "Competizione di alianti nella zona delimitata dal NOTAM"
+        Regex("""(?:\bMIL\b|\bMILITARY\b).*?(?:\bUNMANNED\b|\bUAS\b|\bUAV\b|\bRPAS\b|\bDRONE\b)|(?:\bUNMANNED\b|\bUAS\b|\bUAV\b|\bRPAS\b|\bDRONE\b).*?(?:\bMIL\b|\bMILITARY\b)""")
+            .containsMatchIn(normalized) ->
+            "Utilizzo di aeromobili militari a pilotaggio remoto"
+        Regex("""ASCENT\s+OF\s+FREE\s+BALLOONS?|FREE\s+BALLOONS?|PALLONI\s+AEROSTATICI""").containsMatchIn(normalized) ->
+            "Palloni aerostatici nell'area"
+        Regex("""CAPTIVE\s+BALLOONS?|PALLONE\s+VINCOLATO""").containsMatchIn(normalized) ->
+            "Pallone vincolato nell'area"
+        Regex("""MILITARY\s+FIRING|FIRING\s+AREA|FIRING|LIVE\s*FIRE|GUNNERY|SHOOTING|TIRO""").containsMatchIn(normalized) ->
+            "Esercitazioni militari a fuoco"
+        Regex("""PARACHUTE|PARA|PARACADUT|PJE""").containsMatchIn(normalized) ->
+            "Lanci paracadutistici nell'area"
+        Regex("""AIR\s*DISPLAY|AIRSHOW|FLYPAST|AEROBATIC|MANIFESTAZION[EI]\s+AERE""").containsMatchIn(normalized) ->
+            "Manifestazione aerea nell'area"
+        Regex("""UAS|UAV|DRONE|CIV\s+UNMANNED|UNMANNED\s+ACFT|RPAS|OPERAZIONI\s+CON\s+DRONI""").containsMatchIn(normalized) ->
+            "Operazioni con droni nella zona delimitata dal NOTAM"
+        Regex("""SAR|SEARCH\s+AND\s+RESCUE|RICERCA\s+E\s+SOCCORSO""").containsMatchIn(normalized) ->
+            "Operazioni di ricerca e soccorso nell'area"
+        Regex("""LASER""").containsMatchIn(normalized) ->
+            "Impiego di laser nell'area"
+        Regex("""\bMIL\b|\bMILITARY\b|MIL\s+OPS|MILITARY\s+OPS|ATTIVIT[AÀ]\s+MILITAR""").containsMatchIn(normalized) ->
+            "Attivit\u00E0 militare nell'area"
+        Regex("""ATTIVIT[AÀ]\s+OPERATIVE\s+SPECIFICATE\s+NEL\s+NOTAM|GENERIC""").containsMatchIn(normalized) ->
+            "Attivit\u00E0 operative specificate nel NOTAM"
+        else -> null
+    }
 }
 
 private fun String.normalizedForUiDedup(): String =
