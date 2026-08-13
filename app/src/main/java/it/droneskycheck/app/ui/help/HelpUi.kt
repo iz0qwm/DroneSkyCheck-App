@@ -1,16 +1,18 @@
 package it.droneskycheck.app.ui.help
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -44,11 +46,21 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import coil.compose.SubcomposeAsyncImage
+import coil.compose.SubcomposeAsyncImageContent
+import coil.request.CachePolicy
+import coil.request.ImageRequest
+import it.droneskycheck.app.data.DscLogger
 import it.droneskycheck.app.data.help.HelpContentBlock
+import it.droneskycheck.app.data.help.HelpImageResolver
 import it.droneskycheck.app.data.help.HelpManifest
 import it.droneskycheck.app.data.help.HelpTopic
 
@@ -229,6 +241,12 @@ private fun HelpTopicBody(topic: HelpTopic) {
                 color = MaterialTheme.colorScheme.onSurface
             )
         }
+        topic.image?.let { image ->
+            HelpGuideImage(
+                image = image,
+                contentDescription = topic.imageAlt ?: "Schermata ${topic.title}"
+            )
+        }
         topic.blocks.forEach { block ->
             when (block) {
                 is HelpContentBlock.Paragraph -> Text(
@@ -253,6 +271,10 @@ private fun HelpTopicBody(topic: HelpTopic) {
                         }
                     }
                 }
+                is HelpContentBlock.Image -> HelpGuideImage(
+                    image = block.src,
+                    contentDescription = block.alt
+                )
                 is HelpContentBlock.Note -> Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = MaterialTheme.shapes.medium,
@@ -279,13 +301,75 @@ private fun HelpTopicBody(topic: HelpTopic) {
                 }
             }
         }
-        topic.image?.let {
-            Text(
-                text = "Immagine: $it",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+    }
+}
+
+@Composable
+private fun HelpGuideImage(
+    image: String,
+    contentDescription: String?
+) {
+    val context = LocalContext.current
+    val resolved = remember(image) { HelpImageResolver.resolve(image) } ?: return
+    val localDrawableId = remember(resolved.localDrawableName) {
+        resolved.localDrawableName?.let { drawableName ->
+            context.resources.getIdentifier(drawableName, "drawable", context.packageName)
+                .takeIf { it != 0 }
         }
+    }
+
+    SubcomposeAsyncImage(
+        model = ImageRequest.Builder(context)
+            .data(resolved.url)
+            .crossfade(true)
+            .memoryCachePolicy(CachePolicy.ENABLED)
+            .diskCachePolicy(CachePolicy.ENABLED)
+            .build(),
+        contentDescription = contentDescription,
+        modifier = Modifier.fillMaxWidth(),
+        loading = {},
+        error = {
+            if (localDrawableId != null) {
+                HelpGuideImageFrame {
+                    Image(
+                        painter = painterResource(localDrawableId),
+                        contentDescription = contentDescription,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = HelpImageMaxHeight),
+                        contentScale = ContentScale.Fit
+                    )
+                }
+            } else {
+                DscLogger.debug(LogTag, "Help image unavailable url=${resolved.url}")
+            }
+        },
+        success = {
+            HelpGuideImageFrame {
+                SubcomposeAsyncImageContent(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = HelpImageMaxHeight),
+                    contentScale = ContentScale.Fit
+                )
+            }
+        }
+    )
+}
+
+@Composable
+private fun HelpGuideImageFrame(content: @Composable () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(HelpImageShape)
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.outlineVariant,
+                shape = HelpImageShape
+            )
+    ) {
+        content()
     }
 }
 
@@ -318,3 +402,7 @@ private fun topicIcon(id: String): ImageVector =
         "pilot_profile" -> Icons.Default.Person
         else -> Icons.Default.Timeline
     }
+
+private val HelpImageShape = RoundedCornerShape(10.dp)
+private val HelpImageMaxHeight = 260.dp
+private const val LogTag = "HelpUi"

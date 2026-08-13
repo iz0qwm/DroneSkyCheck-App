@@ -129,15 +129,73 @@ class HelpManifestParserTest {
         assertEquals(HelpTourAction.NONE, HelpTourAction.fromWireName(null))
         assertNull(HelpTourAction.fromWireName("open_code"))
     }
+
+    @Test
+    fun topicImageAndImageAltParseFromManifest() {
+        val result = HelpManifestParser.parse(helpManifestJson(topicImage = "weather.webp", topicImageAlt = "Meteo"))
+
+        assertTrue(result.isValid)
+        assertEquals("weather.webp", result.manifest?.topics?.single()?.image)
+        assertEquals("Meteo", result.manifest?.topics?.single()?.imageAlt)
+    }
+
+    @Test
+    fun imageBlockParsesFromManifest() {
+        val result = HelpManifestParser.parse(helpManifestJson(includeImageBlock = true))
+
+        val imageBlock = result.manifest?.topics?.single()?.blocks?.filterIsInstance<HelpContentBlock.Image>()?.single()
+        assertEquals("weather_details.webp", imageBlock?.src)
+        assertEquals("Meteo", imageBlock?.alt)
+    }
+
+    @Test
+    fun imageBlockAltIsOptional() {
+        val result = HelpManifestParser.parse(helpManifestJson(includeImageBlock = true, imageBlockAlt = null))
+
+        val imageBlock = result.manifest?.topics?.single()?.blocks?.filterIsInstance<HelpContentBlock.Image>()?.single()
+        assertEquals("weather_details.webp", imageBlock?.src)
+        assertNull(imageBlock?.alt)
+    }
+
+    @Test
+    fun unknownBlockIsIgnoredWithWarning() {
+        val result = HelpManifestParser.parse(helpManifestJson(includeUnknownBlock = true))
+
+        assertTrue(result.isValid)
+        assertTrue(result.warnings.any { it.code == HelpManifestWarningCode.INVALID_FIELD })
+        assertEquals(
+            3,
+            result.manifest?.topics?.single()?.blocks?.size
+        )
+    }
 }
 
 private fun helpManifestJson(
     schemaVersion: Int = 1,
     contentVersion: Int = 2,
     target: String = "map",
-    action: String? = null
+    action: String? = null,
+    topicImage: String? = null,
+    topicImageAlt: String? = null,
+    includeImageBlock: Boolean = false,
+    imageBlockAlt: String? = "Meteo",
+    includeUnknownBlock: Boolean = false
 ): String =
     action?.let { ""","action":"$it"""" }.orEmpty().let { actionJson ->
+    val topicImageJson = topicImage?.let { """"image":"$it",""" }.orEmpty()
+    val topicImageAltJson = topicImageAlt?.let { """"imageAlt":"$it",""" }.orEmpty()
+    val imageBlockJson = if (includeImageBlock) {
+        """,
+                {"type":"image","src":"weather_details.webp"${imageBlockAlt?.let { ""","alt":"$it"""" }.orEmpty() } }"""
+    } else {
+        ""
+    }
+    val unknownBlockJson = if (includeUnknownBlock) {
+        """,
+                {"type":"video","src":"weather.mp4"}"""
+    } else {
+        ""
+    }
     """
         {
           "schemaVersion": $schemaVersion,
@@ -154,11 +212,13 @@ private fun helpManifestJson(
               "id": "weather",
               "title": "Meteo",
               "summary": "Sintesi",
+              $topicImageJson
+              $topicImageAltJson
               "order": 1,
               "blocks": [
                 {"type":"paragraph","text":"Testo"},
                 {"type":"bulletList","items":["Uno","Due"]},
-                {"type":"note","text":"Nota"}
+                {"type":"note","text":"Nota"}$imageBlockJson$unknownBlockJson
               ]
             }
           ]

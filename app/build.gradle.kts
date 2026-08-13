@@ -52,6 +52,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.room.ktx)
     implementation(libs.androidx.room.runtime)
+    implementation(libs.coil.compose)
     implementation(libs.maplibre.android)
     implementation(libs.pdfbox.android)
     ksp(libs.androidx.room.compiler)

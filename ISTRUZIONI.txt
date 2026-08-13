@@ -17,3 +17,139 @@ https://www.kwos.org/appoggio/droni/DroneSkyCheck/catalog
 Utility per creare l'SHA del file
 C:\Users\raffa\AndroidStudioProjects\DroneSkyCheck\tools
 update_drone_catalog_manifest.py
+-----------------------------------------------------------------
+
+Grandissimo per commit e push, così respira anche il progetto.
+Report Help System
+Il sistema di help di Drone Sky Check oggi è basato su un solo JSON principale:
+[`help_manifest.json`](C:/Users/raffa/AndroidStudioProjects/DroneSkyCheck/app/src/main/res/raw/help_manifest.json)
+Questo JSON alimenta due cose diverse:
+Tour guidato iniziale
+La sequenza 1/7, 2/7, ecc. che appare sopra la mappa.
+
+Sezione “Guida Drone Sky Check”
+La guida consultabile dal Profilo pilota, con elenco argomenti e dettaglio di ogni argomento.
+
+Il JSON può stare in due posti:
+Incorporato nell’app: app/src/main/res/raw/help_manifest.json
+Remoto su KWOS: https://www.kwos.org/appoggio/droni/DroneSkyCheck/help/manifest.json
+L’app carica quello incorporato, poi controlla se online esiste una versione più recente. La versione viene decisa tramite:
+"contentVersion": 5,
+"onboardingVersion": 5
+Quando aggiorni il contenuto guida, aumenta contentVersion.
+Quando cambi il tour guidato, aumenta anche onboardingVersion.
+Struttura JSON
+La parte onboarding.steps serve per il tour guidato:
+{
+  "id": "selected_point_panel",
+  "target": "selected_point_panel",
+  "action": "open_selected_point_details",
+  "title": "Controllo zona",
+  "text": "Quando tocchi un punto della mappa...",
+  "order": 2
+}
+I target disponibili sono:
+map
+zones_button
+location_button
+traffic_button
+profile_button
+selected_point_panel
+weather_action
+flight_opportunity_card
+Le action disponibili sono:
+none
+open_zones
+open_profile
+open_traffic
+open_selected_point_details
+open_weather
+La parte topics serve invece per riempire la sezione Guida:
+{
+  "id": "weather",
+  "title": "Meteo per il volo",
+  "summary": "Condizioni previste, vento, raffiche e finestre favorevoli.",
+  "introduction": "Drone Sky Check analizza...",
+  "order": 3,
+  "blocks": [
+    {
+      "type": "paragraph",
+      "text": "La valutazione considera vento, raffiche..."
+    },
+    {
+      "type": "note",
+      "text": "La previsione e un supporto alla pianificazione..."
+    }
+  ],
+  "image": "weather_panel.png"
+}
+I blocchi attualmente supportati sono:
+paragraph
+bullet_list / bulletList
+note
+Quindi puoi già costruire una guida abbastanza leggibile con paragrafi, elenchi puntati e note evidenziate.
+Immagini
+Sì, mettere piccoli screenshot nel manuale sarebbe utile, soprattutto per:
+mappa operativa
+pannello controllo zona
+sezione meteo/report operativo
+selettore zone
+traffico aereo
+profilo pilota e drone
+Attenzione però: il campo image esiste già nel modello JSON, ma al momento l’app lo mostra solo come testo tipo:
+Immagine: weather_panel.png
+Quindi per vedere davvero la miniatura bisogna fare un piccolo upgrade UI in [`HelpUi.kt`](C:/Users/raffa/AndroidStudioProjects/DroneSkyCheck/app/src/main/java/it/droneskycheck/app/ui/help/HelpUi.kt): leggere topic.image e renderizzarla come immagine piccola.
+La soluzione più ordinata sarebbe:
+tu carichi screenshot ridotti, per esempio map_operativa.png, controllo_zona.png
+li mettiamo in app/src/main/res/drawable/ oppure li serviamo da KWOS
+nel JSON usiamo:
+"image": "controllo_zona.png"
+oppure, se remoto:
+"image": "https://www.kwos.org/appoggio/droni/DroneSkyCheck/help/images/controllo_zona.png"
+La mia preferenza: immagini remote su KWOS. Così puoi aggiornare manuale e screenshot senza pubblicare una nuova versione dell’app.
+Però se vuoi massima affidabilità offline, meglio immagini locali dentro l’app.
+
+--------------------------------------------------------------------------------------------
+Report Patch Immagini Help
+Image loader scelto
+Ho usato Coil Compose, adatto a Compose e con cache memoria/disco integrata.
+
+Dipendenze aggiunte
+Aggiunta io.coil-kt:coil-compose:2.7.0 in gradle/libs.versions.toml e app/build.gradle.kts.
+
+Base URL immagini
+Definita in DscApiConfig:
+HelpImagesBaseUrl = "$KwosDataBaseUrl/help/images/"
+
+Filename relativo
+weather_panel.webp diventa:
+https://www.kwos.org/appoggio/droni/DroneSkyCheck/help/images/weather_panel.webp
+
+URL assoluto
+https://example.com/weather.webp resta invariato.
+
+Offline/cache
+Le immagini vengono caricate solo quando apri il topic. Coil gestisce cache memoria/disco; se offline e già in cache, può mostrarle.
+
+Fallback locale
+Implementato semplice: per immagini relative cerca anche un drawable locale con lo stesso nome, es. weather_overview.webp -> res/drawable/weather_overview.*. Se non esiste, nessuna immagine.
+
+Domain model
+Aggiunto imageAlt a HelpTopic.
+
+Nuovo block image
+Aggiunto HelpContentBlock.Image(src, alt).
+
+Gestione imageAlt
+   Supportato nel JSON:
+   "imageAlt": "Schermata Meteo per il volo"
+   Se manca, usa una descrizione derivata dal titolo.
+
+Validazione/sicurezza URL
+   Accetta solo:
+https://...
+path relativi sicuri con .webp, .png, .jpg, .jpeg
+
+   Rifiuta file://, content://, javascript:, path traversal ../, estensioni non supportate.
+   
+--------------------------------------------------------------------------

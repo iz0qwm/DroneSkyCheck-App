@@ -190,6 +190,7 @@ object HelpManifestParser {
                         introduction = item.optStringOrNull("introduction"),
                         blocks = parseBlocks(item.optJSONArray("blocks"), warnings, id),
                         image = item.optStringOrNull("image"),
+                        imageAlt = item.optStringOrNull("imageAlt"),
                         introducedInVersion = item.optIntOrNull("introducedInVersion"),
                         order = order
                     )
@@ -225,6 +226,18 @@ object HelpManifestParser {
                     ?.let(HelpContentBlock::Note)
                     ?: run {
                         warnings += HelpManifestWarning(HelpManifestWarningCode.MISSING_FIELD, "Note in $topicId missing text")
+                        null
+                    }
+                "image" -> item.optString("src").trim()
+                    .takeIf { it.isNotBlank() }
+                    ?.let { src ->
+                        HelpContentBlock.Image(
+                            src = src,
+                            alt = item.optStringOrNull("alt")
+                        )
+                    }
+                    ?: run {
+                        warnings += HelpManifestWarning(HelpManifestWarningCode.MISSING_FIELD, "Image in $topicId missing src")
                         null
                     }
                 else -> {

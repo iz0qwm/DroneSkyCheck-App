@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "contentVersion": 5,
+  "contentVersion": 6,
   "updatedAt": "2026-08-13",
   "onboardingVersion": 5,
   "onboarding": {
@@ -92,11 +92,18 @@
       "title": "Meteo per il volo",
       "summary": "Condizioni previste, vento, raffiche e finestre favorevoli.",
       "introduction": "Drone Sky Check analizza le condizioni meteorologiche previste nel punto selezionato e individua le finestre piu favorevoli per il volo.",
+      "image": "weather_overview.webp",
+      "imageAlt": "Schermata Meteo per il volo",
       "order": 3,
       "blocks": [
         {
           "type": "paragraph",
           "text": "La valutazione considera anche vento, raffiche, precipitazioni e compatibilita con il drone selezionato."
+        },
+        {
+          "type": "image",
+          "src": "weather_details.webp",
+          "alt": "Dettaglio del report operativo meteo"
         },
         {
           "type": "note",

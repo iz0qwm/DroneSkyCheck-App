@@ -73,6 +73,7 @@ data class HelpTopic(
     val introduction: String? = null,
     val blocks: List<HelpContentBlock> = emptyList(),
     val image: String? = null,
+    val imageAlt: String? = null,
     val introducedInVersion: Int? = null,
     val order: Int = 0
 )
@@ -81,6 +82,7 @@ sealed interface HelpContentBlock {
     data class Paragraph(val text: String) : HelpContentBlock
     data class BulletList(val items: List<String>) : HelpContentBlock
     data class Note(val text: String) : HelpContentBlock
+    data class Image(val src: String, val alt: String? = null) : HelpContentBlock
 }
 
 data class ActiveHelpOnboarding(
