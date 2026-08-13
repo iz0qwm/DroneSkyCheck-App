@@ -2,8 +2,10 @@ package it.droneskycheck.app.ui.map
 
 import android.Manifest
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationListener
@@ -12,6 +14,7 @@ import android.location.Geocoder
 import android.os.Build
 import android.media.AudioManager
 import android.media.ToneGenerator
+import android.net.Uri
 import android.os.Bundle
 import android.os.Looper
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -151,6 +154,9 @@ import it.droneskycheck.app.data.LocalPilotRepository
 import it.droneskycheck.app.data.MapPreferencesRepository
 import it.droneskycheck.app.data.NotamInfo
 import it.droneskycheck.app.data.OfficialInfo
+import it.droneskycheck.app.data.PeriodicNoticeLinks
+import it.droneskycheck.app.data.PeriodicNoticePolicy
+import it.droneskycheck.app.data.PeriodicNoticePreferencesRepository
 import it.droneskycheck.app.data.SupInfo
 import it.droneskycheck.app.data.TemporalBarEntry
 import it.droneskycheck.app.data.UasGeographicalZoneInfo
@@ -212,6 +218,7 @@ import it.droneskycheck.app.ui.authorization.AuthorizationDraftSheet
 import it.droneskycheck.app.ui.help.HelpTopicDialog
 import it.droneskycheck.app.ui.profile.PilotProfileSheet
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -242,6 +249,9 @@ fun MapScreen(
     )
     val coroutineScope = rememberCoroutineScope()
     val authorizationRepository = remember(context) { LocalAuthorizationRepository(context.applicationContext) }
+    val periodicNoticePreferences = remember(context) {
+        PeriodicNoticePreferencesRepository(context.applicationContext)
+    }
     val activity = context.findActivity()
     val uiState by viewModel.uiState.collectAsState()
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -262,6 +272,8 @@ fun MapScreen(
     var planningWarning by remember { mutableStateOf<String?>(null) }
     var isPlanningCardCompact by remember { mutableStateOf(true) }
     var contextualHelpTopic by remember { mutableStateOf<HelpTopic?>(null) }
+    var isPeriodicNoticeVisible by remember { mutableStateOf(false) }
+    var periodicNoticeShownThisSession by remember { mutableStateOf(false) }
 
     suspend fun reloadActiveDraft() {
         currentDraft = authorizationRepository.getActiveDraft()
@@ -353,6 +365,39 @@ fun MapScreen(
         onProviderUnavailable = viewModel::onLocationProviderUnavailable,
         onPermissionRevoked = viewModel::onLocationPermissionRevoked
     )
+
+    val canShowPeriodicNotice = uiState.cameraBounds != null &&
+        uiState.activeHelpOnboarding == null &&
+        !uiState.isLayerSheetVisible &&
+        !uiState.locationPermissionSheetVisible &&
+        !uiState.isLocationControlSheetVisible &&
+        !isLocationSearchSheetVisible &&
+        !uiState.isTrafficAlertSettingsSheetVisible &&
+        uiState.selectedTrafficTarget == null &&
+        !isPilotProfileSheetVisible &&
+        !isDraftSheetVisible &&
+        conflictingDraft == null &&
+        !uiState.isZoneSheetVisible &&
+        contextualHelpTopic == null &&
+        !isPeriodicNoticeVisible
+
+    LaunchedEffect(canShowPeriodicNotice, periodicNoticeShownThisSession, periodicNoticePreferences) {
+        if (!canShowPeriodicNotice || periodicNoticeShownThisSession) return@LaunchedEffect
+        delay(PeriodicNoticeUiSettlingMillis)
+
+        val lastShownAt = withContext(Dispatchers.IO) {
+            periodicNoticePreferences.getLastPeriodicNoticeShownAt()
+        }
+        val shownAt = Instant.now()
+        if (PeriodicNoticePolicy.shouldShow(lastShownAt = lastShownAt, now = shownAt)) {
+            withContext(Dispatchers.IO) {
+                periodicNoticePreferences.setLastPeriodicNoticeShownAt(shownAt)
+            }
+            periodicNoticeShownThisSession = true
+            isPeriodicNoticeVisible = true
+            DscLogger.debug(PeriodicNoticeLogTag, "Periodic notice shown")
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         DroneSkyMapView(
@@ -731,6 +776,16 @@ fun MapScreen(
             )
         }
 
+        if (isPeriodicNoticeVisible) {
+            PeriodicNoticeDialog(
+                onDismiss = { isPeriodicNoticeVisible = false },
+                onBuyMeACoffee = {
+                    isPeriodicNoticeVisible = false
+                    openExternalUrl(context, PeriodicNoticeLinks.BuyMeACoffeeUrl)
+                }
+            )
+        }
+
         uiState.activeHelpOnboarding?.let { onboarding ->
             key(uiState.helpTourOverlayRevision) {
                 HelpTourOverlay(
@@ -743,6 +798,35 @@ fun MapScreen(
             }
         }
     }
+}
+
+@Composable
+private fun PeriodicNoticeDialog(
+    onDismiss: () -> Unit,
+    onBuyMeACoffee: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text("Un promemoria da Drone Sky Check")
+        },
+        text = {
+            Text(
+                text = PeriodicNoticeBody,
+                style = MaterialTheme.typography.bodyMedium
+            )
+        },
+        confirmButton = {
+            Button(onClick = onBuyMeACoffee) {
+                Text(PeriodicNoticeCoffeeButtonText)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Ho capito")
+            }
+        }
+    )
 }
 
 @Composable
@@ -6370,6 +6454,19 @@ private fun Context.findActivity(): Activity? =
         else -> null
     }
 
+private fun openExternalUrl(context: Context, url: String) {
+    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    try {
+        context.startActivity(intent)
+        DscLogger.debug(PeriodicNoticeLogTag, "Buy Me a Coffee link opened")
+    } catch (error: ActivityNotFoundException) {
+        DscLogger.warn(PeriodicNoticeLogTag, "External URL open failure", error)
+    } catch (error: SecurityException) {
+        DscLogger.warn(PeriodicNoticeLogTag, "External URL open failure", error)
+    }
+}
+
 private class MapViewModelFactory(
     private val context: Context
 ) : ViewModelProvider.Factory {
@@ -6414,3 +6511,13 @@ private val TemporalUnknownColor = Color(144, 164, 174)
 private const val CoordinateDecimals = 5
 private const val TrafficAlertToneDurationMillis = 120
 private const val TrafficAlertToneVolume = 60
+private const val PeriodicNoticeLogTag = "DscPeriodicNotice"
+private const val PeriodicNoticeUiSettlingMillis = 700L
+private const val PeriodicNoticeCoffeeButtonText = "☕ Offrimi un caffè"
+private val PeriodicNoticeBody = """
+    Drone Sky Check raccoglie, interpreta e presenta in modo più semplice dati provenienti da fonti ufficiali e da altri servizi utili alla pianificazione del volo.
+
+    L'app facilita la consultazione, ma non sostituisce le fonti aeronautiche ufficiali né gli strumenti messi a disposizione dagli enti competenti.
+
+    Prima del volo verifica sempre le informazioni applicabili attraverso le fonti ufficiali indicate.
+""".trimIndent()
