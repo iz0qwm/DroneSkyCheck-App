@@ -114,8 +114,7 @@ class MapViewModel(
             MapTapSelection(
                 point = point,
                 zone = _uiState.value.selectedZone
-            ),
-            forceTimeline = true
+            )
         )
     }
 
@@ -205,24 +204,9 @@ class MapViewModel(
         )
     }
 
-    private fun requestAnalysis(
-        selection: MapTapSelection,
-        forceTimeline: Boolean = false
-    ) {
-        val shouldKeepOperationalContext =
-            _uiState.value.isOperationalContextRequested || _uiState.value.isWeatherAnalysisEnabled
+    private fun requestAnalysis(selection: MapTapSelection) {
         selectionRequestId += 1
         val requestId = selectionRequestId
-        val windowStart = clock.instant()
-        val windowEnd = legalTimelineEndIncludingWeekend(windowStart, timelineZoneId)
-        val timelineRequest = LegalTimelineRequestKey(
-            point = selection.point,
-            from = windowStart,
-            to = windowEnd
-        )
-        val shouldRequestTimeline = forceTimeline || timelineRequest != lastLegalTimelineRequest
-        val shouldRequestOperationalContext = forceTimeline || shouldKeepOperationalContext
-        if (shouldRequestOperationalContext) lastLegalTimelineRequest = timelineRequest
 
         verdictJob?.cancel()
         legalTimelineJob?.cancel()
@@ -259,25 +243,6 @@ class MapViewModel(
                 "selectedPoint changed pollRestart=true lat=${selection.point.lat.coarseTraffic()} lon=${selection.point.lon.coarseTraffic()}"
             )
             startTrafficAwarenessPolling(selection.point, clearSnapshot = true)
-        }
-        if (shouldRequestOperationalContext && shouldRequestTimeline) {
-            _uiState.value = _uiState.value.copy(
-                isOperationalContextRequested = true,
-                isWeatherAnalysisEnabled = true,
-                isLegalTimelineLoading = true,
-                isWeatherAnalysisLoading = true,
-                flightOpportunityStatus = FlightOpportunityStatus.LOADING,
-                flightOpportunityResult = null,
-                isOperationalReportExpanded = false
-            )
-            launchLegalTimeline(
-                requestId = requestId,
-                request = timelineRequest
-            )
-            launchWeatherAnalysis(
-                requestId = requestId,
-                point = selection.point
-            )
         }
     }
 

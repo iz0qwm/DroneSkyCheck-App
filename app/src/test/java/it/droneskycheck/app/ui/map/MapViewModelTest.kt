@@ -123,7 +123,7 @@ class MapViewModelTest {
     }
 
     @Test
-    fun newSelectionRecalculatesOperationalContextWhenWeatherAlreadyEnabled() = runBlocking {
+    fun newSelectionRequiresExplicitWeatherRequestAgain() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val weather = FakeWeatherClient(forecast = weatherForecast())
         val legal = FakeLegalTimelineClient()
@@ -138,19 +138,20 @@ class MapViewModelTest {
         viewModel.onOperationalContextRequested()
         waitUntil { viewModel.uiState.value.flightOpportunityResult != null }
         viewModel.onMapTapped(selection(42.0, 12.6))
-        waitUntil {
-            legal.calls == 2 &&
-                weather.calls == 2 &&
-                !viewModel.uiState.value.isWeatherAnalysisLoading &&
-                viewModel.uiState.value.flightOpportunityResult != null
-        }
+        waitUntil { !viewModel.uiState.value.isVerdictLoading }
 
-        assertTrue(viewModel.uiState.value.isOperationalContextRequested)
-        assertTrue(viewModel.uiState.value.isWeatherAnalysisEnabled)
+        assertFalse(viewModel.uiState.value.isOperationalContextRequested)
+        assertFalse(viewModel.uiState.value.isWeatherAnalysisEnabled)
         assertFalse(viewModel.uiState.value.isWeatherAnalysisLoading)
-        assertEquals(MapPoint(42.0, 12.6), legal.lastPoint)
-        assertEquals(MapPoint(42.0, 12.6), weather.lastPoint)
-        assertEquals(FlightOpportunityStatus.PARTIAL, viewModel.uiState.value.flightOpportunityStatus)
+        assertEquals(1, legal.calls)
+        assertEquals(1, weather.calls)
+        assertEquals(MapPoint(41.9, 12.5), legal.lastPoint)
+        assertEquals(MapPoint(41.9, 12.5), weather.lastPoint)
+        assertEquals(MapPoint(42.0, 12.6), viewModel.uiState.value.selectedPoint)
+        assertNull(viewModel.uiState.value.weatherForecast)
+        assertNull(viewModel.uiState.value.weatherAssessment)
+        assertEquals(FlightOpportunityStatus.IDLE, viewModel.uiState.value.flightOpportunityStatus)
+        assertNull(viewModel.uiState.value.flightOpportunityResult)
         assertNull(viewModel.uiState.value.weatherError)
         scope.cancel()
     }
