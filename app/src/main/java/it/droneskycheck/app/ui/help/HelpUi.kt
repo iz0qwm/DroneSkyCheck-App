@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -24,20 +23,16 @@ import androidx.compose.material.icons.filled.Flight
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -61,7 +56,6 @@ import it.droneskycheck.app.data.help.HelpTopic
 @Composable
 fun HelpBottomSheet(
     manifest: HelpManifest,
-    onRepeatTour: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -84,7 +78,6 @@ fun HelpBottomSheet(
             HelpTopicList(
                 manifest = manifest,
                 onTopicSelected = { selectedTopicId = it.id },
-                onRepeatTour = onRepeatTour,
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(max = 620.dp)
@@ -118,7 +111,6 @@ fun HelpTopicDialog(
 private fun HelpTopicList(
     manifest: HelpManifest,
     onTopicSelected: (HelpTopic) -> Unit,
-    onRepeatTour: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     LazyColumn(
@@ -145,23 +137,6 @@ private fun HelpTopicList(
                 topic = topic,
                 onClick = { onTopicSelected(topic) }
             )
-        }
-        item {
-            HorizontalDivider(modifier = Modifier.padding(top = 4.dp))
-            OutlinedButton(
-                onClick = onRepeatTour,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.PlayArrow,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.size(8.dp))
-                Text("Ripeti il tour guidato")
-            }
         }
     }
 }

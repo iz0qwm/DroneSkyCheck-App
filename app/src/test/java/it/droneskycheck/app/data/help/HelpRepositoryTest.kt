@@ -84,6 +84,18 @@ class HelpRepositoryTest {
     }
 
     @Test
+    fun newerEmbeddedManifestReplacesOlderCacheOnAppUpdate() = runBlocking {
+        val storage = storage(embeddedVersion = 3)
+        storage.writeManifestAtomically(manifestJson(contentVersion = 2, title = "Cache"))
+        val repository = repository(storage = storage, http = FakeHelpHttpClient())
+
+        val current = repository.getCurrentManifest()
+
+        assertEquals(3, current.contentVersion)
+        assertEquals("Embedded", current.topics.single().title)
+    }
+
+    @Test
     fun newerRemoteReplacesCachedManifest() = runBlocking {
         val storage = storage(embeddedVersion = 1)
         storage.writeManifestAtomically(manifestJson(contentVersion = 2, title = "Cache"))

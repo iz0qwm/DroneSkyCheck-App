@@ -56,7 +56,8 @@ data class MapUiState(
     val layerVisibility: Map<DscLayerCategory, Boolean> = DscLayerCategory.defaultVisibility,
     val isLayerSheetVisible: Boolean = false,
     val helpManifest: HelpManifest = HelpManifest.empty(),
-    val activeHelpOnboarding: ActiveHelpOnboarding? = null
+    val activeHelpOnboarding: ActiveHelpOnboarding? = null,
+    val helpTourOverlayRevision: Int = 0
 )
 
 data class MapTapSelection(

@@ -96,6 +96,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
@@ -596,7 +597,11 @@ fun MapScreen(
         if (isPilotProfileSheetVisible) {
             PilotProfileSheet(
                 helpManifest = uiState.helpManifest,
-                onRepeatTour = { viewModel.requestHelpOnboardingReplay(profileSheetVisible = isPilotProfileSheetVisible) },
+                onRepeatTour = {
+                    isPilotProfileSheetVisible = false
+                    viewModel.onHelpTourProfileVisibilityChanged(false)
+                    viewModel.requestHelpOnboardingReplay(profileSheetVisible = false)
+                },
                 onDismiss = {
                     isPilotProfileSheetVisible = false
                     viewModel.onHelpTourProfileVisibilityChanged(false)
@@ -724,13 +729,15 @@ fun MapScreen(
         }
 
         uiState.activeHelpOnboarding?.let { onboarding ->
-            HelpTourOverlay(
-                onboarding = onboarding,
-                onPrevious = { viewModel.onHelpOnboardingPrevious(profileSheetVisible = isPilotProfileSheetVisible) },
-                onNext = { viewModel.onHelpOnboardingNext(profileSheetVisible = isPilotProfileSheetVisible) },
-                onSkip = { viewModel.onHelpOnboardingSkipped(profileSheetVisible = isPilotProfileSheetVisible) },
-                modifier = Modifier.fillMaxSize()
-            )
+            key(uiState.helpTourOverlayRevision) {
+                HelpTourOverlay(
+                    onboarding = onboarding,
+                    onPrevious = { viewModel.onHelpOnboardingPrevious(profileSheetVisible = isPilotProfileSheetVisible) },
+                    onNext = { viewModel.onHelpOnboardingNext(profileSheetVisible = isPilotProfileSheetVisible) },
+                    onSkip = { viewModel.onHelpOnboardingSkipped(profileSheetVisible = isPilotProfileSheetVisible) },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
         }
     }
 }

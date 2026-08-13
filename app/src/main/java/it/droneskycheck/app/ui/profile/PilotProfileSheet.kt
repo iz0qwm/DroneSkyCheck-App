@@ -51,6 +51,7 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FlightTakeoff
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Shield
@@ -596,7 +597,11 @@ fun PilotProfileSheet(
                         onRefresh = { reload() }
                     )
                     HelpAccessCard(
-                        onOpenHelp = { isHelpSheetVisible = true }
+                        onOpenHelp = { isHelpSheetVisible = true },
+                        onRepeatTour = {
+                            onDismiss()
+                            onRepeatTour()
+                        }
                     )
                     OutlinedButton(
                         onClick = { reload() },
@@ -618,10 +623,6 @@ fun PilotProfileSheet(
     if (isHelpSheetVisible) {
         HelpBottomSheet(
             manifest = helpManifest,
-            onRepeatTour = {
-                isHelpSheetVisible = false
-                onRepeatTour()
-            },
             onDismiss = { isHelpSheetVisible = false }
         )
     }
@@ -990,6 +991,24 @@ private fun DroneRow(
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onSelect, enabled = !isSelected) {
+                    Icon(
+                        imageVector = Icons.Default.CheckCircle,
+                        contentDescription = if (isSelected) "Drone predefinito" else "Imposta drone predefinito"
+                    )
+                }
+                IconButton(onClick = onEdit) {
+                    Icon(Icons.Default.Edit, contentDescription = "Modifica drone")
+                }
+                IconButton(onClick = onDelete) {
+                    Icon(Icons.Default.Delete, contentDescription = "Elimina drone")
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.Top
             ) {
@@ -1014,7 +1033,7 @@ private fun DroneRow(
                         text = drone.displayName,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
-                        maxLines = 2,
+                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
@@ -1023,20 +1042,6 @@ private fun DroneRow(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     SummaryValue("S/N", drone.serialNumber)
-                }
-                Row {
-                    IconButton(onClick = onSelect, enabled = !isSelected) {
-                        Icon(
-                            imageVector = Icons.Default.CheckCircle,
-                            contentDescription = if (isSelected) "Drone predefinito" else "Imposta drone predefinito"
-                        )
-                    }
-                    IconButton(onClick = onEdit) {
-                        Icon(Icons.Default.Edit, contentDescription = "Modifica drone")
-                    }
-                    IconButton(onClick = onDelete) {
-                        Icon(Icons.Default.Delete, contentDescription = "Elimina drone")
-                    }
                 }
             }
             if (isSelected) {
@@ -1089,7 +1094,8 @@ private fun AuthorizationDraftsCard(
 
 @Composable
 private fun HelpAccessCard(
-    onOpenHelp: () -> Unit
+    onOpenHelp: () -> Unit,
+    onRepeatTour: () -> Unit
 ) {
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
@@ -1142,6 +1148,18 @@ private fun HelpAccessCard(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("Guida e informazioni")
+            }
+            OutlinedButton(
+                onClick = onRepeatTour,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    imageVector = Icons.Default.PlayArrow,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Ripeti tour guidato")
             }
         }
     }

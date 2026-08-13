@@ -268,6 +268,7 @@ class MapViewModel(
 
     fun onHelpTourProfileVisibilityChanged(visible: Boolean) {
         prepareCurrentHelpStep(profileSheetVisible = visible)
+        bumpHelpTourOverlay()
     }
 
     private fun prepareCurrentHelpStep(profileSheetVisible: Boolean) {
@@ -304,27 +305,48 @@ class MapViewModel(
         HelpTourEnvironment(
             selectedPointAvailable = _uiState.value.selectedPoint != null,
             cameraCenterAvailable = _uiState.value.cameraBounds != null,
+            selectedPointSheetVisible = _uiState.value.isZoneSheetVisible,
             layerSheetVisible = _uiState.value.isLayerSheetVisible,
             profileSheetVisible = profileSheetVisible,
             trafficEnabled = _uiState.value.trafficAwareness.enabled
         )
 
     private fun applyHelpTourEffects(effects: Set<HelpTourEffect>) {
+        var shouldRefreshHelpOverlay = false
         effects.forEach { effect ->
             when (effect) {
-                HelpTourEffect.OPEN_ZONES -> onLayerPanelRequested()
-                HelpTourEffect.CLOSE_ZONES -> onLayerPanelDismissed()
-                HelpTourEffect.OPEN_PROFILE -> _helpTourUiCommands.tryEmit(HelpTourUiCommand.OpenProfile)
-                HelpTourEffect.CLOSE_PROFILE -> _helpTourUiCommands.tryEmit(HelpTourUiCommand.CloseProfile)
+                HelpTourEffect.OPEN_ZONES -> {
+                    onLayerPanelRequested()
+                    shouldRefreshHelpOverlay = true
+                }
+                HelpTourEffect.CLOSE_ZONES -> {
+                    onLayerPanelDismissed()
+                    shouldRefreshHelpOverlay = true
+                }
+                HelpTourEffect.OPEN_PROFILE -> {
+                    if (_uiState.value.isZoneSheetVisible) {
+                        _uiState.value = _uiState.value.copy(isZoneSheetVisible = false)
+                    }
+                    _helpTourUiCommands.tryEmit(HelpTourUiCommand.OpenProfile)
+                    shouldRefreshHelpOverlay = true
+                }
+                HelpTourEffect.CLOSE_PROFILE -> {
+                    _helpTourUiCommands.tryEmit(HelpTourUiCommand.CloseProfile)
+                    shouldRefreshHelpOverlay = true
+                }
                 HelpTourEffect.ENABLE_TRAFFIC -> enableTrafficAwareness()
                 HelpTourEffect.DISABLE_TRAFFIC -> disableTrafficAwareness()
                 HelpTourEffect.OPEN_SELECTED_POINT_DETAILS -> {
-                    if (_uiState.value.selectedPoint != null) {
-                        _uiState.value = _uiState.value.copy(isZoneSheetVisible = true)
+                    if (openSelectedPointDetailsForHelp()) {
+                        shouldRefreshHelpOverlay = true
                     }
                 }
+                HelpTourEffect.CLOSE_SELECTED_POINT_DETAILS -> {
+                    onZoneSheetDismissed()
+                    shouldRefreshHelpOverlay = true
+                }
                 HelpTourEffect.OPEN_WEATHER -> {
-                    if (_uiState.value.selectedPoint != null) {
+                    if (openSelectedPointDetailsForHelp()) {
                         if (!_uiState.value.isOperationalContextRequested) {
                             onOperationalContextRequested()
                         }
@@ -332,10 +354,41 @@ class MapViewModel(
                             isOperationalReportExpanded = true,
                             isZoneSheetVisible = true
                         )
+                        shouldRefreshHelpOverlay = true
                     }
                 }
             }
         }
+        if (shouldRefreshHelpOverlay) {
+            bumpHelpTourOverlay()
+        }
+    }
+
+    private fun openSelectedPointDetailsForHelp(): Boolean {
+        val currentPoint = _uiState.value.selectedPoint
+        if (currentPoint != null) {
+            _uiState.value = _uiState.value.copy(isZoneSheetVisible = true)
+            return true
+        }
+        val centerPoint = _uiState.value.cameraBounds?.centerPoint() ?: return false
+        DscLogger.debug(
+            LogTag,
+            "Help: selectedPoint changed source=mapCenter lat=${centerPoint.lat} lon=${centerPoint.lon}"
+        )
+        requestAnalysis(
+            MapTapSelection(
+                point = centerPoint,
+                zone = null
+            )
+        )
+        return true
+    }
+
+    private fun bumpHelpTourOverlay() {
+        if (_uiState.value.activeHelpOnboarding == null) return
+        _uiState.value = _uiState.value.copy(
+            helpTourOverlayRevision = _uiState.value.helpTourOverlayRevision + 1
+        )
     }
 
     private fun markHelpOnboardingSeen(manifest: HelpManifest) {

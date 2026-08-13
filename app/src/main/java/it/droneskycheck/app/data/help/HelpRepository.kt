@@ -147,11 +147,16 @@ class HelpRepository(
     }
 
     private fun loadBestAvailableManifest(): HelpManifest {
-        storage.readManifestJson()?.let { json ->
-            loadValidatedManifest(json, source = "cached")?.let { return it }
-                ?: DscLogger.warn(LogTag, "Help: cached manifest invalid, trying embedded")
+        val cached = storage.readManifestJson()?.let { json ->
+            loadValidatedManifest(json, source = "cached")
+                ?: DscLogger.warn(LogTag, "Help: cached manifest invalid, trying embedded").let { null }
         }
-        loadValidatedManifest(storage.readEmbeddedManifestJson(), source = "embedded")?.let { return it }
+        val embedded = loadValidatedManifest(storage.readEmbeddedManifestJson(), source = "embedded")
+        if (cached != null && embedded != null) {
+            return if (embedded.contentVersion > cached.contentVersion) embedded else cached
+        }
+        cached?.let { return it }
+        embedded?.let { return it }
         DscLogger.warn(LogTag, "Help: no valid manifest available")
         return HelpManifest.empty()
     }

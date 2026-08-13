@@ -24,6 +24,11 @@ import it.droneskycheck.app.data.drone.DroneTechnicalCatalogResolver
 import it.droneskycheck.app.data.drone.InMemoryDroneTechnicalCatalogClient
 import it.droneskycheck.app.data.drone.parseDroneTechnicalCatalog
 import it.droneskycheck.app.data.flight.FlightOpportunityStatus
+import it.droneskycheck.app.data.help.HelpManifest
+import it.droneskycheck.app.data.help.HelpManifestClient
+import it.droneskycheck.app.data.help.HelpOnboardingStep
+import it.droneskycheck.app.data.help.HelpTourAction
+import it.droneskycheck.app.data.help.HelpTourTarget
 import it.droneskycheck.app.data.help.InMemoryHelpManifestClient
 import it.droneskycheck.app.data.help.InMemoryHelpPreferences
 import it.droneskycheck.app.data.traffic.TrafficAwarenessClient
@@ -900,6 +905,68 @@ class MapViewModelTest {
         scope.cancel()
     }
 
+    @Test
+    fun helpTourSelectsMapCenterWhenOpeningZoneControlWithoutSelectedPoint() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val viewModel = viewModel(
+            scope = scope,
+            preferences = InMemoryMapPreferences(),
+            helpRepository = InMemoryHelpManifestClient(helpTourManifest())
+        )
+
+        viewModel.onCameraIdle(
+            CameraBounds(
+                zoom = 12.0,
+                north = 44.0,
+                south = 42.0,
+                east = 11.0,
+                west = 9.0
+            )
+        )
+        viewModel.requestHelpOnboardingReplay()
+        waitUntil { viewModel.uiState.value.activeHelpOnboarding != null }
+        viewModel.onHelpOnboardingNext()
+        waitUntil { viewModel.uiState.value.selectedPoint != null }
+
+        assertEquals(MapPoint(43.0, 10.0), viewModel.uiState.value.selectedPoint)
+        assertTrue(viewModel.uiState.value.isZoneSheetVisible)
+        assertEquals(1, viewModel.uiState.value.activeHelpOnboarding?.currentIndex)
+        scope.cancel()
+    }
+
+    @Test
+    fun helpTourClosesZoneControlBeforeOpeningLayerSelectorAfterWeather() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val viewModel = viewModel(
+            scope = scope,
+            preferences = InMemoryMapPreferences(),
+            helpRepository = InMemoryHelpManifestClient(zoneWeatherLayersTourManifest())
+        )
+
+        viewModel.onCameraIdle(
+            CameraBounds(
+                zoom = 12.0,
+                north = 44.0,
+                south = 42.0,
+                east = 11.0,
+                west = 9.0
+            )
+        )
+        viewModel.requestHelpOnboardingReplay()
+        waitUntil { viewModel.uiState.value.activeHelpOnboarding != null }
+        viewModel.onHelpOnboardingNext()
+        waitUntil { viewModel.uiState.value.isZoneSheetVisible }
+        viewModel.onHelpOnboardingNext()
+        waitUntil { viewModel.uiState.value.isOperationalReportExpanded }
+        viewModel.onHelpOnboardingNext()
+        waitUntil { viewModel.uiState.value.isLayerSheetVisible }
+
+        assertEquals(3, viewModel.uiState.value.activeHelpOnboarding?.currentIndex)
+        assertFalse(viewModel.uiState.value.isZoneSheetVisible)
+        assertTrue(viewModel.uiState.value.isLayerSheetVisible)
+        scope.cancel()
+    }
+
     private fun viewModel(
         scope: CoroutineScope,
         legal: FakeLegalTimelineClient = FakeLegalTimelineClient(),
@@ -908,6 +975,7 @@ class MapViewModelTest {
         preferences: InMemoryMapPreferences,
         pilotStore: LocalPilotStore = FakePilotStore(),
         catalog: DroneTechnicalCatalogClient = InMemoryDroneTechnicalCatalogClient(),
+        helpRepository: HelpManifestClient = InMemoryHelpManifestClient(),
         trafficPollingIntervalMillis: Long = 5_000L,
         loadHelpOnInit: Boolean = false
     ): MapViewModel =
@@ -917,7 +985,7 @@ class MapViewModelTest {
             weatherForecastRepository = weather,
             trafficAwarenessRepository = traffic,
             mapPreferences = preferences,
-            helpRepository = InMemoryHelpManifestClient(),
+            helpRepository = helpRepository,
             helpPreferences = InMemoryHelpPreferences(),
             localPilotStore = pilotStore,
             droneTechnicalCatalog = catalog,
@@ -926,6 +994,74 @@ class MapViewModelTest {
             trafficAwarenessPollingIntervalMillis = trafficPollingIntervalMillis,
             loadHelpOnInit = loadHelpOnInit,
             externalScope = scope
+        )
+
+    private fun helpTourManifest(): HelpManifest =
+        HelpManifest(
+            schemaVersion = 1,
+            contentVersion = 1,
+            updatedAt = "2026-08-13",
+            onboardingVersion = 1,
+            onboardingSteps = listOf(
+                HelpOnboardingStep(
+                    id = "map",
+                    target = HelpTourTarget.MAP,
+                    title = "Mappa",
+                    text = "Testo",
+                    order = 1
+                ),
+                HelpOnboardingStep(
+                    id = "zone",
+                    target = HelpTourTarget.SELECTED_POINT_PANEL,
+                    action = HelpTourAction.OPEN_SELECTED_POINT_DETAILS,
+                    title = "Zona",
+                    text = "Testo",
+                    order = 2
+                )
+            ),
+            topics = emptyList()
+        )
+
+    private fun zoneWeatherLayersTourManifest(): HelpManifest =
+        HelpManifest(
+            schemaVersion = 1,
+            contentVersion = 1,
+            updatedAt = "2026-08-13",
+            onboardingVersion = 1,
+            onboardingSteps = listOf(
+                HelpOnboardingStep(
+                    id = "map",
+                    target = HelpTourTarget.MAP,
+                    title = "Mappa",
+                    text = "Testo",
+                    order = 1
+                ),
+                HelpOnboardingStep(
+                    id = "zone",
+                    target = HelpTourTarget.SELECTED_POINT_PANEL,
+                    action = HelpTourAction.OPEN_SELECTED_POINT_DETAILS,
+                    title = "Zona",
+                    text = "Testo",
+                    order = 2
+                ),
+                HelpOnboardingStep(
+                    id = "weather",
+                    target = HelpTourTarget.FLIGHT_OPPORTUNITY_CARD,
+                    action = HelpTourAction.OPEN_WEATHER,
+                    title = "Meteo",
+                    text = "Testo",
+                    order = 3
+                ),
+                HelpOnboardingStep(
+                    id = "layers",
+                    target = HelpTourTarget.ZONES_BUTTON,
+                    action = HelpTourAction.OPEN_ZONES,
+                    title = "Zone",
+                    text = "Testo",
+                    order = 4
+                )
+            ),
+            topics = emptyList()
         )
 
     private fun selection(lat: Double, lon: Double): MapTapSelection =

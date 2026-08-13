@@ -61,6 +61,26 @@ class HelpTourControllerTest {
     }
 
     @Test
+    fun openProfileDoesNotReopenAfterUserDismissesItDuringSameStep() {
+        val environment = environment(profileSheetVisible = false)
+        val session = HelpTourController.initialSession(environment)
+        val firstPrepare = HelpTourController.prepareStep(
+            step(HelpTourTarget.PROFILE_BUTTON, HelpTourAction.OPEN_PROFILE),
+            session,
+            environment
+        )
+
+        val secondPrepare = HelpTourController.prepareStep(
+            step(HelpTourTarget.PROFILE_BUTTON, HelpTourAction.OPEN_PROFILE),
+            firstPrepare.session,
+            environment(profileSheetVisible = false)
+        )
+
+        assertEquals(setOf(HelpTourEffect.OPEN_PROFILE), firstPrepare.effects)
+        assertEquals(emptySet<HelpTourEffect>(), secondPrepare.effects)
+    }
+
+    @Test
     fun openTrafficEnablesAndRestoresWhenInitiallyOff() {
         val environment = environment(selectedPointAvailable = true, trafficEnabled = false)
         val session = HelpTourController.initialSession(environment)
@@ -92,10 +112,36 @@ class HelpTourControllerTest {
     }
 
     @Test
-    fun weatherWithoutSelectedPointIsSkippedByPrerequisite() {
+    fun weatherWithoutSelectedPointStaysVisibleInTour() {
         val environment = environment(selectedPointAvailable = false)
 
-        assertFalse(HelpTourController.canShow(step(HelpTourTarget.WEATHER_ACTION, HelpTourAction.OPEN_WEATHER), environment))
+        assertTrue(HelpTourController.canShow(step(HelpTourTarget.WEATHER_ACTION, HelpTourAction.OPEN_WEATHER), environment))
+    }
+
+    @Test
+    fun selectedPointPanelWithoutPointStaysVisibleInTour() {
+        val environment = environment(selectedPointAvailable = false)
+
+        assertTrue(
+            HelpTourController.canShow(
+                step(HelpTourTarget.SELECTED_POINT_PANEL, HelpTourAction.OPEN_SELECTED_POINT_DETAILS),
+                environment
+            )
+        )
+    }
+
+    @Test
+    fun selectedPointPanelWithSelectedPointCanOpenRealZoneSheet() {
+        val environment = environment(selectedPointAvailable = true)
+        val session = HelpTourController.initialSession(environment)
+
+        val prepare = HelpTourController.prepareStep(
+            step(HelpTourTarget.SELECTED_POINT_PANEL, HelpTourAction.OPEN_SELECTED_POINT_DETAILS),
+            session,
+            environment
+        )
+
+        assertEquals(setOf(HelpTourEffect.OPEN_SELECTED_POINT_DETAILS), prepare.effects)
     }
 
     @Test
@@ -103,12 +149,38 @@ class HelpTourControllerTest {
         val environment = environment(selectedPointAvailable = true)
         val session = HelpTourController.initialSession(environment)
 
-        val prepare = HelpTourController.prepareStep(step(HelpTourTarget.WEATHER_ACTION, HelpTourAction.OPEN_WEATHER), session, environment)
+        val prepare = HelpTourController.prepareStep(step(HelpTourTarget.FLIGHT_OPPORTUNITY_CARD, HelpTourAction.OPEN_WEATHER), session, environment)
 
         assertEquals(
             setOf(HelpTourEffect.OPEN_SELECTED_POINT_DETAILS, HelpTourEffect.OPEN_WEATHER),
             prepare.effects
         )
+    }
+
+    @Test
+    fun weatherCleanupClosesZoneSheetOpenedByTour() {
+        val environment = environment(selectedPointAvailable = true, selectedPointSheetVisible = false)
+        val session = HelpTourController.initialSession(environment)
+        val selectedPointPrepare = HelpTourController.prepareStep(
+            step(HelpTourTarget.SELECTED_POINT_PANEL, HelpTourAction.OPEN_SELECTED_POINT_DETAILS),
+            session,
+            environment
+        )
+        val weatherPrepare = HelpTourController.prepareStep(
+            step(HelpTourTarget.FLIGHT_OPPORTUNITY_CARD, HelpTourAction.OPEN_WEATHER),
+            selectedPointPrepare.session,
+            environment(selectedPointAvailable = true, selectedPointSheetVisible = true)
+        )
+
+        val cleanup = HelpTourController.cleanupStep(
+            step = step(HelpTourTarget.FLIGHT_OPPORTUNITY_CARD, HelpTourAction.OPEN_WEATHER),
+            session = weatherPrepare.session,
+            environment = environment(selectedPointAvailable = true, selectedPointSheetVisible = true),
+            finishingTour = false
+        )
+
+        assertEquals(setOf(HelpTourEffect.CLOSE_SELECTED_POINT_DETAILS), cleanup.effects)
+        assertFalse(cleanup.session.openedSelectedPointSheet)
     }
 
     @Test
@@ -142,6 +214,7 @@ class HelpTourControllerTest {
     private fun environment(
         selectedPointAvailable: Boolean = false,
         cameraCenterAvailable: Boolean = true,
+        selectedPointSheetVisible: Boolean = false,
         layerSheetVisible: Boolean = false,
         profileSheetVisible: Boolean = false,
         trafficEnabled: Boolean = false
@@ -149,6 +222,7 @@ class HelpTourControllerTest {
         HelpTourEnvironment(
             selectedPointAvailable = selectedPointAvailable,
             cameraCenterAvailable = cameraCenterAvailable,
+            selectedPointSheetVisible = selectedPointSheetVisible,
             layerSheetVisible = layerSheetVisible,
             profileSheetVisible = profileSheetVisible,
             trafficEnabled = trafficEnabled
