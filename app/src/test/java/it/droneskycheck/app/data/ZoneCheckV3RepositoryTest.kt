@@ -174,6 +174,13 @@ class ZoneCheckV3RepositoryTest {
               {
                 "identity": { "id": "park", "name": "LIPROT123" },
                 "classification": { "type": "ATM09_PARKS", "family": "PROTECTED_AREA" },
+                "authority": {
+                  "authorizationRequired": true,
+                  "authority": {
+                    "emails": ["parco@example.test"],
+                    "note": "Ente Parco"
+                  }
+                },
                 "authorization": {
                   "applicability": "WHEN_ACTIVE",
                   "resolutionStatus": "RESOLVED",
@@ -214,6 +221,9 @@ class ZoneCheckV3RepositoryTest {
         assertEquals("ENTE_PARCO", authorization?.additionalRequirements?.single()?.type)
         assertEquals("PROTECTED_AREA_ATM05", authorization?.reasonCodes?.first())
         assertEquals(1, authorization?.resolverVersion)
+        assertEquals(listOf("parco@example.test"), zone.authority?.emails)
+        assertEquals("parco@example.test", zone.authority?.contact)
+        assertEquals("Ente Parco", zone.authority?.name)
     }
 
     @Test

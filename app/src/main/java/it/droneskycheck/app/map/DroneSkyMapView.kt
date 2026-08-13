@@ -230,10 +230,11 @@ private fun configureMap(
                 MapLayerIds.TRAFFIC_AWARENESS_SYMBOL_LAYER_ID
             )
             val trafficTargetId = trafficFeatures.firstNotNullOfOrNull(::featureToTrafficTargetId)
-            DscLogger.trace(
-                TrafficAwarenessLogTag,
-                "target tap featuresHit=${trafficFeatures.size} id=${trafficTargetId ?: "none"}"
-            )
+            // Paused noisy traffic tap diagnostics during field testing.
+            // DscLogger.trace(
+            //     TrafficAwarenessLogTag,
+            //     "target tap featuresHit=${trafficFeatures.size} id=${trafficTargetId ?: "none"}"
+            // )
             if (trafficTargetId != null) {
                 onTrafficTargetTapped(trafficTargetId)
                 return@addOnMapClickListener true
@@ -530,11 +531,12 @@ private fun updateTrafficAwareness(
         MapLayerIds.TRAFFIC_AWARENESS_SOURCE_ID,
         targetFeatures
     )
-    DscLogger.trace(
-        TrafficAwarenessLogTag,
-        "map source update source=${MapLayerIds.TRAFFIC_AWARENESS_SOURCE_ID} " +
-            "features=${targetFeatures.features().orEmpty().size} styleLoaded=true sourceFound=$targetUpdated"
-    )
+    // Paused noisy traffic source diagnostics during field testing.
+    // DscLogger.trace(
+    //     TrafficAwarenessLogTag,
+    //     "map source update source=${MapLayerIds.TRAFFIC_AWARENESS_SOURCE_ID} " +
+    //         "features=${targetFeatures.features().orEmpty().size} styleLoaded=true sourceFound=$targetUpdated"
+    // )
 
     val radiusFeatures = if (enabled) {
         trafficRadiusFeatureCollection(
@@ -548,12 +550,13 @@ private fun updateTrafficAwareness(
         MapLayerIds.TRAFFIC_AWARENESS_RADIUS_SOURCE_ID,
         radiusFeatures
     )
-    DscLogger.trace(
-        TrafficAwarenessLogTag,
-        "radius update center=${selectedPoint?.let { "${it.lat.coarseTraffic()},${it.lon.coarseTraffic()}" } ?: "none"} " +
-            "radiusKm=${TrafficAwarenessDefaults.DefaultRadiusKm.coarseTraffic(0)} " +
-            "features=${radiusFeatures.features().orEmpty().size} sourceFound=$radiusUpdated"
-    )
+    // Paused noisy traffic radius diagnostics during field testing.
+    // DscLogger.trace(
+    //     TrafficAwarenessLogTag,
+    //     "radius update center=${selectedPoint?.let { "${it.lat.coarseTraffic()},${it.lon.coarseTraffic()}" } ?: "none"} " +
+    //         "radiusKm=${TrafficAwarenessDefaults.DefaultRadiusKm.coarseTraffic(0)} " +
+    //         "features=${radiusFeatures.features().orEmpty().size} sourceFound=$radiusUpdated"
+    // )
 }
 
 private fun centerOnUserLocation(map: MapLibreMap, userLocation: UserLocation) {

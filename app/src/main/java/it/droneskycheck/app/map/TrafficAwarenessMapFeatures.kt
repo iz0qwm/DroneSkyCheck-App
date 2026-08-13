@@ -58,10 +58,11 @@ fun trafficTargetsFeatureCollection(
             )
         }
     }
-    DscLogger.trace(
-        TrafficAwarenessLogTag,
-        "GeoJSON build inputTargets=${targets.size} features=${features.size}"
-    )
+    // Paused noisy traffic GeoJSON diagnostics during field testing.
+    // DscLogger.trace(
+    //     TrafficAwarenessLogTag,
+    //     "GeoJSON build inputTargets=${targets.size} features=${features.size}"
+    // )
     return FeatureCollection.fromFeatures(features)
 }
 

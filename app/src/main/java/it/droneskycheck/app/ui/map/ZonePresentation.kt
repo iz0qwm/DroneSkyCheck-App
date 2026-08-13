@@ -44,6 +44,7 @@ internal data class NotamPresentation(
     val code: String,
     val statusLabel: String,
     val body: String,
+    val reasonText: String?,
     val activitySchedule: String?,
     val validity: String?,
     val operationalStatus: String?,
@@ -106,7 +107,7 @@ internal fun NotamInfo.presentation(): NotamPresentation {
     val hasBlockingEffect = blockingReason != null || severityCode in setOf("HARD", "SOFT", "BLOCKER", "WARNING")
     val isInfo = severityCode in setOf("INFO", "INFORMATION") || !hasBlockingEffect
     val status = when {
-        hasBlockingEffect -> "Verifica necessaria"
+        hasBlockingEffect -> "Restrizione temporanea"
         isInfo -> "Informativo"
         validity?.activeNow == true -> "Attivo"
         else -> "Da verificare"
@@ -128,6 +129,12 @@ internal fun NotamInfo.presentation(): NotamPresentation {
                 .ifBlank { "Consulta il testo ufficiale prima dell'operazione." }
     }
 
+    val displayBody = if (hasBlockingEffect) {
+        "Restrizione temporanea pubblicata tramite NOTAM. Consulta motivo, validita e testo ufficiale prima dell'operazione."
+    } else {
+        body
+    }
+
     val schedule = schedule?.readableSchedule()
         ?: validity?.interpretedSchedule
         ?: validity?.schedule.readableScheduleText()
@@ -135,7 +142,8 @@ internal fun NotamInfo.presentation(): NotamPresentation {
     return NotamPresentation(
         code = code.orEmpty(),
         statusLabel = status,
-        body = body.cleanItalianUiText(),
+        body = displayBody.cleanItalianUiText(),
+        reasonText = official.notamReasonText().cleanItalianUiTextOrNull(),
         activitySchedule = schedule.cleanItalianUiTextOrNull(),
         validity = validity?.validityRangeLabel(),
         operationalStatus = blockingReason?.toDscUserText(),
@@ -143,8 +151,17 @@ internal fun NotamInfo.presentation(): NotamPresentation {
     )
 }
 
+internal fun AuthorizationInfo.notamTemporaryRestrictionNotice(): String? {
+    val isNotamManualCheck = resolutionStatus.equals("MANUAL_CHECK", ignoreCase = true) &&
+        reasonCodes.any { it.equals("NOTAM_REQUIRES_MANUAL_CHECK", ignoreCase = true) }
+    if (!isNotamManualCheck) return null
+
+    return "Il sistema automatico di richiesta autorizzazioni di Drone Sky Check non e applicabile alle restrizioni temporanee pubblicate tramite NOTAM."
+}
+
 internal fun AuthorizationInfo.manualCheckSummary(): Pair<String, String>? {
     if (!resolutionStatus.equals("MANUAL_CHECK", ignoreCase = true)) return null
+    if (notamTemporaryRestrictionNotice() != null) return null
 
     return "VERIFICA NECESSARIA" to
         "Drone Sky Check non può determinare automaticamente l'effetto operativo di questa zona. Consulta le informazioni ufficiali prima dell'operazione."
@@ -318,7 +335,7 @@ private fun String.toItalianScheduleClauses(): String? {
 }
 
 private fun String.toItalianDelimitedScheduleClauses(): String? {
-    val clauses = split(";").mapNotNull { segment ->
+    val clauses = split(DelimitedScheduleClauseSeparatorRegex).mapNotNull { segment ->
         val dayMatch = DayExpressionRegex.find(segment) ?: return@mapNotNull null
         val dayText = formatDayExpression(dayMatch.value) ?: return@mapNotNull null
         val body = segment.substring(dayMatch.range.last + 1)
@@ -362,23 +379,46 @@ private fun String.toItalianScheduleTimeText(): String? {
     if (Regex("""\bH24\b""").containsMatchIn(this)) return "24 ore su 24 UTC"
     if (Regex("""\bHJ\b""").containsMatchIn(this)) return "da alba a tramonto"
     if (Regex("""\bHN\b""").containsMatchIn(this)) return "da tramonto ad alba"
-    if (Regex("""\b(SR|SUNRISE)(?:[+-]\d+)?\s*-\s*(SS|SUNSET)(?:[+-]\d+)?\b""").containsMatchIn(this)) {
-        return "da alba a tramonto, secondo gli offset pubblicati"
-    }
-    if (Regex("""\b(SS|SUNSET)(?:[+-]\d+)?\s*-\s*(SR|SUNRISE)(?:[+-]\d+)?\b""").containsMatchIn(this)) {
-        return "da tramonto ad alba, secondo gli offset pubblicati"
-    }
 
-    val ranges = TimeRangeRegex
+    val ranges = AeronauticalTimeRangeRegex
         .findAll(this)
         .mapNotNull { match ->
-            val start = formatUtcHourMinute(match.groupValues[1], match.groupValues[2])
-            val end = formatUtcHourMinute(match.groupValues[3], match.groupValues[4])
-            if (start != null && end != null) "dalle $start alle $end UTC" else null
+            formatAeronauticalTimeRange(match.groupValues[1], match.groupValues[2])
         }
         .toList()
 
     return ranges.takeIf { it.isNotEmpty() }?.joinToString(", ")
+}
+
+private fun formatAeronauticalTimeRange(startToken: String, endToken: String): String? {
+    val start = formatAeronauticalRangeToken(startToken, isStart = true, otherToken = endToken) ?: return null
+    val end = formatAeronauticalRangeToken(endToken, isStart = false, otherToken = startToken) ?: return null
+    return "$start $end".trim()
+}
+
+private fun formatAeronauticalRangeToken(token: String, isStart: Boolean, otherToken: String): String? {
+    val time = token.toUtcHourMinuteToken()
+    if (time != null) {
+        val otherIsTime = otherToken.toUtcHourMinuteToken() != null
+        val suffix = if (!isStart || !otherIsTime) " UTC" else ""
+        return "${if (isStart) "dalle" else "alle"} $time$suffix"
+    }
+
+    val value = token.uppercase()
+    return when {
+        value == "SR" || value == "SUNRISE" -> if (isStart) "dall'alba" else "all'alba"
+        value == "SS" || value == "SUNSET" -> if (isStart) "dal tramonto" else "al tramonto"
+        value.startsWith("SR") || value.startsWith("SUNRISE") ->
+            if (isStart) "dall'alba secondo offset pubblicato" else "all'alba secondo offset pubblicato"
+        value.startsWith("SS") || value.startsWith("SUNSET") ->
+            if (isStart) "dal tramonto secondo offset pubblicato" else "al tramonto secondo offset pubblicato"
+        else -> null
+    }
+}
+
+private fun String.toUtcHourMinuteToken(): String? {
+    val match = Regex("""^(\d{2})(\d{2})$""").matchEntire(this) ?: return null
+    return formatUtcHourMinute(match.groupValues[1], match.groupValues[2])
 }
 
 private fun String.toItalianHolidayText(): String? {
@@ -516,6 +556,21 @@ internal fun String.toDscUserText(): String =
         else -> this.cleanItalianUiText()
     }
 
+private fun it.droneskycheck.app.data.OfficialInfo?.notamReasonText(): String? {
+    if (this == null) return null
+    fields.firstOrNull { it.key.equals("E", ignoreCase = true) }?.value?.let { return it }
+    sourceText?.let { text ->
+        Regex("""(?:^|\s)E\)\s*([\s\S]*?)(?=(?:\s(?:F|G)\)\s)|$)""", RegexOption.IGNORE_CASE)
+            .find(text)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.let { return it }
+    }
+    return null
+}
+
 private fun String.normalizedForUiDedup(): String =
     lowercase()
         .replace(Regex("[^a-z0-9àèéìòù]+"), " ")
@@ -530,6 +585,8 @@ private val DayExpressionRegex = Regex("""\b(?:MON|TUE|WED|THU|FRI|SAT|SUN)(?:\s
 private val DayClauseRegex = Regex("""\b((?:MON|TUE|WED|THU|FRI|SAT|SUN)(?:\s*(?:-|,|\s)\s*(?:MON|TUE|WED|THU|FRI|SAT|SUN))*)\s*:""")
 private val StrictDayRangeRegex = Regex("""^(MON|TUE|WED|THU|FRI|SAT|SUN)\s*-\s*(MON|TUE|WED|THU|FRI|SAT|SUN)$""")
 private val TimeRangeRegex = Regex("""\b(\d{2})(\d{2})\s*-\s*(\d{2})(\d{2})\b""")
+private val AeronauticalTimeRangeRegex = Regex("""\b(\d{4}|SR(?:[+-]\d+)?|SS(?:[+-]\d+)?|SUNRISE(?:[+-]\d+)?|SUNSET(?:[+-]\d+)?)\s*-\s*(\d{4}|SR(?:[+-]\d+)?|SS(?:[+-]\d+)?|SUNRISE(?:[+-]\d+)?|SUNSET(?:[+-]\d+)?)\b""")
+private val DelimitedScheduleClauseSeparatorRegex = Regex(""";\s*|,\s*(?=(?:MON|TUE|WED|THU|FRI|SAT|SUN)\b)""")
 private val FromToDayTimeRegex = Regex("""\b(?:DA|FROM)\s+(MON|TUE|WED|THU|FRI|SAT|SUN)\s+(\d{2})(\d{2})\s+(?:A|TO)\s+(MON|TUE|WED|THU|FRI|SAT|SUN)\s+(\d{2})(\d{2})\b""")
 private val InactivePeriodRegex = Regex("""\bNON\s+ATTIVA\s*:?\s*(\d{1,2})\s+([A-Z]{3})\s*-\s*(\d{1,2})\s+([A-Z]{3})\b""")
 private val ParenthesizedTextRegex = Regex("""\([^)]*\)""")

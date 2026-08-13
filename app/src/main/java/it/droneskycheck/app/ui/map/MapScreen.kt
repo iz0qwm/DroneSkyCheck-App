@@ -755,6 +755,8 @@ private fun MapControlsToolbar(
             MapActionFab(
                 label = "Zone",
                 direction = MapActionDirection.Up,
+                containerColor = mapToggleContainerColor(active = hiddenCount == 0),
+                contentColor = mapToggleContentColor(active = hiddenCount == 0),
                 onClick = {
                     expanded = false
                     onLayersClick()
@@ -795,16 +797,8 @@ private fun MapControlsToolbar(
             MapActionFab(
                 label = "Posizione",
                 direction = MapActionDirection.Up,
-                containerColor = if (isLocationEnabled) {
-                    MaterialTheme.colorScheme.primaryContainer
-                } else {
-                    MaterialTheme.colorScheme.surface
-                },
-                contentColor = if (isLocationEnabled) {
-                    MaterialTheme.colorScheme.onPrimaryContainer
-                } else {
-                    MaterialTheme.colorScheme.onSurface
-                },
+                containerColor = mapToggleContainerColor(active = isLocationEnabled),
+                contentColor = mapToggleContentColor(active = isLocationEnabled),
                 onClick = {
                     expanded = false
                     onLocationClick()
@@ -837,16 +831,8 @@ private fun MapControlsToolbar(
                 label = "Traffico",
                 direction = MapActionDirection.Up,
                 contentDescription = trafficAwarenessButtonContentDescription(trafficAwareness),
-                containerColor = if (trafficAwareness.enabled) {
-                    MaterialTheme.colorScheme.primaryContainer
-                } else {
-                    MaterialTheme.colorScheme.surface
-                },
-                contentColor = if (trafficAwareness.enabled) {
-                    MaterialTheme.colorScheme.onPrimaryContainer
-                } else {
-                    MaterialTheme.colorScheme.onSurface
-                },
+                containerColor = mapToggleContainerColor(active = trafficAwareness.enabled),
+                contentColor = mapToggleContentColor(active = trafficAwareness.enabled),
                 onClick = {
                     expanded = false
                     onTrafficClick()
@@ -949,6 +935,14 @@ private fun MapControlsToolbar(
         }
     }
 }
+
+@Composable
+private fun mapToggleContainerColor(active: Boolean): Color =
+    if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface
+
+@Composable
+private fun mapToggleContentColor(active: Boolean): Color =
+    if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
 
 private enum class MapActionDirection {
     Up,
@@ -2043,7 +2037,10 @@ private fun PlanningWorkflowCard(
     val areaCount = operation.areaPoints.size
     Card(
         modifier = modifier,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+            contentColor = MaterialTheme.colorScheme.onSurface
+        ),
         shape = MaterialTheme.shapes.large,
         elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
     ) {
@@ -2058,7 +2055,8 @@ private fun PlanningWorkflowCard(
                     "2. Area operativa"
                 },
                 style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface
             )
             Text(
                 text = if (draft.workflowStep == AuthorizationWorkflowSteps.Takeoff) {
@@ -2160,6 +2158,7 @@ private fun DraftMapLine(label: String, value: String) {
             text = value,
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurface,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis
         )
@@ -3700,7 +3699,11 @@ private fun ZoneInfoCard(
                 EnrSection(zone.enr)
                 SupSection(zone.sup)
                 UasGeographicalZoneSection(zone.uasGeographicalZone)
-                AuthorizationSection(zone.authorization, onAuthorizationRequest)
+                AuthorizationSection(
+                    authorization = zone.authorization,
+                    authority = zone.displayAuthority(),
+                    onAuthorizationRequest = onAuthorizationRequest
+                )
                 AuthoritySection(zone.authority)
                 zone.blockers.filterRelevantFor(zone).takeIf { it.isNotEmpty() }?.let {
                     ZoneOptionalDetail("Attenzione", it.joinIssues())
@@ -4161,6 +4164,7 @@ private fun NotamSection(notams: List<NotamInfo>) {
                 ZoneOptionalDetail("FIR", notam.fir)
                 ZoneOptionalDetail("Località", notam.location)
                 ZoneOptionalDetail("Zona", notam.zoneReference)
+                ZoneOptionalDetail("Motivo del NOTAM", presentation.reasonText)
                 ZoneOptionalDetail("Orari", presentation.activitySchedule)
                 ZoneOptionalDetail("Validità", presentation.validity)
                 ZoneOptionalDetail("Stato operativo", presentation.operationalStatus)
@@ -4300,6 +4304,7 @@ private fun SupSection(sup: SupInfo?) {
         ValiditySection(sup.validity)
         AuthorizationSection(
             authorization = sup.authorization,
+            authority = sup.authority,
             onAuthorizationRequest = {},
             allowDraftCreation = false
         )
@@ -4324,10 +4329,21 @@ private fun UasGeographicalZoneSection(uasGeographicalZone: UasGeographicalZoneI
 @Composable
 private fun AuthorizationSection(
     authorization: AuthorizationInfo?,
+    authority: AuthorityInfo? = null,
     onAuthorizationRequest: () -> Unit,
     allowDraftCreation: Boolean = true
 ) {
     if (authorization == null || !authorization.hasContent()) return
+    val notamNotice = authorization.notamTemporaryRestrictionNotice()
+    if (notamNotice != null) {
+        ZoneSection(title = "Autorizzazioni") {
+            Text(
+                text = notamNotice,
+                style = MaterialTheme.typography.bodyLarge
+            )
+        }
+        return
+    }
     val manualCheck = authorization.manualCheckSummary()
 
     ZoneSection(title = "Autorizzazioni") {
@@ -4338,7 +4354,7 @@ private fun AuthorizationSection(
         } else {
             ZoneOptionalDetail("Richiesta", authorization.requiredText())
         }
-        ZoneOptionalDetail("Requisiti aggiuntivi", authorization.additionalRequirements.formatAdditionalRequirements())
+        ZoneOptionalDetail("Invio richieste a", authority.formatRequestContacts())
         ZoneOptionalDetail("Requisito", authorization.requirement.usableAuthorizationText())
         ZoneOptionalDetail("Operazioni", authorization.operationSummary())
         ZoneOptionalDetail("Attestato di competenza minimo richiesto", authorization.requiredLicense.formatRequiredLicense())
@@ -4627,10 +4643,14 @@ private fun ZoneInfo.primaryDescription(): String? =
         uasGeographicalZone?.description,
         description
     )
-        .mapNotNull { it.usableUserText() }
+        .mapNotNull { it.usableMultilineUserText() }
         .distinctBy { it.lowercase() }
         .joinToString("\n\n")
         .takeIf { it.isNotBlank() }
+
+private fun ZoneInfo.displayAuthority(): AuthorityInfo? =
+    listOfNotNull(authority, enr?.authority, sup?.authority, uasGeographicalZone?.authority)
+        .firstOrNull { it.hasContent() }
 
 private fun ValidityInfo.statusLabel(): String? =
     when {
@@ -5545,6 +5565,15 @@ private fun String?.usableUserText(): String? =
     this?.cleanUserText()
         ?.takeUnless { it.isBlank() || it.equals("NIL", ignoreCase = true) }
 
+private fun String?.usableMultilineUserText(): String? =
+    this
+        ?.replace(Regex("""<br\s*/?>""", RegexOption.IGNORE_CASE), "\n")
+        ?.lineSequence()
+        ?.map { it.cleanUserText() }
+        ?.filter { it.isNotBlank() && !it.equals("NIL", ignoreCase = true) }
+        ?.joinToString("\n")
+        ?.takeIf { it.isNotBlank() }
+
 private fun String?.usableAuthorizationText(): String? =
     usableUserText()
         ?.takeUnless { it.isNoLikeValue() }
@@ -5814,7 +5843,8 @@ private fun String.toWorkflowLabel(): String =
         else -> this
     }
 
-private fun AuthorityInfo.formatRequestContacts(): String? {
+private fun AuthorityInfo?.formatRequestContacts(): String? {
+    if (this == null) return null
     val chunks = listOfNotNull(name, contact, source)
     val objects = chunks.mapNotNull { it.parseJsonObjectOrNull() }
     val note = note

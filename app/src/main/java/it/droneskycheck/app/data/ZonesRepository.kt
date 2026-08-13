@@ -9,12 +9,22 @@ import java.util.Locale
 import kotlin.math.ceil
 import kotlin.math.floor
 
-class ZonesRepository(
-    context: Context,
+class ZonesRepository internal constructor(
+    cacheDir: File,
     private val endpointUrl: String = DscApiConfig.ZonesUrl,
     private val apiKey: String = DscApiConfig.ApiKey
 ) {
-    private val cacheDir = File(context.cacheDir, "dsc_zones_api").apply {
+    constructor(
+        context: Context,
+        endpointUrl: String = DscApiConfig.ZonesUrl,
+        apiKey: String = DscApiConfig.ApiKey
+    ) : this(
+        cacheDir = File(context.cacheDir, "dsc_zones_api"),
+        endpointUrl = endpointUrl,
+        apiKey = apiKey
+    )
+
+    private val cacheDir = cacheDir.apply {
         mkdirs()
     }
 
@@ -24,23 +34,32 @@ class ZonesRepository(
     fun getZonesResult(bbox: String, type: String): CachedGeoJson {
         val normalizedBbox = normalizeBbox(bbox)
         val cacheFile = File(cacheDir, "${type.lowercase()}_${normalizedBbox.cacheSafeName()}.geojson")
+        val cacheKey = "${type.uppercase(Locale.US)}:${normalizedBbox.cacheSafeName()}"
         val now = System.currentTimeMillis()
+        val cacheTtlMillis = cacheTtlMillis(type)
 
-        if (cacheFile.exists() && now - cacheFile.lastModified() < CacheTtlMillis) {
+        if (cacheFile.exists() && now - cacheFile.lastModified() < cacheTtlMillis) {
             return CachedGeoJson(cacheFile.readText(Charsets.UTF_8), degraded = false)
         }
 
-        return runCatching {
-            fetchZones(normalizedBbox, type).also { body ->
-                cacheFile.writeText(body, Charsets.UTF_8)
-            }.let { body ->
-                CachedGeoJson(body, degraded = false)
+        synchronized(requestLock(cacheKey)) {
+            val lockedNow = System.currentTimeMillis()
+            if (cacheFile.exists() && lockedNow - cacheFile.lastModified() < cacheTtlMillis) {
+                return CachedGeoJson(cacheFile.readText(Charsets.UTF_8), degraded = false)
             }
-        }.getOrElse { error ->
-            if (cacheFile.exists()) {
-                CachedGeoJson(cacheFile.readText(Charsets.UTF_8), degraded = true)
-            } else {
-                throw error
+
+            return runCatching {
+                fetchZones(normalizedBbox, type).also { body ->
+                    cacheFile.writeText(body, Charsets.UTF_8)
+                }.let { body ->
+                    CachedGeoJson(body, degraded = false)
+                }
+            }.getOrElse { error ->
+                if (cacheFile.exists()) {
+                    CachedGeoJson(cacheFile.readText(Charsets.UTF_8), degraded = true)
+                } else {
+                    throw error
+                }
             }
         }
     }
@@ -97,10 +116,23 @@ class ZonesRepository(
             .replace(".", "p")
             .replace(",", "_")
 
+    private fun cacheTtlMillis(type: String): Long =
+        when (type.uppercase(Locale.US)) {
+            "TACTICAL", "CORRIDOR" -> LongLivedZonesCacheTtlMillis
+            else -> CacheTtlMillis
+        }
+
     private companion object {
         const val TimeoutMillis = 8_000
         const val CacheTtlMillis = 7L * 24L * 60L * 60L * 1000L
+        const val LongLivedZonesCacheTtlMillis = 30L * 24L * 60L * 60L * 1000L
         const val BboxGridDegrees = 0.1
         const val BboxPaddingDegrees = 0.03
+        val RequestLocks = mutableMapOf<String, Any>()
+
+        fun requestLock(key: String): Any =
+            synchronized(RequestLocks) {
+                RequestLocks.getOrPut(key) { Any() }
+            }
     }
 }

@@ -2,6 +2,7 @@ package it.droneskycheck.app.ui.map
 
 import it.droneskycheck.app.data.AuthorizationInfo
 import it.droneskycheck.app.data.EnrInfo
+import it.droneskycheck.app.data.KeyValueInfo
 import it.droneskycheck.app.data.NotamInfo
 import it.droneskycheck.app.data.OfficialInfo
 import it.droneskycheck.app.data.ScheduleInfo
@@ -232,6 +233,43 @@ class ZonePresentationTest {
     }
 
     @Test
+    fun temporalDetailsParsesDailyScheduleEndingAtSunset() {
+        val details = zone(
+            activeNow = true,
+            enr = enr(
+                schedule = ScheduleInfo(
+                    raw = "DAILY 1000-SS",
+                    human = null,
+                    activeNow = true,
+                    explanation = null
+                )
+            )
+        ).temporalDetailsPresentation()
+
+        assertEquals("Ogni giorno dalle 10:00 UTC al tramonto", details.activitySchedule)
+    }
+
+    @Test
+    fun temporalDetailsKeepsSingleWeekdayInCommaSeparatedGroups() {
+        val details = zone(
+            activeNow = true,
+            enr = enr(
+                schedule = ScheduleInfo(
+                    raw = "MON-THU 0500-2100, FRI 0500-1700",
+                    human = null,
+                    activeNow = true,
+                    explanation = null
+                )
+            )
+        ).temporalDetailsPresentation()
+
+        assertEquals(
+            "Da luned\u00EC a gioved\u00EC dalle 05:00 alle 21:00 UTC; Venerd\u00EC dalle 05:00 alle 17:00 UTC",
+            details.activitySchedule
+        )
+    }
+
+    @Test
     fun temporalDetailsFallsBackToBackendHumanScheduleWhenRawIsNotRecognized() {
         val details = zone(
             activeNow = true,
@@ -315,6 +353,59 @@ class ZonePresentationTest {
         assertFalse(presentation.body.contains("Spiegazione DSC"))
         assertFalse(presentation.body.contains("Significato operativo"))
         assertEquals(official.sourceText, presentation.official?.sourceText)
+    }
+
+    @Test
+    fun notamPresentationShowsReasonFromOfficialFieldE() {
+        val presentation = NotamInfo(
+            code = "W1234/26",
+            fir = "LIXX",
+            location = null,
+            zoneReference = null,
+            activityType = null,
+            severity = "HARD",
+            summary = null,
+            explanation = null,
+            operationalMeaning = null,
+            blockingReason = "ACTIVE_HARD_NOTAM",
+            schedule = ScheduleInfo(
+                raw = "DAILY 1000-SS",
+                human = null,
+                activeNow = true,
+                explanation = null
+            ),
+            official = OfficialInfo(
+                sourceText = "W1234/26 NOTAMN Q) LIXX/QXXXX A) LIXX E) UAS ACTIVITY WILL TAKE PLACE",
+                sourceReference = null,
+                qLine = null,
+                fields = listOf(KeyValueInfo("E", "UAS ACTIVITY WILL TAKE PLACE"))
+            ),
+            validity = null
+        ).presentation()
+
+        assertEquals("Restrizione temporanea", presentation.statusLabel)
+        assertEquals("UAS ACTIVITY WILL TAKE PLACE", presentation.reasonText)
+        assertFalse(presentation.body.contains("non puÃ² determinare automaticamente"))
+    }
+
+    @Test
+    fun notamAuthorizationUsesSingleShortNotice() {
+        val authorization = AuthorizationInfo(
+            required = null,
+            requirement = null,
+            operationMode = null,
+            operationCategory = null,
+            requiredLicense = null,
+            explanation = "Verifica manuale necessaria",
+            resolutionStatus = "MANUAL_CHECK",
+            reasonCodes = listOf("NOTAM_REQUIRES_MANUAL_CHECK")
+        )
+
+        assertEquals(null, authorization.manualCheckSummary())
+        assertEquals(
+            "Il sistema automatico di richiesta autorizzazioni di Drone Sky Check non e applicabile alle restrizioni temporanee pubblicate tramite NOTAM.",
+            authorization.notamTemporaryRestrictionNotice()
+        )
     }
 
     @Test
