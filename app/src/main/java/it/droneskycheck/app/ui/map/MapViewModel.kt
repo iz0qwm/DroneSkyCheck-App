@@ -27,6 +27,19 @@ import it.droneskycheck.app.data.flight.FlightOpportunityLevel
 import it.droneskycheck.app.data.flight.FlightOpportunityResult
 import it.droneskycheck.app.data.flight.FlightOpportunityStatus
 import it.droneskycheck.app.data.flight.FlightOpportunityWeatherSlot
+import it.droneskycheck.app.data.help.ActiveHelpOnboarding
+import it.droneskycheck.app.data.help.HelpManifest
+import it.droneskycheck.app.data.help.HelpManifestClient
+import it.droneskycheck.app.data.help.HelpManifestUpdateResult
+import it.droneskycheck.app.data.help.HelpOnboardingPolicy
+import it.droneskycheck.app.data.help.HelpOnboardingReason
+import it.droneskycheck.app.data.help.HelpPreferences
+import it.droneskycheck.app.data.help.HelpTourController
+import it.droneskycheck.app.data.help.HelpTourEffect
+import it.droneskycheck.app.data.help.HelpTourEnvironment
+import it.droneskycheck.app.data.help.HelpTourSession
+import it.droneskycheck.app.data.help.InMemoryHelpManifestClient
+import it.droneskycheck.app.data.help.InMemoryHelpPreferences
 import it.droneskycheck.app.data.weather.WeatherAssessmentEngine
 import it.droneskycheck.app.data.weather.WeatherForecast
 import it.droneskycheck.app.data.weather.WeatherForecastClient
@@ -72,11 +85,14 @@ class MapViewModel(
     private val flightOpportunityEngine: FlightOpportunityEngine = FlightOpportunityEngine(),
     private val droneTechnicalCatalog: DroneTechnicalCatalogClient = InMemoryDroneTechnicalCatalogClient(),
     private val mapPreferences: MapPreferences = InMemoryMapPreferences(),
+    private val helpRepository: HelpManifestClient = InMemoryHelpManifestClient(),
+    private val helpPreferences: HelpPreferences = InMemoryHelpPreferences(),
     private val localPilotStore: LocalPilotStore = InMemoryLocalPilotStore(),
     private val clock: Clock = Clock.systemUTC(),
     private val timelineZoneId: ZoneId = ZoneId.systemDefault(),
     private val trafficAwarenessPollingIntervalMillis: Long = TrafficAwarenessDefaults.PollingIntervalMillis,
     private val trafficAwarenessRadiusKm: Double = TrafficAwarenessDefaults.DefaultRadiusKm,
+    private val loadHelpOnInit: Boolean = true,
     externalScope: CoroutineScope? = null
 ) : ViewModel() {
     private val scope = externalScope ?: viewModelScope
@@ -88,6 +104,12 @@ class MapViewModel(
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
     val trafficAlertEvents: SharedFlow<TrafficAlertEvent> = _trafficAlertEvents.asSharedFlow()
+    private val _helpTourUiCommands = MutableSharedFlow<HelpTourUiCommand>(
+        replay = 0,
+        extraBufferCapacity = 4,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
+    val helpTourUiCommands: SharedFlow<HelpTourUiCommand> = _helpTourUiCommands.asSharedFlow()
 
     private var selectionRequestId = 0L
     private var verdictJob: Job? = null
@@ -101,7 +123,228 @@ class MapViewModel(
 
     init {
         loadTrafficAlertPreferences()
+        if (loadHelpOnInit) loadHelpManifest()
         loadDroneCatalogAndFleet()
+    }
+
+    fun requestHelpOnboardingReplay(profileSheetVisible: Boolean = false) {
+        val manifest = _uiState.value.helpManifest
+        if (manifest.contentVersion > 0) {
+            startHelpOnboarding(manifest, HelpOnboardingReason.REPLAY_REQUESTED, profileSheetVisible)
+            return
+        }
+        scope.launch {
+            val loaded = withContext(Dispatchers.IO) {
+                helpRepository.getCurrentManifest()
+            }
+            _uiState.value = _uiState.value.copy(helpManifest = loaded)
+            startHelpOnboarding(loaded, HelpOnboardingReason.REPLAY_REQUESTED, profileSheetVisible)
+        }
+    }
+
+    fun onHelpOnboardingNext(profileSheetVisible: Boolean = false) {
+        val active = _uiState.value.activeHelpOnboarding ?: return
+        if (active.isLastStep) {
+            finishHelpOnboarding(profileSheetVisible)
+        } else {
+            moveHelpOnboarding(direction = 1, profileSheetVisible = profileSheetVisible)
+        }
+    }
+
+    fun onHelpOnboardingPrevious(profileSheetVisible: Boolean = false) {
+        val active = _uiState.value.activeHelpOnboarding ?: return
+        if (active.isFirstStep) return
+        moveHelpOnboarding(direction = -1, profileSheetVisible = profileSheetVisible)
+    }
+
+    fun onHelpOnboardingSkipped(profileSheetVisible: Boolean = false) {
+        cleanupHelpTour(profileSheetVisible)
+        markHelpOnboardingSeen(_uiState.value.helpManifest)
+        _uiState.value = _uiState.value.copy(activeHelpOnboarding = null)
+    }
+
+    private fun finishHelpOnboarding(profileSheetVisible: Boolean = false) {
+        cleanupHelpTour(profileSheetVisible)
+        markHelpOnboardingSeen(_uiState.value.helpManifest)
+        _uiState.value = _uiState.value.copy(activeHelpOnboarding = null)
+    }
+
+    private fun loadHelpManifest() {
+        scope.launch {
+            val manifest = withContext(Dispatchers.IO) {
+                helpRepository.getCurrentManifest()
+            }
+            _uiState.value = _uiState.value.copy(helpManifest = manifest)
+            maybeStartInitialHelpOnboarding(manifest)
+
+            val update = withContext(Dispatchers.IO) {
+                helpRepository.checkForUpdatesIfDue()
+            }
+            if (update is HelpManifestUpdateResult.Installed) {
+                val updatedManifest = withContext(Dispatchers.IO) {
+                    helpRepository.getCurrentManifest()
+                }
+                _uiState.value = _uiState.value.copy(helpManifest = updatedManifest)
+                val decision = HelpOnboardingPolicy.evaluate(
+                    lastSeenOnboardingVersion = helpPreferences.getLastSeenOnboardingVersion(),
+                    lastSeenContentVersion = helpPreferences.getLastSeenContentVersion(),
+                    manifest = updatedManifest,
+                    replayRequested = false
+                )
+                if (decision.newFeaturesAvailable) {
+                    DscLogger.debug(LogTag, "Help: new guide content available without automatic full tour")
+                }
+            }
+        }
+    }
+
+    private fun maybeStartInitialHelpOnboarding(manifest: HelpManifest) {
+        val decision = HelpOnboardingPolicy.evaluate(
+            lastSeenOnboardingVersion = helpPreferences.getLastSeenOnboardingVersion(),
+            lastSeenContentVersion = helpPreferences.getLastSeenContentVersion(),
+            manifest = manifest,
+            replayRequested = false
+        )
+        if (decision.shouldShowFullTour) {
+            startHelpOnboarding(manifest, HelpOnboardingReason.FIRST_RUN, profileSheetVisible = false)
+        }
+    }
+
+    private fun startHelpOnboarding(
+        manifest: HelpManifest,
+        reason: HelpOnboardingReason,
+        profileSheetVisible: Boolean
+    ) {
+        val steps = manifest.onboardingSteps.take(MaxHelpTourSteps)
+        if (steps.isEmpty()) return
+        val environment = helpTourEnvironment(profileSheetVisible)
+        val firstIndex = steps.indexOfFirst { HelpTourController.canShow(it, environment) }
+        if (firstIndex < 0) return
+        val session = HelpTourController.initialSession(environment)
+        _uiState.value = _uiState.value.copy(
+            activeHelpOnboarding = ActiveHelpOnboarding(
+                reason = reason,
+                steps = steps,
+                session = session,
+                currentIndex = firstIndex
+            )
+        )
+        prepareCurrentHelpStep(profileSheetVisible)
+    }
+
+    private fun moveHelpOnboarding(
+        direction: Int,
+        profileSheetVisible: Boolean = false
+    ) {
+        val active = _uiState.value.activeHelpOnboarding ?: return
+        val currentCleanup = HelpTourController.cleanupStep(
+            step = active.currentStep,
+            session = active.session,
+            environment = helpTourEnvironment(profileSheetVisible),
+            finishingTour = false
+        )
+        applyHelpTourEffects(currentCleanup.effects)
+
+        val nextIndex = generateSequence(active.currentIndex + direction) { it + direction }
+            .takeWhile { it in active.steps.indices }
+            .firstOrNull { index ->
+                HelpTourController.canShow(
+                    active.steps[index],
+                    helpTourEnvironment(profileSheetVisible)
+                )
+            }
+            ?: run {
+                finishHelpOnboarding(profileSheetVisible)
+                return
+            }
+        _uiState.value = _uiState.value.copy(
+            activeHelpOnboarding = active.copy(
+                currentIndex = nextIndex,
+                session = currentCleanup.session
+            )
+        )
+        prepareCurrentHelpStep(profileSheetVisible)
+    }
+
+    fun onHelpTourProfileVisibilityChanged(visible: Boolean) {
+        prepareCurrentHelpStep(profileSheetVisible = visible)
+    }
+
+    private fun prepareCurrentHelpStep(profileSheetVisible: Boolean) {
+        val active = _uiState.value.activeHelpOnboarding ?: return
+        val step = active.currentStep ?: return
+        val plan = HelpTourController.prepareStep(
+            step = step,
+            session = active.session,
+            environment = helpTourEnvironment(profileSheetVisible)
+        )
+        _uiState.value = _uiState.value.copy(
+            activeHelpOnboarding = active.copy(session = plan.session)
+        )
+        applyHelpTourEffects(plan.effects)
+    }
+
+    private fun cleanupHelpTour(profileSheetVisible: Boolean) {
+        val active = _uiState.value.activeHelpOnboarding ?: return
+        val currentCleanup = HelpTourController.cleanupStep(
+            step = active.currentStep,
+            session = active.session,
+            environment = helpTourEnvironment(profileSheetVisible),
+            finishingTour = true
+        )
+        applyHelpTourEffects(currentCleanup.effects)
+        val finalCleanup = HelpTourController.cleanupTour(
+            session = currentCleanup.session,
+            environment = helpTourEnvironment(profileSheetVisible)
+        )
+        applyHelpTourEffects(finalCleanup.effects)
+    }
+
+    private fun helpTourEnvironment(profileSheetVisible: Boolean): HelpTourEnvironment =
+        HelpTourEnvironment(
+            selectedPointAvailable = _uiState.value.selectedPoint != null,
+            cameraCenterAvailable = _uiState.value.cameraBounds != null,
+            layerSheetVisible = _uiState.value.isLayerSheetVisible,
+            profileSheetVisible = profileSheetVisible,
+            trafficEnabled = _uiState.value.trafficAwareness.enabled
+        )
+
+    private fun applyHelpTourEffects(effects: Set<HelpTourEffect>) {
+        effects.forEach { effect ->
+            when (effect) {
+                HelpTourEffect.OPEN_ZONES -> onLayerPanelRequested()
+                HelpTourEffect.CLOSE_ZONES -> onLayerPanelDismissed()
+                HelpTourEffect.OPEN_PROFILE -> _helpTourUiCommands.tryEmit(HelpTourUiCommand.OpenProfile)
+                HelpTourEffect.CLOSE_PROFILE -> _helpTourUiCommands.tryEmit(HelpTourUiCommand.CloseProfile)
+                HelpTourEffect.ENABLE_TRAFFIC -> enableTrafficAwareness()
+                HelpTourEffect.DISABLE_TRAFFIC -> disableTrafficAwareness()
+                HelpTourEffect.OPEN_SELECTED_POINT_DETAILS -> {
+                    if (_uiState.value.selectedPoint != null) {
+                        _uiState.value = _uiState.value.copy(isZoneSheetVisible = true)
+                    }
+                }
+                HelpTourEffect.OPEN_WEATHER -> {
+                    if (_uiState.value.selectedPoint != null) {
+                        if (!_uiState.value.isOperationalContextRequested) {
+                            onOperationalContextRequested()
+                        }
+                        _uiState.value = _uiState.value.copy(
+                            isOperationalReportExpanded = true,
+                            isZoneSheetVisible = true
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private fun markHelpOnboardingSeen(manifest: HelpManifest) {
+        if (manifest.onboardingVersion > 0) {
+            helpPreferences.setLastSeenOnboardingVersion(manifest.onboardingVersion)
+        }
+        if (manifest.contentVersion > 0) {
+            helpPreferences.setLastSeenContentVersion(manifest.contentVersion)
+        }
     }
 
     fun onMapTapped(selection: MapTapSelection) {
@@ -1059,12 +1302,18 @@ class MapViewModel(
         const val LogTag = "DscMapViewModel"
         const val CachedMapDataMessage = "Dati mappa salvati"
         const val StatusMessageMillis = 8_000L
+        const val MaxHelpTourSteps = 7
     }
 
     override fun onCleared() {
         trafficAwarenessJob?.cancel()
         super.onCleared()
     }
+}
+
+sealed interface HelpTourUiCommand {
+    data object OpenProfile : HelpTourUiCommand
+    data object CloseProfile : HelpTourUiCommand
 }
 
 private fun Throwable.toMapLegalTimelineReason(): String =

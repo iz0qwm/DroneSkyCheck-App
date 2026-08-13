@@ -74,6 +74,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.AlertDialog
@@ -115,6 +116,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
@@ -185,6 +188,12 @@ import it.droneskycheck.app.data.flight.FlightOpportunityResult
 import it.droneskycheck.app.data.flight.FlightOpportunityStatus
 import it.droneskycheck.app.data.flight.FlightOpportunityWarning
 import it.droneskycheck.app.data.formatLocalRange
+import it.droneskycheck.app.data.help.ActiveHelpOnboarding
+import it.droneskycheck.app.data.help.HelpOnboardingStep
+import it.droneskycheck.app.data.help.HelpPreferencesRepository
+import it.droneskycheck.app.data.help.HelpRepository
+import it.droneskycheck.app.data.help.HelpTopic
+import it.droneskycheck.app.data.help.HelpTourTarget
 import it.droneskycheck.app.data.weather.WeatherAssessment
 import it.droneskycheck.app.data.weather.WeatherAssessmentEngine
 import it.droneskycheck.app.data.weather.WeatherCodeCategory
@@ -199,6 +208,7 @@ import it.droneskycheck.app.map.DscZoneMapColors
 import it.droneskycheck.app.map.DroneSkyMapView
 import it.droneskycheck.app.map.MapLayerIds
 import it.droneskycheck.app.ui.authorization.AuthorizationDraftSheet
+import it.droneskycheck.app.ui.help.HelpTopicDialog
 import it.droneskycheck.app.ui.profile.PilotProfileSheet
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -250,6 +260,7 @@ fun MapScreen(
     var draftError by remember { mutableStateOf<String?>(null) }
     var planningWarning by remember { mutableStateOf<String?>(null) }
     var isPlanningCardCompact by remember { mutableStateOf(true) }
+    var contextualHelpTopic by remember { mutableStateOf<HelpTopic?>(null) }
 
     suspend fun reloadActiveDraft() {
         currentDraft = authorizationRepository.getActiveDraft()
@@ -258,6 +269,31 @@ fun MapScreen(
     LaunchedEffect(authorizationRepository) {
         reloadActiveDraft()
     }
+
+    contextualHelpTopic?.let { topic ->
+        HelpTopicDialog(
+            topic = topic,
+            onDismiss = { contextualHelpTopic = null }
+        )
+    }
+
+    LaunchedEffect(viewModel, lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            viewModel.helpTourUiCommands.collect { command ->
+                when (command) {
+                    HelpTourUiCommand.OpenProfile -> {
+                        isPilotProfileSheetVisible = true
+                        viewModel.onHelpTourProfileVisibilityChanged(true)
+                    }
+                    HelpTourUiCommand.CloseProfile -> {
+                        isPilotProfileSheetVisible = false
+                        viewModel.onHelpTourProfileVisibilityChanged(false)
+                    }
+                }
+            }
+        }
+    }
+
     LaunchedEffect(
         viewModel,
         lifecycleOwner,
@@ -457,7 +493,10 @@ fun MapScreen(
                 }
             },
             onSearchClick = { isLocationSearchSheetVisible = true },
-            onProfileClick = { isPilotProfileSheetVisible = true },
+            onProfileClick = {
+                isPilotProfileSheetVisible = true
+                viewModel.onHelpTourProfileVisibilityChanged(true)
+            },
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .windowInsetsPadding(WindowInsets.safeDrawing)
@@ -556,7 +595,12 @@ fun MapScreen(
 
         if (isPilotProfileSheetVisible) {
             PilotProfileSheet(
-                onDismiss = { isPilotProfileSheetVisible = false }
+                helpManifest = uiState.helpManifest,
+                onRepeatTour = { viewModel.requestHelpOnboardingReplay(profileSheetVisible = isPilotProfileSheetVisible) },
+                onDismiss = {
+                    isPilotProfileSheetVisible = false
+                    viewModel.onHelpTourProfileVisibilityChanged(false)
+                }
             )
         }
 
@@ -567,6 +611,7 @@ fun MapScreen(
                 onOpenProfile = {
                     isDraftSheetVisible = false
                     isPilotProfileSheetVisible = true
+                    viewModel.onHelpTourProfileVisibilityChanged(true)
                 },
                 onSaveRequestData = { requestData ->
                     authorizationRepository.updateRequestData(draft.id, requestData).also { updated ->
@@ -647,6 +692,9 @@ fun MapScreen(
                 onOperationalContextRequested = viewModel::onOperationalContextRequested,
                 onOperationalReportExpansionChanged = viewModel::onOperationalReportExpansionChanged,
                 onDroneSelected = viewModel::onDroneSelected,
+                onContextualHelpRequested = { topicId ->
+                    contextualHelpTopic = uiState.helpManifest.topic(topicId)
+                },
                 onAuthorizationRequest = { zoneInfo ->
                     draftError = null
                     coroutineScope.launch {
@@ -674,8 +722,195 @@ fun MapScreen(
                 onDismiss = viewModel::onZoneSheetDismissed
             )
         }
+
+        uiState.activeHelpOnboarding?.let { onboarding ->
+            HelpTourOverlay(
+                onboarding = onboarding,
+                onPrevious = { viewModel.onHelpOnboardingPrevious(profileSheetVisible = isPilotProfileSheetVisible) },
+                onNext = { viewModel.onHelpOnboardingNext(profileSheetVisible = isPilotProfileSheetVisible) },
+                onSkip = { viewModel.onHelpOnboardingSkipped(profileSheetVisible = isPilotProfileSheetVisible) },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
     }
 }
+
+@Composable
+private fun HelpTourOverlay(
+    onboarding: ActiveHelpOnboarding,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+    onSkip: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val step = onboarding.currentStep ?: return
+    Dialog(
+        onDismissRequest = onSkip,
+        properties = DialogProperties(
+            dismissOnBackPress = true,
+            dismissOnClickOutside = false,
+            usePlatformDefaultWidth = false
+        )
+    ) {
+        Box(
+            modifier = modifier
+                .background(Color.Black.copy(alpha = 0.42f))
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .padding(16.dp)
+        ) {
+            HelpTargetHint(
+                step = step,
+                modifier = Modifier
+                    .align(step.target.overlayAlignment())
+                    .padding(step.target.overlayPadding())
+            )
+            Card(
+                modifier = Modifier
+                    .align(step.target.cardAlignment())
+                    .fillMaxWidth()
+                    .widthIn(max = 420.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    contentColor = MaterialTheme.colorScheme.onSurface
+                ),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+            ) {
+                Column(
+                    modifier = Modifier.padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "${onboarding.currentIndex + 1}/${onboarding.steps.size}",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = step.title,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = step.text,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TextButton(
+                            onClick = onSkip,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Salta")
+                        }
+                        OutlinedButton(
+                            onClick = onPrevious,
+                            enabled = !onboarding.isFirstStep
+                        ) {
+                            Text("Indietro")
+                        }
+                        Button(onClick = onNext) {
+                            Text(if (onboarding.isLastStep) "Fine" else "Avanti")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HelpTargetHint(
+    step: HelpOnboardingStep,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier,
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        tonalElevation = 6.dp,
+        shadowElevation = 8.dp,
+        border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = step.target.icon(),
+                contentDescription = null,
+                modifier = Modifier.size(20.dp)
+            )
+            Text(
+                text = step.target.label(),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+    }
+}
+
+private fun HelpTourTarget.overlayAlignment(): Alignment =
+    when (this) {
+        HelpTourTarget.MAP -> Alignment.Center
+        HelpTourTarget.ZONES_BUTTON,
+        HelpTourTarget.LOCATION_BUTTON,
+        HelpTourTarget.TRAFFIC_BUTTON,
+        HelpTourTarget.PROFILE_BUTTON -> Alignment.BottomEnd
+        HelpTourTarget.SELECTED_POINT_PANEL,
+        HelpTourTarget.WEATHER_ACTION,
+        HelpTourTarget.FLIGHT_OPPORTUNITY_CARD -> Alignment.BottomCenter
+    }
+
+private fun HelpTourTarget.cardAlignment(): Alignment =
+    when (this) {
+        HelpTourTarget.MAP -> Alignment.BottomCenter
+        HelpTourTarget.SELECTED_POINT_PANEL,
+        HelpTourTarget.WEATHER_ACTION,
+        HelpTourTarget.FLIGHT_OPPORTUNITY_CARD -> Alignment.TopCenter
+        else -> Alignment.TopCenter
+    }
+
+private fun HelpTourTarget.overlayPadding(): PaddingValues =
+    when (this) {
+        HelpTourTarget.MAP -> PaddingValues(0.dp)
+        HelpTourTarget.ZONES_BUTTON -> PaddingValues(bottom = 76.dp, end = 4.dp)
+        HelpTourTarget.LOCATION_BUTTON -> PaddingValues(bottom = 152.dp, end = 4.dp)
+        HelpTourTarget.TRAFFIC_BUTTON -> PaddingValues(bottom = 216.dp, end = 4.dp)
+        HelpTourTarget.PROFILE_BUTTON -> PaddingValues(bottom = 4.dp, end = 76.dp)
+        HelpTourTarget.SELECTED_POINT_PANEL,
+        HelpTourTarget.WEATHER_ACTION,
+        HelpTourTarget.FLIGHT_OPPORTUNITY_CARD -> PaddingValues(bottom = 24.dp)
+    }
+
+private fun HelpTourTarget.label(): String =
+    when (this) {
+        HelpTourTarget.MAP -> "Mappa"
+        HelpTourTarget.ZONES_BUTTON -> "Zone"
+        HelpTourTarget.LOCATION_BUTTON -> "Posizione"
+        HelpTourTarget.TRAFFIC_BUTTON -> "Traffico"
+        HelpTourTarget.PROFILE_BUTTON -> "Profilo"
+        HelpTourTarget.SELECTED_POINT_PANEL -> "Punto selezionato"
+        HelpTourTarget.WEATHER_ACTION -> "Meteo"
+        HelpTourTarget.FLIGHT_OPPORTUNITY_CARD -> "Report operativo"
+    }
+
+private fun HelpTourTarget.icon(): ImageVector =
+    when (this) {
+        HelpTourTarget.MAP -> Icons.Default.Search
+        HelpTourTarget.ZONES_BUTTON -> Icons.Default.Visibility
+        HelpTourTarget.LOCATION_BUTTON -> Icons.Default.MyLocation
+        HelpTourTarget.TRAFFIC_BUTTON -> Icons.Default.Flight
+        HelpTourTarget.PROFILE_BUTTON -> Icons.Default.Settings
+        HelpTourTarget.SELECTED_POINT_PANEL -> Icons.Default.Info
+        HelpTourTarget.WEATHER_ACTION -> Icons.Default.Cloud
+        HelpTourTarget.FLIGHT_OPPORTUNITY_CARD -> Icons.Default.WbSunny
+    }
 
 @Composable
 private fun LayerStackIcon(modifier: Modifier = Modifier) {
@@ -2193,6 +2428,7 @@ private fun ZoneBottomSheet(
     onOperationalContextRequested: () -> Unit,
     onOperationalReportExpansionChanged: (Boolean) -> Unit,
     onDroneSelected: (String) -> Unit,
+    onContextualHelpRequested: (String) -> Unit,
     onAuthorizationRequest: (ZoneInfo) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -2262,7 +2498,8 @@ private fun ZoneBottomSheet(
                             selectedDrone = selectedDrone,
                             selectedDroneCatalogMatch = selectedDroneCatalogMatch,
                             droneOperationalAssessment = droneOperationalAssessment,
-                            onDroneSelected = onDroneSelected
+                            onDroneSelected = onDroneSelected,
+                            onContextualHelpRequested = onContextualHelpRequested
                         )
                     }
                 } else {
@@ -2294,6 +2531,7 @@ private fun ZoneBottomSheet(
                             verdict = response,
                             blockers = response.blockers,
                             warnings = response.warnings,
+                            onContextualHelpRequested = onContextualHelpRequested,
                             onAuthorizationRequest = { onAuthorizationRequest(zoneInfo) }
                         )
                     }
@@ -2568,7 +2806,8 @@ private fun OperationalReportSection(
     selectedDrone: LocalDrone?,
     selectedDroneCatalogMatch: DroneCatalogMatchResult?,
     droneOperationalAssessment: DroneOperationalAssessment?,
-    onDroneSelected: (String) -> Unit
+    onDroneSelected: (String) -> Unit,
+    onContextualHelpRequested: (String) -> Unit
 ) {
     var expanded by remember { mutableStateOf(true) }
 
@@ -2603,7 +2842,8 @@ private fun OperationalReportSection(
                     isLoading = isWeatherLoading,
                     forecast = forecast,
                     assessment = assessment,
-                    error = weatherError
+                    error = weatherError,
+                    onHelpClick = { onContextualHelpRequested("weather") }
                 )
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 DroneOperationalSection(
@@ -2713,7 +2953,8 @@ private fun LegalTimelineSection(
 private fun ReportSectionTitle(
     icon: ImageVector,
     title: String,
-    subtitle: String
+    subtitle: String,
+    onHelpClick: (() -> Unit)? = null
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -2736,6 +2977,14 @@ private fun ReportSectionTitle(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+        if (onHelpClick != null) {
+            IconButton(onClick = onHelpClick) {
+                Icon(
+                    imageVector = Icons.Default.Info,
+                    contentDescription = "Apri guida $title"
+                )
+            }
         }
     }
 }
@@ -2928,7 +3177,8 @@ private fun WeatherAnalysisSection(
     isLoading: Boolean,
     forecast: WeatherForecast?,
     assessment: WeatherAssessment?,
-    error: String?
+    error: String?,
+    onHelpClick: () -> Unit
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -2937,7 +3187,8 @@ private fun WeatherAnalysisSection(
         ReportSectionTitle(
             icon = Icons.Default.Cloud,
             title = "Meteo",
-            subtitle = "Valori previsti sull'ora piu vicina"
+            subtitle = "Valori previsti sull'ora piu vicina",
+            onHelpClick = onHelpClick
         )
         when {
             isLoading -> Row(
@@ -3614,6 +3865,7 @@ private fun ZoneInfoCard(
     verdict: ZoneCheckV3Response,
     blockers: List<Issue>,
     warnings: List<Issue>,
+    onContextualHelpRequested: (String) -> Unit,
     onAuthorizationRequest: () -> Unit
 ) {
     var expanded by remember(zone.name, zone.type, index) { mutableStateOf(false) }
@@ -3695,7 +3947,10 @@ private fun ZoneInfoCard(
                 TemporalDetailsPanel(zone)
                 ZoneNarrativeSection(zone)
                 OfficialSection(zone.official)
-                NotamSection(zone.notams)
+                NotamSection(
+                    notams = zone.notams,
+                    onHelpClick = { onContextualHelpRequested("notam") }
+                )
                 EnrSection(zone.enr)
                 SupSection(zone.sup)
                 UasGeographicalZoneSection(zone.uasGeographicalZone)
@@ -4146,11 +4401,17 @@ private fun ValiditySection(validity: ValidityInfo?) {
 }
 
 @Composable
-private fun NotamSection(notams: List<NotamInfo>) {
+private fun NotamSection(
+    notams: List<NotamInfo>,
+    onHelpClick: () -> Unit
+) {
     val usefulNotams = notams.filter { it.hasUsefulContent() }
     if (usefulNotams.isEmpty()) return
 
-    ZoneSection(title = "NOTAM") {
+    ZoneSection(
+        title = "NOTAM",
+        onHelpClick = onHelpClick
+    ) {
         usefulNotams.forEachIndexed { index, notam ->
             if (index > 0) HorizontalDivider()
             val presentation = notam.presentation()
@@ -4422,14 +4683,30 @@ private fun EnrichedSection(enriched: List<KeyValueInfo>) {
 @Composable
 private fun ZoneSection(
     title: String,
+    onHelpClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.SemiBold
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f)
+            )
+            if (onHelpClick != null) {
+                IconButton(onClick = onHelpClick) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = "Apri guida $title"
+                    )
+                }
+            }
+        }
         Column(
             verticalArrangement = Arrangement.spacedBy(6.dp),
             content = content
@@ -6096,6 +6373,8 @@ private class MapViewModelFactory(
                 trafficAwarenessRepository = TrafficAwarenessRepository(),
                 weatherAssessmentEngine = WeatherAssessmentEngine(),
                 mapPreferences = MapPreferencesRepository(context),
+                helpRepository = HelpRepository(context),
+                helpPreferences = HelpPreferencesRepository(context),
                 localPilotStore = LocalPilotRepository(context),
                 droneTechnicalCatalog = DroneTechnicalCatalogRepository(context)
             ) as T

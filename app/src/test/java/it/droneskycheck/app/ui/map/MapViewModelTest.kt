@@ -24,6 +24,8 @@ import it.droneskycheck.app.data.drone.DroneTechnicalCatalogResolver
 import it.droneskycheck.app.data.drone.InMemoryDroneTechnicalCatalogClient
 import it.droneskycheck.app.data.drone.parseDroneTechnicalCatalog
 import it.droneskycheck.app.data.flight.FlightOpportunityStatus
+import it.droneskycheck.app.data.help.InMemoryHelpManifestClient
+import it.droneskycheck.app.data.help.InMemoryHelpPreferences
 import it.droneskycheck.app.data.traffic.TrafficAwarenessClient
 import it.droneskycheck.app.data.traffic.TrafficAwarenessResponse
 import it.droneskycheck.app.data.traffic.TrafficCacheInfo
@@ -906,7 +908,8 @@ class MapViewModelTest {
         preferences: InMemoryMapPreferences,
         pilotStore: LocalPilotStore = FakePilotStore(),
         catalog: DroneTechnicalCatalogClient = InMemoryDroneTechnicalCatalogClient(),
-        trafficPollingIntervalMillis: Long = 5_000L
+        trafficPollingIntervalMillis: Long = 5_000L,
+        loadHelpOnInit: Boolean = false
     ): MapViewModel =
         MapViewModel(
             zoneCheckRepository = FakeZoneCheckClient(),
@@ -914,11 +917,14 @@ class MapViewModelTest {
             weatherForecastRepository = weather,
             trafficAwarenessRepository = traffic,
             mapPreferences = preferences,
+            helpRepository = InMemoryHelpManifestClient(),
+            helpPreferences = InMemoryHelpPreferences(),
             localPilotStore = pilotStore,
             droneTechnicalCatalog = catalog,
             clock = clock,
             timelineZoneId = ZoneId.of("Europe/Rome"),
             trafficAwarenessPollingIntervalMillis = trafficPollingIntervalMillis,
+            loadHelpOnInit = loadHelpOnInit,
             externalScope = scope
         )
 

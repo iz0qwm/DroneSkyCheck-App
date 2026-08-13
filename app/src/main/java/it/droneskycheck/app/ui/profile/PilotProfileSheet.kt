@@ -37,6 +37,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Badge
@@ -121,6 +122,8 @@ import it.droneskycheck.app.data.drone.DroneTechnicalCatalogRepository
 import it.droneskycheck.app.data.drone.DroneTechnicalCatalogResolver
 import it.droneskycheck.app.data.drone.formatOneDecimal
 import it.droneskycheck.app.data.drone.msToKmh
+import it.droneskycheck.app.data.help.HelpManifest
+import it.droneskycheck.app.ui.help.HelpBottomSheet
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -302,6 +305,8 @@ private val DroneSaver = listSaver<LocalDrone, String>(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PilotProfileSheet(
+    helpManifest: HelpManifest = HelpManifest.empty(),
+    onRepeatTour: () -> Unit = {},
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -327,6 +332,7 @@ fun PilotProfileSheet(
     var operatorExpanded by rememberSaveable { mutableStateOf(true) }
     var dronesExpanded by rememberSaveable { mutableStateOf(true) }
     var draftsExpanded by rememberSaveable { mutableStateOf(false) }
+    var isHelpSheetVisible by rememberSaveable { mutableStateOf(false) }
 
     fun reload() {
         scope.launch {
@@ -589,6 +595,9 @@ fun PilotProfileSheet(
                         onExpandedChange = { draftsExpanded = it },
                         onRefresh = { reload() }
                     )
+                    HelpAccessCard(
+                        onOpenHelp = { isHelpSheetVisible = true }
+                    )
                     OutlinedButton(
                         onClick = { reload() },
                         modifier = Modifier.align(Alignment.End)
@@ -604,6 +613,17 @@ fun PilotProfileSheet(
                 }
             }
         }
+    }
+
+    if (isHelpSheetVisible) {
+        HelpBottomSheet(
+            manifest = helpManifest,
+            onRepeatTour = {
+                isHelpSheetVisible = false
+                onRepeatTour()
+            },
+            onDismiss = { isHelpSheetVisible = false }
+        )
     }
 }
 
@@ -1063,6 +1083,66 @@ private fun AuthorizationDraftsCard(
             )
             SummaryValue("Stato", activeDraft.status)
             SummaryValue("Creata", formatDraftDate(activeDraft.createdAt))
+        }
+    }
+}
+
+@Composable
+private fun HelpAccessCard(
+    onOpenHelp: () -> Unit
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        shape = RoundedCornerShape(20.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                ProfileIconChip(icon = Icons.Default.Description)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Guida Drone Sky Check",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "Tour guidato e spiegazioni operative",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                IconButton(onClick = onOpenHelp) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = "Apri guida"
+                    )
+                }
+            }
+            Text(
+                text = "Apri la guida generale oppure ripeti il tour iniziale.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Button(
+                onClick = onOpenHelp,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Description,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Guida e informazioni")
+            }
         }
     }
 }

@@ -7,6 +7,8 @@ import it.droneskycheck.app.data.drone.DroneCatalogMatchResult
 import it.droneskycheck.app.data.drone.DroneOperationalAssessment
 import it.droneskycheck.app.data.flight.FlightOpportunityResult
 import it.droneskycheck.app.data.flight.FlightOpportunityStatus
+import it.droneskycheck.app.data.help.ActiveHelpOnboarding
+import it.droneskycheck.app.data.help.HelpManifest
 import it.droneskycheck.app.data.traffic.TrafficAwarenessState
 import it.droneskycheck.app.data.traffic.TrafficAssessment
 import it.droneskycheck.app.data.traffic.TrafficTarget
@@ -52,7 +54,9 @@ data class MapUiState(
     val mapStatusMessage: String? = null,
     val cameraBounds: CameraBounds? = null,
     val layerVisibility: Map<DscLayerCategory, Boolean> = DscLayerCategory.defaultVisibility,
-    val isLayerSheetVisible: Boolean = false
+    val isLayerSheetVisible: Boolean = false,
+    val helpManifest: HelpManifest = HelpManifest.empty(),
+    val activeHelpOnboarding: ActiveHelpOnboarding? = null
 )
 
 data class MapTapSelection(

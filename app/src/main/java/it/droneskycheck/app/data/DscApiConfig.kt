@@ -6,6 +6,7 @@ object DscApiConfig {
     const val KwosDroneSkyCheckPathPrefix = "/appoggio/droni/DroneSkyCheck/"
     const val DroneCatalogManifestUrl = "$KwosDataBaseUrl/catalog/drone_catalog_manifest.json"
     const val DroneCatalogUrl = "$KwosDataBaseUrl/catalog/drone_technical_catalog.json"
+    const val HelpManifestUrl = "$KwosDataBaseUrl/help/manifest.json"
     const val ZoneCheckV3Url = "https://appzonecheckv3-32dg4v266a-uc.a.run.app/appZoneCheckV3"
     const val LegalTimelineUrl = "https://applegaltimeline-32dg4v266a-uc.a.run.app/appLegalTimeline"
     const val WeatherForecastUrl = "https://appweatherforecast-32dg4v266a-uc.a.run.app/appWeatherForecast"
