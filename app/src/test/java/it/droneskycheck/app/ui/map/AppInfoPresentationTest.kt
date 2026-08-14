@@ -48,7 +48,7 @@ class AppInfoPresentationTest {
     fun datasetInfoFallsBackWhenMetadataIsUnavailable() {
         val info = uasDatasetInfoPresentation(mapStatusMessage = null)
 
-        assertEquals("Dati UAS disponibili", info.availabilityLabel)
+        assertEquals("Dati Zone UAS disponibili", info.availabilityLabel)
         assertEquals(null, info.datasetVersion)
         assertEquals(null, info.sourceUpdatedAt)
         assertEquals(null, info.cachedOnDeviceAt)
@@ -91,11 +91,11 @@ class AppInfoPresentationTest {
         )
 
         assertTrue(text.contains("Versione app: 3.0-beta4 (19)"))
-        assertTrue(text.contains("Dati UAS: Dati UAS disponibili"))
-        assertTrue(text.contains("Versione dataset UAS: non disponibile"))
-        assertTrue(text.contains("Metadata UAS: Versione e date dataset non disponibili nell'app"))
-        assertFalse(text.contains("Aggiornamento sorgente UAS:"))
-        assertFalse(text.contains("Cache dispositivo UAS:"))
+        assertTrue(text.contains("Dati Zone UAS: Dati Zone UAS disponibili"))
+        assertTrue(text.contains("Versione dataset Zone UAS: non disponibile"))
+        assertTrue(text.contains("Metadata Zone UAS: Versione e date dataset non disponibili nell'app"))
+        assertFalse(text.contains("Aggiornamento sorgente Zone UAS:"))
+        assertFalse(text.contains("Cache dispositivo Zone UAS:"))
     }
 
     @Test

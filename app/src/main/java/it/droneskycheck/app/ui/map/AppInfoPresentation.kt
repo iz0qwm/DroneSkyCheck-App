@@ -90,9 +90,9 @@ fun uasDatasetInfoPresentation(
     val cachedOnDeviceAt = updates?.cachedOnDeviceAt?.formatDatasetInstant()
     return UasDatasetInfoPresentation(
         availabilityLabel = if (degraded) {
-            "Dati UAS caricati dalla cache locale"
+            "Dati Zone UAS caricati dalla cache locale"
         } else {
-            "Dati UAS disponibili"
+            "Dati Zone UAS disponibili"
         },
         cacheLabel = when {
             degraded -> "Ultima copia disponibile"
@@ -120,13 +120,13 @@ fun appInfoDiagnosticText(info: AppInfoPresentation): String =
             appendLine("Testo piu grande DSC: ${textScale.largeTextEnabledLabel}")
             appendLine("Scala testo effettiva DSC: ${textScale.effectiveFontScaleLabel}")
         }
-        appendLine("Dati UAS: ${info.dataset.availabilityLabel}")
-        info.dataset.cacheLabel?.let { appendLine("Cache UAS: $it") }
-        info.dataset.datasetVersion?.let { appendLine("Versione dataset UAS: $it") }
-            ?: appendLine("Versione dataset UAS: non disponibile")
-        info.dataset.sourceUpdatedAt?.let { appendLine("Aggiornamento sorgente UAS: $it") }
-        info.dataset.cachedOnDeviceAt?.let { appendLine("Cache dispositivo UAS: $it") }
-        info.dataset.metadataFallbackLabel?.let { appendLine("Metadata UAS: $it") }
+        appendLine("Dati Zone UAS: ${info.dataset.availabilityLabel}")
+        info.dataset.cacheLabel?.let { appendLine("Cache Zone UAS: $it") }
+        info.dataset.datasetVersion?.let { appendLine("Versione dataset Zone UAS: $it") }
+            ?: appendLine("Versione dataset Zone UAS: non disponibile")
+        info.dataset.sourceUpdatedAt?.let { appendLine("Aggiornamento sorgente Zone UAS: $it") }
+        info.dataset.cachedOnDeviceAt?.let { appendLine("Cache dispositivo Zone UAS: $it") }
+        info.dataset.metadataFallbackLabel?.let { appendLine("Metadata Zone UAS: $it") }
     }.trimEnd()
 
 private fun Context.readAppBuildInfoPresentation(): AppBuildInfoPresentation {

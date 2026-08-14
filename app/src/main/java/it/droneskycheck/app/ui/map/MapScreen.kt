@@ -37,6 +37,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -850,6 +851,8 @@ fun MapScreen(
         if (uiState.isAppInfoSheetVisible) {
             AppInfoBottomSheet(
                 info = appInfo,
+                isUasDatasetRefreshing = uiState.isUasDatasetRefreshing,
+                onRefreshUasDataset = viewModel::onUasDatasetRefreshRequested,
                 onOpenHelp = {
                     viewModel.onAppInfoDismissed()
                     isHelpSheetVisible = true
@@ -2347,6 +2350,8 @@ private fun MapTitlePill(
 @OptIn(ExperimentalMaterial3Api::class)
 private fun AppInfoBottomSheet(
     info: AppInfoPresentation,
+    isUasDatasetRefreshing: Boolean,
+    onRefreshUasDataset: () -> Unit,
     onOpenHelp: () -> Unit,
     onOpenWebApp: () -> Unit,
     onCopy: () -> Unit,
@@ -2402,7 +2407,27 @@ private fun AppInfoBottomSheet(
                 }
             }
 
-            AppInfoSection(title = "Dati UAS") {
+            AppInfoSection(
+                title = "Dati Zone UAS",
+                action = {
+                    IconButton(
+                        onClick = onRefreshUasDataset,
+                        enabled = !isUasDatasetRefreshing
+                    ) {
+                        if (isUasDatasetRefreshing) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Aggiorna dati Zone UAS"
+                            )
+                        }
+                    }
+                }
+            ) {
                 AppInfoRow("Stato", info.dataset.availabilityLabel)
                 info.dataset.cacheLabel?.let { AppInfoRow("Cache", it) }
                 AppInfoRow("Versione dataset", info.dataset.datasetVersion ?: "Non disponibile")
@@ -2473,15 +2498,23 @@ private fun AppInfoBottomSheet(
 @Composable
 private fun AppInfoSection(
     title: String,
+    action: (@Composable RowScope.() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.primary
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            action?.invoke(this)
+        }
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             content()
         }

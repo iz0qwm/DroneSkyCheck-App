@@ -850,6 +850,112 @@ class MapViewModelTest {
     }
 
     @Test
+    fun trafficAwarenessKeepsAirSenseDronesBetweenSparseBeacons() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val sparseDrone = trafficTarget(
+            id = "airsense:drone-7",
+            lat = 41.901,
+            lon = 12.501,
+            callsign = "DSC-DRONE-7",
+            provider = "AirSense",
+            source = "AirSense",
+            objectType = "drone",
+            ageSec = 5.0
+        )
+        val disappearingAircraft = trafficTarget(
+            id = "icao:old",
+            lat = 41.902,
+            lon = 12.502,
+            callsign = "OLD",
+            provider = "opensky",
+            source = "OpenSky"
+        )
+        val freshAircraft = trafficTarget(
+            id = "icao:fresh",
+            lat = 41.903,
+            lon = 12.503,
+            callsign = "FRESH",
+            provider = "opensky",
+            source = "OpenSky"
+        )
+        val traffic = FakeTrafficAwarenessClient(
+            results = ArrayDeque(
+                listOf(
+                    Result.success(trafficResponse(targets = listOf(sparseDrone, disappearingAircraft))),
+                    Result.success(trafficResponse(targets = listOf(freshAircraft))),
+                    Result.success(trafficResponse(targets = listOf(freshAircraft)))
+                )
+            )
+        )
+        val viewModel = viewModel(
+            scope = scope,
+            traffic = traffic,
+            preferences = InMemoryMapPreferences(),
+            trafficPollingIntervalMillis = 20
+        )
+
+        viewModel.onMapTapped(selection(41.9, 12.5))
+        waitUntil { viewModel.uiState.value.selectedPoint != null }
+        viewModel.enableTrafficAwareness()
+        waitUntil { traffic.calls >= 2 && viewModel.uiState.value.trafficAwareness.response?.traffic?.targets?.any { it.id == "icao:fresh" } == true }
+
+        val visibleIds = viewModel.uiState.value.trafficAwareness.response?.traffic?.targets.orEmpty().map { it.id }
+        assertTrue(visibleIds.contains("airsense:drone-7"))
+        assertTrue(visibleIds.contains("icao:fresh"))
+        assertFalse(visibleIds.contains("icao:old"))
+        assertEquals(2, viewModel.uiState.value.trafficAwareness.response?.traffic?.count)
+        scope.cancel()
+    }
+
+    @Test
+    fun trafficAwarenessDropsPersistedAirSenseDronesAfterPersistenceWindow() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val staleDrone = trafficTarget(
+            id = "airsense:stale-drone",
+            lat = 41.901,
+            lon = 12.501,
+            callsign = "DSC-STALE",
+            provider = "AirSense",
+            source = "AirSense",
+            objectType = "drone",
+            ageSec = 240.0
+        )
+        val freshAircraft = trafficTarget(
+            id = "icao:fresh",
+            lat = 41.903,
+            lon = 12.503,
+            callsign = "FRESH",
+            provider = "opensky",
+            source = "OpenSky"
+        )
+        val traffic = FakeTrafficAwarenessClient(
+            results = ArrayDeque(
+                listOf(
+                    Result.success(trafficResponse(targets = listOf(staleDrone))),
+                    Result.success(trafficResponse(targets = listOf(freshAircraft))),
+                    Result.success(trafficResponse(targets = listOf(freshAircraft)))
+                )
+            )
+        )
+        val viewModel = viewModel(
+            scope = scope,
+            traffic = traffic,
+            preferences = InMemoryMapPreferences(),
+            trafficPollingIntervalMillis = 20
+        )
+
+        viewModel.onMapTapped(selection(41.9, 12.5))
+        waitUntil { viewModel.uiState.value.selectedPoint != null }
+        viewModel.enableTrafficAwareness()
+        waitUntil { traffic.calls >= 2 && viewModel.uiState.value.trafficAwareness.response?.traffic?.targets?.any { it.id == "icao:fresh" } == true }
+
+        val visibleIds = viewModel.uiState.value.trafficAwareness.response?.traffic?.targets.orEmpty().map { it.id }
+        assertFalse(visibleIds.contains("airsense:stale-drone"))
+        assertEquals(listOf("icao:fresh"), visibleIds)
+        scope.cancel()
+    }
+
+    @Test
     fun closingZoneSheetKeepsTrafficAwarenessEnabledAndPolling() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val traffic = FakeTrafficAwarenessClient()
@@ -1534,7 +1640,10 @@ private fun trafficTarget(
     speedMps: Double? = null,
     trackDeg: Double? = null,
     headingDeg: Double? = null,
-    ageSec: Double? = null
+    ageSec: Double? = null,
+    provider: String = "opensky",
+    source: String = "OpenSky",
+    objectType: String? = null
 ): TrafficTarget =
     TrafficTarget(
         id = id,
@@ -1562,11 +1671,12 @@ private fun trafficTarget(
         aircraft = TrafficAircraft(category = null, type = null),
         time = TrafficTime(timestamp = null, ageSec = ageSec),
         relative = TrafficRelative(distanceM = null, bearingDeg = null),
-        provider = "opensky",
-        source = "OpenSky",
+        provider = provider,
+        source = source,
         quality = null,
-        sources = listOf(TrafficSource(provider = "opensky", source = "OpenSky")),
-        provenance = null
+        sources = listOf(TrafficSource(provider = provider, source = source)),
+        provenance = null,
+        objectType = objectType
     )
 
 private fun metersToLatDegreesForTest(meters: Double): Double =

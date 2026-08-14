@@ -8,6 +8,7 @@ import org.json.JSONObject
 object TrafficAwarenessDefaults {
     const val DefaultRadiusKm = 20.0
     const val PollingIntervalMillis = 5_000L
+    const val DronePersistenceMillis = 180_000L
 }
 
 data class TrafficAwarenessResponse(

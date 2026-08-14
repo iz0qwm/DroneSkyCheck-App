@@ -60,6 +60,7 @@ data class MapUiState(
     val mapStatusMessage: String? = null,
     val isAppInfoSheetVisible: Boolean = false,
     val uasDatasetUpdates: UasDatasetUpdates? = null,
+    val isUasDatasetRefreshing: Boolean = false,
     val cameraBounds: CameraBounds? = null,
     val layerVisibility: Map<DscLayerCategory, Boolean> = DscLayerCategory.defaultVisibility,
     val isLayerSheetVisible: Boolean = false,

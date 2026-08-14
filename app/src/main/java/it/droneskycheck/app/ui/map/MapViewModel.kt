@@ -60,9 +60,14 @@ import it.droneskycheck.app.data.traffic.TrafficAwarenessState
 import it.droneskycheck.app.data.traffic.TrafficOperationCenter
 import it.droneskycheck.app.data.traffic.TrafficAlertController
 import it.droneskycheck.app.data.traffic.TrafficAlertEvent
+import it.droneskycheck.app.data.traffic.TrafficAwarenessResponse
 import it.droneskycheck.app.data.traffic.TrafficRelevanceEngine
+import it.droneskycheck.app.data.traffic.TrafficTarget
+import it.droneskycheck.app.data.traffic.TrafficTargetKind
+import it.droneskycheck.app.data.traffic.TrafficTime
 import it.droneskycheck.app.data.traffic.coarseTraffic
 import it.droneskycheck.app.data.traffic.toTrafficAwarenessDiagnosticReason
+import it.droneskycheck.app.data.traffic.trafficTargetKind
 import it.droneskycheck.app.map.DscLayerCategory
 import java.time.Clock
 import java.time.Duration
@@ -134,18 +139,34 @@ class MapViewModel(
         loadAccessibilityPreferences()
         loadTrafficAlertPreferences()
         if (loadHelpOnInit) loadHelpManifest()
-        loadUasDatasetUpdates()
+        loadUasDatasetUpdates(showRefreshing = false)
         loadDroneCatalogAndFleet()
     }
 
-    private fun loadUasDatasetUpdates() {
-        val repository = uasDatasetUpdatesRepository ?: return
+    private fun loadUasDatasetUpdates(showRefreshing: Boolean) {
+        val repository = uasDatasetUpdatesRepository ?: run {
+            if (showRefreshing) {
+                _uiState.value = _uiState.value.copy(isUasDatasetRefreshing = false)
+            }
+            return
+        }
+        if (showRefreshing && _uiState.value.isUasDatasetRefreshing) return
+        if (showRefreshing) {
+            _uiState.value = _uiState.value.copy(isUasDatasetRefreshing = true)
+        }
         scope.launch {
             val updates = withContext(Dispatchers.IO) {
                 repository.getUpdates()
             }
-            _uiState.value = _uiState.value.copy(uasDatasetUpdates = updates)
+            _uiState.value = _uiState.value.copy(
+                uasDatasetUpdates = updates ?: _uiState.value.uasDatasetUpdates,
+                isUasDatasetRefreshing = false
+            )
         }
+    }
+
+    fun onUasDatasetRefreshRequested() {
+        loadUasDatasetUpdates(showRefreshing = true)
     }
 
     fun requestHelpOnboardingReplay(profileSheetVisible: Boolean = false) {
@@ -848,8 +869,14 @@ class MapViewModel(
                 "state updated enabled=true targets=${response.traffic.targets.size}"
             )
             val nowMillis = clock.millis()
+            val previousTraffic = _uiState.value.trafficAwareness
+            val visibleResponse = response.withPersistentDroneTargets(
+                previousResponse = previousTraffic.response,
+                previousLastUpdatedAt = previousTraffic.lastUpdatedAt,
+                nowMillis = nowMillis
+            )
             val assessments = trafficRelevanceEngine.assessTrafficBatch(
-                targets = response.traffic.targets,
+                targets = visibleResponse.traffic.targets,
                 operationCenter = TrafficOperationCenter(point.lat, point.lon),
                 nowMillis = nowMillis
             )
@@ -874,13 +901,13 @@ class MapViewModel(
                 trafficAwareness = _uiState.value.trafficAwareness.copy(
                     enabled = true,
                     loading = false,
-                    response = response,
+                    response = visibleResponse,
                     error = null,
                     lastUpdatedAt = nowMillis
                 ),
                 trafficAssessments = assessments,
                 selectedTrafficTarget = _uiState.value.selectedTrafficTarget?.let { selected ->
-                    response.traffic.targets.firstOrNull { it.id == selected.id }
+                    visibleResponse.traffic.targets.firstOrNull { it.id == selected.id }
                 }
             )
         }.onFailure { error ->
@@ -960,6 +987,64 @@ class MapViewModel(
             trafficAlertVibrationEnabled = mapPreferences.isTrafficAlertVibrationEnabled()
         )
     }
+
+    private fun TrafficAwarenessResponse.withPersistentDroneTargets(
+        previousResponse: TrafficAwarenessResponse?,
+        previousLastUpdatedAt: Long?,
+        nowMillis: Long
+    ): TrafficAwarenessResponse {
+        val previousTargets = previousResponse?.traffic?.targets.orEmpty()
+        if (previousTargets.isEmpty()) return this
+
+        val currentIds = traffic.targets.mapTo(mutableSetOf()) { it.id }
+        val retainedDrones = previousTargets.mapNotNull { target ->
+            if (target.id in currentIds || target.trafficTargetKind() != TrafficTargetKind.DRONE) {
+                return@mapNotNull null
+            }
+            val lastSeenMillis = target.lastSeenMillis(
+                fallbackLastUpdatedAt = previousLastUpdatedAt,
+                nowMillis = nowMillis
+            )
+            val ageMillis = nowMillis - lastSeenMillis
+            if (ageMillis in 0..TrafficAwarenessDefaults.DronePersistenceMillis) {
+                target.withTrafficAge(nowMillis = nowMillis, lastSeenMillis = lastSeenMillis)
+            } else {
+                null
+            }
+        }
+        if (retainedDrones.isEmpty()) return this
+
+        DscLogger.trace(
+            TrafficAwarenessLogTag,
+            "drone persistence retained=${retainedDrones.size} freshTargets=${traffic.targets.size}"
+        )
+        val visibleTargets = traffic.targets + retainedDrones
+        return copy(
+            traffic = traffic.copy(
+                count = visibleTargets.size,
+                targets = visibleTargets
+            )
+        )
+    }
+
+    private fun TrafficTarget.lastSeenMillis(
+        fallbackLastUpdatedAt: Long?,
+        nowMillis: Long
+    ): Long =
+        time.timestamp
+            ?: time.ageSec?.takeIf { it.isFinite() && it >= 0.0 }?.let { ageSec ->
+                (fallbackLastUpdatedAt ?: nowMillis) - (ageSec * 1_000.0).toLong()
+            }
+            ?: fallbackLastUpdatedAt
+            ?: nowMillis
+
+    private fun TrafficTarget.withTrafficAge(nowMillis: Long, lastSeenMillis: Long): TrafficTarget =
+        copy(
+            time = TrafficTime(
+                timestamp = time.timestamp ?: lastSeenMillis,
+                ageSec = ((nowMillis - lastSeenMillis).coerceAtLeast(0L)) / 1_000.0
+            )
+        )
 
     fun onDroneSelected(droneId: String) {
         scope.launch {
