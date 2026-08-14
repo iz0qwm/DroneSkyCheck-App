@@ -1,6 +1,7 @@
 package it.droneskycheck.app.data.traffic
 
 import it.droneskycheck.app.data.DscLogger
+import java.util.Locale
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -43,8 +44,14 @@ data class TrafficTarget(
     val source: String?,
     val quality: String?,
     val sources: List<TrafficSource>,
-    val provenance: TrafficProvenance?
+    val provenance: TrafficProvenance?,
+    val objectType: String? = null
 )
+
+enum class TrafficTargetKind {
+    AIRCRAFT,
+    DRONE
+}
 
 data class TrafficIdentifiers(
     val icao24: String?,
@@ -201,8 +208,54 @@ private fun JSONObject.toTrafficTargetOrNull(): TrafficTarget? {
         source = optStringOrNull("source"),
         quality = optStringOrNull("quality"),
         sources = optJSONArray("sources").toObjectList { it.toTrafficSource() },
-        provenance = optJSONObject("provenance")?.toTrafficProvenance()
+        provenance = optJSONObject("provenance")?.toTrafficProvenance(),
+        objectType = optFirstStringOrNull("kind", "targetKind", "trafficKind", "objectType", "vehicleType", "targetType")
     )
+}
+
+fun TrafficTarget.trafficTargetKind(): TrafficTargetKind =
+    if (droneTrafficHints().any { it.hasDroneTrafficHint() }) {
+        TrafficTargetKind.DRONE
+    } else {
+        TrafficTargetKind.AIRCRAFT
+    }
+
+private fun TrafficTarget.droneTrafficHints(): List<String> =
+    buildList {
+        add(id)
+        listOfNotNull(
+            objectType,
+            provider,
+            source,
+            quality,
+            aircraft.category,
+            aircraft.type,
+            identifiers.icao24,
+            identifiers.callsign,
+            identifiers.registration,
+            identifiers.sourceId
+        ).forEach(::add)
+        sources.forEach { trafficSource ->
+            listOfNotNull(trafficSource.provider, trafficSource.source).forEach(::add)
+        }
+        provenance?.sources?.forEach { trafficSource ->
+            listOfNotNull(trafficSource.provider, trafficSource.source).forEach(::add)
+        }
+        provenance?.contributions?.forEach { contribution ->
+            listOfNotNull(
+                contribution.id,
+                contribution.provider,
+                contribution.source,
+                contribution.sourceId
+            ).forEach(::add)
+        }
+    }
+
+private fun String.hasDroneTrafficHint(): Boolean {
+    val normalized = lowercase(Locale.US)
+        .replace("_", " ")
+        .replace("-", " ")
+    return DroneTrafficKeywords.any { keyword -> normalized.contains(keyword) }
 }
 
 private fun JSONObject?.toTrafficIdentifiers(): TrafficIdentifiers {
@@ -329,6 +382,9 @@ private fun JSONObject.optStringOrNull(name: String): String? {
     return opt(name)?.toString()?.trim()?.takeIf { it.isNotBlank() }
 }
 
+private fun JSONObject.optFirstStringOrNull(vararg names: String): String? =
+    names.firstNotNullOfOrNull(::optStringOrNull)
+
 private fun JSONObject.optDoubleOrNull(name: String): Double? =
     when {
         !has(name) || isNull(name) -> null
@@ -358,3 +414,14 @@ private fun JSONObject.optBooleanOrNull(name: String): Boolean? =
         optString(name).equals("false", ignoreCase = true) -> false
         else -> null
     }
+
+private val DroneTrafficKeywords = listOf(
+    "airsense",
+    "air sense",
+    "drone",
+    "uas",
+    "uav",
+    "rpas",
+    "remoteid",
+    "remote id"
+)

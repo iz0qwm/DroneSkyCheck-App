@@ -171,6 +171,34 @@ class TrafficAwarenessMapFeaturesTest {
     }
 
     @Test
+    fun geoJsonMarksAirSenseDronesWithDroneTargetKind() {
+        val collection = trafficTargetsFeatureCollection(
+            targets = listOf(
+                trafficTarget(
+                    id = "airsense:drone-7",
+                    callsign = "DSC-DRONE-7",
+                    provider = "AirSense",
+                    source = "AirSense",
+                    objectType = "drone",
+                    aglM = 42.0
+                ),
+                trafficTarget(id = "icao:3009bc", provider = "opensky", source = "OpenSky")
+            )
+        )
+        val featuresById = collection.features().orEmpty()
+            .associateBy { it.properties()?.get(TrafficAwarenessMapProperties.TargetId)?.asString }
+
+        assertEquals(
+            "DRONE",
+            featuresById["airsense:drone-7"]?.properties()?.get(TrafficAwarenessMapProperties.TargetKind)?.asString
+        )
+        assertEquals(
+            "AIRCRAFT",
+            featuresById["icao:3009bc"]?.properties()?.get(TrafficAwarenessMapProperties.TargetKind)?.asString
+        )
+    }
+
+    @Test
     fun altitudeBandDoesNotUseGeometricAltitudeAsAglFallback() {
         val feature = trafficTargetsFeatureCollection(
             listOf(trafficTarget(id = "traffic:geo-only", geoM = 11_000.0, aglM = null))
@@ -272,7 +300,8 @@ private fun trafficTarget(
     trackDeg: Double? = 0.0,
     headingDeg: Double? = null,
     geoM: Double? = null,
-    aglM: Double? = null
+    aglM: Double? = null,
+    objectType: String? = null
 ): TrafficTarget =
     TrafficTarget(
         id = id,
@@ -307,7 +336,8 @@ private fun trafficTarget(
         provenance = TrafficProvenance(
             sources = listOf(TrafficSource(provider = provider, source = source)),
             contributions = emptyList()
-        )
+        ),
+        objectType = objectType
     )
 
 private fun assessment(relevance: TrafficRelevance): TrafficAssessment =

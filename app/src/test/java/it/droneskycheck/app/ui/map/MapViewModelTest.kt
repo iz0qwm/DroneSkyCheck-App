@@ -25,6 +25,8 @@ import it.droneskycheck.app.data.drone.InMemoryDroneTechnicalCatalogClient
 import it.droneskycheck.app.data.drone.parseDroneTechnicalCatalog
 import it.droneskycheck.app.data.flight.DroneWindowCompatibility
 import it.droneskycheck.app.data.flight.FlightLightPreference
+import it.droneskycheck.app.data.flight.FlightOpportunityMode
+import it.droneskycheck.app.data.flight.FlightOpportunityReasonCode
 import it.droneskycheck.app.data.flight.FlightOpportunityStatus
 import it.droneskycheck.app.data.help.HelpManifest
 import it.droneskycheck.app.data.help.HelpManifestClient
@@ -129,6 +131,45 @@ class MapViewModelTest {
         assertEquals(Instant.parse("2026-08-16T22:00:00Z"), legal.lastTo)
         assertEquals(MapPoint(41.9, 12.5), weather.lastPoint)
         assertEquals(FlightOpportunityStatus.PARTIAL, viewModel.uiState.value.flightOpportunityStatus)
+        scope.cancel()
+    }
+
+    @Test
+    fun noOpenAuthRequiredProposesTechnicalPlanningWithoutDeclaringOpen() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val viewModel = viewModel(
+            scope = scope,
+            legal = FakeLegalTimelineClient(state = LegalTimelineState.AUTH_REQUIRED),
+            weather = FakeWeatherClient(forecast = weatherForecast(hours = 2)),
+            preferences = InMemoryMapPreferences(),
+            pilotStore = FakePilotStore(
+                listOf(LocalDrone(id = "mini", manufacturer = "DJI", model = "Mini 3 Pro", manualMaxWindResistanceMs = 10.0, isSelected = true))
+            )
+        )
+
+        waitUntil { viewModel.uiState.value.selectedDrone != null }
+        viewModel.onMapTapped(selection(41.9, 12.5))
+        waitUntil { viewModel.uiState.value.selectedPoint != null }
+        viewModel.onOperationalContextRequested()
+        waitUntil { viewModel.uiState.value.flightOpportunityResult != null }
+
+        val result = requireNotNull(viewModel.uiState.value.flightOpportunityResult)
+        assertEquals(FlightOpportunityMode.OPEN, viewModel.uiState.value.flightOpportunityMode)
+        assertEquals(FlightOpportunityMode.OPEN, result.mode)
+        assertEquals(FlightOpportunityStatus.NO_OPEN_WINDOW, result.status)
+        assertTrue(result.technicalPlanningAvailable)
+        assertNull(result.bestOpportunity)
+        assertTrue(result.blockers.contains(FlightOpportunityReasonCode.AUTHORIZATION_REQUIRED))
+
+        viewModel.onTechnicalPlanningRequested()
+        waitUntil { viewModel.uiState.value.flightOpportunityResult?.mode == FlightOpportunityMode.TECHNICAL_PLANNING }
+
+        val technical = requireNotNull(viewModel.uiState.value.flightOpportunityResult)
+        assertEquals(FlightOpportunityMode.TECHNICAL_PLANNING, viewModel.uiState.value.flightOpportunityMode)
+        assertEquals(FlightOpportunityStatus.READY, technical.status)
+        assertEquals(LegalTimelineState.AUTH_REQUIRED, technical.bestOpportunity?.legalState)
+        assertFalse(technical.bestOpportunity?.reasons?.contains(FlightOpportunityReasonCode.LEGAL_OPEN) == true)
+        assertTrue(technical.blockers.contains(FlightOpportunityReasonCode.AUTHORIZATION_REQUIRED))
         scope.cancel()
     }
 
@@ -407,6 +448,54 @@ class MapViewModelTest {
             (recommendation?.recommended?.droneScore ?: 0) >=
                 (recommendation?.compared?.firstOrNull { it.droneId == "mini" }?.droneScore ?: 0)
         )
+        scope.cancel()
+    }
+
+    @Test
+    fun technicalPlanningKeepsAllCompatibleFleetCandidatesVisible() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val viewModel = viewModel(
+            scope = scope,
+            legal = FakeLegalTimelineClient(state = LegalTimelineState.AUTH_REQUIRED),
+            weather = FakeWeatherClient(forecast = weatherForecast(windKmh = 8.0, gustKmh = 12.0, hours = 2)),
+            preferences = InMemoryMapPreferences(),
+            pilotStore = FakePilotStore(
+                listOf(
+                    LocalDrone(
+                        id = "mini",
+                        manufacturer = "DJI",
+                        model = "Mini 3 Pro",
+                        weight = 249.0,
+                        manualMaxWindResistanceMs = 10.0,
+                        isSelected = true
+                    ),
+                    LocalDrone(
+                        id = "air",
+                        manufacturer = "DJI",
+                        model = "AIR 3S",
+                        weight = 724.0,
+                        manualMaxWindResistanceMs = 12.0
+                    )
+                )
+            )
+        )
+
+        waitUntil { viewModel.uiState.value.selectedDrone != null }
+        viewModel.onMapTapped(selection(41.9, 12.5))
+        waitUntil { viewModel.uiState.value.selectedPoint != null }
+        viewModel.onOperationalContextRequested()
+        waitUntil { viewModel.uiState.value.flightOpportunityResult?.technicalPlanningAvailable == true }
+        viewModel.onTechnicalPlanningRequested()
+        waitUntil { viewModel.uiState.value.flightOpportunityResult?.droneRecommendation != null }
+
+        val result = requireNotNull(viewModel.uiState.value.flightOpportunityResult)
+        val recommendation = requireNotNull(result.droneRecommendation)
+        assertEquals(FlightOpportunityMode.TECHNICAL_PLANNING, result.mode)
+        assertEquals(2, recommendation.usableCount)
+        assertEquals(2, recommendation.compared.size)
+        assertEquals(DroneWindowCompatibility.USABLE, recommendation.compared.first { it.droneId == "mini" }.compatibility)
+        assertEquals(DroneWindowCompatibility.USABLE, recommendation.compared.first { it.droneId == "air" }.compatibility)
+        assertEquals("mini", recommendation.lightestCompatible?.droneId)
         scope.cancel()
     }
 
@@ -1291,7 +1380,8 @@ private class FakeZoneCheckClient : ZoneCheckV3Client {
 
 private class FakeLegalTimelineClient(
     private val delaysByLatitude: Map<Double, Long> = emptyMap(),
-    private val failure: Throwable? = null
+    private val failure: Throwable? = null,
+    private val state: LegalTimelineState = LegalTimelineState.AVAILABLE
 ) : LegalTimelineClient {
     var calls: Int = 0
         private set
@@ -1326,8 +1416,8 @@ private class FakeLegalTimelineClient(
                 LegalTimelineSegment(
                     from = from,
                     to = to,
-                    state = LegalTimelineState.AVAILABLE,
-                    rawState = "AVAILABLE",
+                    state = state,
+                    rawState = state.name,
                     maxAltitudeAgl = 120,
                     authorization = null,
                     contributors = emptyList(),

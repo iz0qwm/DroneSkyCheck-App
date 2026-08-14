@@ -28,6 +28,7 @@ import it.droneskycheck.app.data.traffic.TrafficAwarenessDefaults
 import it.droneskycheck.app.data.traffic.TrafficAwarenessLogTag
 import it.droneskycheck.app.data.traffic.TrafficAwarenessState
 import it.droneskycheck.app.data.traffic.TrafficAssessment
+import it.droneskycheck.app.data.traffic.TrafficTargetKind
 import it.droneskycheck.app.data.traffic.coarseTraffic
 import it.droneskycheck.app.ui.map.CameraBounds
 import it.droneskycheck.app.ui.map.DemoZone
@@ -212,6 +213,7 @@ private fun configureMap(
                 "map icon registered id=${iconStyle.imageId} width=${trafficIcon.width} height=${trafficIcon.height}"
             )
         }
+        it.addImage(TRAFFIC_AWARENESS_DRONE_ICON_ID, createTrafficDroneIcon())
         DscLogger.trace(
             TrafficAwarenessLogTag,
             "map traffic altitude icon variants=${TrafficAircraftIconStyle.entries.size}"
@@ -449,7 +451,7 @@ private fun addTrafficAwarenessLayers(style: Style) {
             MapLayerIds.TRAFFIC_AWARENESS_SYMBOL_LAYER_ID,
             MapLayerIds.TRAFFIC_AWARENESS_SOURCE_ID
         ).withProperties(
-            iconImage(trafficAircraftIconImageExpression()),
+            iconImage(trafficIconImageExpression()),
             iconRotate(Expression.get(TrafficAwarenessMapProperties.RotationDeg)),
             iconSize(TrafficMapStyle.AircraftIconScale),
             iconAllowOverlap(true),
@@ -953,6 +955,48 @@ private fun createTrafficAircraftIcon(fillColor: String): Bitmap {
     return bitmap
 }
 
+private fun createTrafficDroneIcon(): Bitmap {
+    val bitmap = Bitmap.createBitmap(TRAFFIC_AWARENESS_ICON_SIZE_PX, TRAFFIC_AWARENESS_ICON_SIZE_PX, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    val armPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        style = Paint.Style.STROKE
+        strokeWidth = 5.0f
+        strokeCap = Paint.Cap.ROUND
+    }
+    val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor(TRAFFIC_AWARENESS_DRONE_COLOR)
+        style = Paint.Style.FILL
+    }
+    val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        style = Paint.Style.STROKE
+        strokeWidth = 2.2f
+    }
+    val cx = TRAFFIC_AWARENESS_ICON_SIZE_PX / 2f
+    val cy = TRAFFIC_AWARENESS_ICON_SIZE_PX / 2f
+    val rotorCenters = listOf(
+        PointF(cx - 16f, cy - 16f),
+        PointF(cx + 16f, cy - 16f),
+        PointF(cx - 16f, cy + 16f),
+        PointF(cx + 16f, cy + 16f)
+    )
+
+    canvas.drawLine(cx - 12f, cy - 12f, cx + 12f, cy + 12f, armPaint)
+    canvas.drawLine(cx + 12f, cy - 12f, cx - 12f, cy + 12f, armPaint)
+    rotorCenters.forEach { center ->
+        canvas.drawCircle(center.x, center.y, 8.5f, fillPaint)
+        canvas.drawCircle(center.x, center.y, 8.5f, strokePaint)
+    }
+    canvas.drawRoundRect(RectF(cx - 9f, cy - 7f, cx + 9f, cy + 7f), 5f, 5f, fillPaint)
+    canvas.drawRoundRect(RectF(cx - 9f, cy - 7f, cx + 9f, cy + 7f), 5f, 5f, strokePaint)
+    canvas.drawCircle(cx, cy, 2.8f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        style = Paint.Style.FILL
+    })
+    return bitmap
+}
+
 private fun com.google.gson.JsonObject.stringValue(key: String): String? =
     get(key)
         ?.takeIf { !it.isJsonNull }
@@ -976,6 +1020,14 @@ private fun zoneFillColorExpression(): Expression =
 
 private fun zoneLineColorExpression(): Expression =
     DscZoneMapColors.lineExpression()
+
+private fun trafficIconImageExpression(): Expression =
+    Expression.match(
+        Expression.get(TrafficAwarenessMapProperties.TargetKind),
+        Expression.literal(TrafficTargetKind.DRONE.name),
+        Expression.literal(TRAFFIC_AWARENESS_DRONE_ICON_ID),
+        trafficAircraftIconImageExpression()
+    )
 
 private fun trafficAircraftIconImageExpression(): Expression =
     Expression.match(
@@ -1023,7 +1075,9 @@ private const val USER_LOCATION_DOT_LAYER_ID = "dsc-user-location-dot"
 private const val USER_LOCATION_PULSE_LAYER_ID = "dsc-user-location-pulse"
 private const val NOTAM_ZEBRA_PATTERN_ID = "dsc-notam-zebra"
 private const val TRAFFIC_AWARENESS_ICON_SIZE_PX = 56
+private const val TRAFFIC_AWARENESS_DRONE_ICON_ID = "dsc-traffic-awareness-drone"
 private const val TRAFFIC_AWARENESS_COLOR = "#455a64"
+private const val TRAFFIC_AWARENESS_DRONE_COLOR = "#00796b"
 private const val TRAFFIC_AWARENESS_HIGH_ALTITUDE_COLOR = "#78909c"
 private const val TRAFFIC_AWARENESS_ATTENTION_COLOR = "#f9ab00"
 private const val TrafficRelevanceAttention = "ATTENTION"

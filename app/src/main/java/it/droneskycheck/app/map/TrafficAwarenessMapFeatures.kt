@@ -7,6 +7,7 @@ import it.droneskycheck.app.data.traffic.TrafficAssessment
 import it.droneskycheck.app.data.traffic.TrafficRelevance
 import it.droneskycheck.app.data.traffic.TrafficTarget
 import it.droneskycheck.app.data.traffic.coarseTraffic
+import it.droneskycheck.app.data.traffic.trafficTargetKind
 import it.droneskycheck.app.ui.map.MapPoint
 import kotlin.math.PI
 import kotlin.math.asin
@@ -27,6 +28,7 @@ object TrafficAwarenessMapProperties {
     const val HasRotation = "hasRotation"
     const val Relevance = "relevance"
     const val AltitudeBand = "altitudeBand"
+    const val TargetKind = "targetKind"
 }
 
 enum class TrafficAltitudeBand {
@@ -59,6 +61,7 @@ fun trafficTargetsFeatureCollection(
                 (assessments[target.id]?.relevance ?: TrafficRelevance.INFORMATION).name
             )
             addStringProperty(TrafficAwarenessMapProperties.AltitudeBand, target.trafficAltitudeBand().name)
+            addStringProperty(TrafficAwarenessMapProperties.TargetKind, target.trafficTargetKind().name)
         }.also {
             DscLogger.trace(
                 TrafficAwarenessLogTag,

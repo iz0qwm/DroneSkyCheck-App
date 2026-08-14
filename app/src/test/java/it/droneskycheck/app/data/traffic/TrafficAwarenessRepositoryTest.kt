@@ -41,6 +41,59 @@ class TrafficAwarenessRepositoryTest {
     }
 
     @Test
+    fun parsesAirSenseDroneAsTrafficTargetKindDrone() {
+        val response = parseTrafficAwarenessResponse(
+            JSONObject(
+                fixtureJson(
+                    targetsJson = """
+                        [
+                          {
+                            "id": "airsense:pilot-42:drone-7",
+                            "kind": "drone",
+                            "identifiers": {
+                              "icao24": null,
+                              "callsign": "DSC-DRONE-7",
+                              "registration": null,
+                              "sourceId": "drone-7"
+                            },
+                            "position": { "lat": 41.901, "lon": 12.501 },
+                            "altitude": {
+                              "baroM": null,
+                              "geoM": null,
+                              "mslM": null,
+                              "aglM": 42,
+                              "sourceM": 42,
+                              "sourceReference": "airsense.agl_m"
+                            },
+                            "motion": {
+                              "groundSpeedMps": 8.2,
+                              "verticalRateMps": null,
+                              "trackDeg": 91,
+                              "headingDeg": 91
+                            },
+                            "aircraft": { "category": "UAS", "type": "quad" },
+                            "time": { "timestamp": 1786550398000, "ageSec": 2.0 },
+                            "relative": { "distanceM": 350.0, "bearingDeg": 80.0 },
+                            "provider": "AirSense",
+                            "source": "AirSense",
+                            "sources": [{ "provider": "AirSense", "source": "Drone Sky Check" }]
+                          }
+                        ]
+                    """.trimIndent(),
+                    providerJson = """{ "AirSense": { "status": "ok", "count": 1 } }""",
+                    count = 1
+                )
+            )
+        )
+
+        val drone = response.traffic.targets.single()
+        assertEquals("drone", drone.objectType)
+        assertEquals(42.0, drone.altitude.aglM ?: -1.0, 0.0)
+        assertEquals("AirSense", drone.provider)
+        assertEquals(TrafficTargetKind.DRONE, drone.trafficTargetKind())
+    }
+
+    @Test
     fun parsesMixedTrafficResponse() {
         val response = parseTrafficAwarenessResponse(JSONObject(fixtureJson()))
 

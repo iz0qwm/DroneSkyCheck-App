@@ -26,7 +26,8 @@ data class FlightOpportunityInput(
     val zoneId: ZoneId,
     val now: Instant,
     val lightPreference: FlightLightPreference = FlightLightPreference.DAYLIGHT,
-    val solarWindows: List<SolarWindow> = emptyList()
+    val solarWindows: List<SolarWindow> = emptyList(),
+    val mode: FlightOpportunityMode = FlightOpportunityMode.OPEN
 )
 
 data class FlightOpportunityWeatherSlot(
@@ -37,6 +38,7 @@ data class FlightOpportunityWeatherSlot(
 )
 
 data class FlightOpportunityResult(
+    val mode: FlightOpportunityMode = FlightOpportunityMode.OPEN,
     val status: FlightOpportunityStatus,
     val bestOpportunity: FlightOpportunity?,
     val nextOpportunity: FlightOpportunity?,
@@ -48,7 +50,8 @@ data class FlightOpportunityResult(
     val blockers: List<FlightOpportunityReasonCode>,
     val lightPreference: FlightLightPreference = FlightLightPreference.DAYLIGHT,
     val solarWindows: List<SolarWindow> = emptyList(),
-    val droneRecommendation: FlightOpportunityDroneRecommendation? = null
+    val droneRecommendation: FlightOpportunityDroneRecommendation? = null,
+    val technicalPlanningAvailable: Boolean = false
 )
 
 data class FlightOpportunityDroneRecommendation(
@@ -82,6 +85,11 @@ enum class DroneWindowCompatibility {
     NOT_RECOMMENDED,
     NOT_COMPATIBLE,
     UNKNOWN
+}
+
+enum class FlightOpportunityMode {
+    OPEN,
+    TECHNICAL_PLANNING
 }
 
 enum class FlightOpportunityDroneRecommendationReason {
@@ -238,18 +246,37 @@ class FlightOpportunityEngine(
             )
         }
 
-        val openSegments = input.legalSegments.filter { it.isOpenOpportunity && it.to.isAfter(horizonFrom) && it.from.isBefore(horizonTo) }
-        if (openSegments.isEmpty()) {
+        val legalSegmentsInHorizon = input.legalSegments
+            .filter { it.to.isAfter(horizonFrom) && it.from.isBefore(horizonTo) }
+        val openSegments = legalSegmentsInHorizon.filter { it.isOpenOpportunity }
+        val legalBlockers = legalBlockers(input.legalSegments)
+        val effectiveMode = if (openSegments.isNotEmpty()) {
+            FlightOpportunityMode.OPEN
+        } else {
+            input.mode
+        }
+        if (openSegments.isEmpty() && effectiveMode == FlightOpportunityMode.OPEN) {
             return emptyResult(
+                mode = FlightOpportunityMode.OPEN,
                 status = FlightOpportunityStatus.NO_OPEN_WINDOW,
                 horizonFrom = horizonFrom,
                 horizonTo = horizonTo,
-                blockers = legalBlockers(input.legalSegments)
+                blockers = legalBlockers,
+                technicalPlanningAvailable = technicalPlanningAvailable(
+                    legalSegments = legalSegmentsInHorizon,
+                    weatherSlots = input.weatherSlots,
+                    blockers = legalBlockers
+                )
             )
         }
 
+        val evaluationSegments = if (effectiveMode == FlightOpportunityMode.TECHNICAL_PLANNING) {
+            legalSegmentsInHorizon
+        } else {
+            openSegments
+        }
         val lightWindows = input.preferenceWindows(horizonFrom, horizonTo)
-        val hasOpenLightIntersection = openSegments.any { segment ->
+        val hasLegalLightIntersection = evaluationSegments.any { segment ->
             lightWindows.any { lightWindow ->
                 val from = maxInstant(maxInstant(segment.from, lightWindow.window.from), horizonFrom)
                 val to = minInstant(minInstant(segment.to, lightWindow.window.to), horizonTo)
@@ -257,7 +284,7 @@ class FlightOpportunityEngine(
             }
         }
         val dailyScoreCaps = input.weatherSlots.dailyConservativeScoreCaps(input.zoneId)
-        val candidates = openSegments.flatMap { segment ->
+        val candidates = evaluationSegments.flatMap { segment ->
             lightWindows.flatMap { lightWindow ->
                 input.weatherSlots.mapNotNull { slot ->
                     val from = maxInstant(
@@ -300,16 +327,22 @@ class FlightOpportunityEngine(
             candidates.any { it.weatherState == WeatherState.FAVORABLE || it.weatherScore >= config.goodScore } ->
                 FlightOpportunityStatus.DRONE_UNFAVORABLE
             candidates.isNotEmpty() -> FlightOpportunityStatus.NO_FAVORABLE_WEATHER
-            lightWindows.isEmpty() || !hasOpenLightIntersection -> FlightOpportunityStatus.NO_OPEN_WINDOW
+            lightWindows.isEmpty() || !hasLegalLightIntersection -> FlightOpportunityStatus.NO_OPEN_WINDOW
             else -> FlightOpportunityStatus.INSUFFICIENT_DATA
         }
 
         val blockers = if (viable.isEmpty()) {
-            noOpportunityReasons(candidates, lightWindows, hasOpenLightIntersection)
+            noOpportunityReasons(candidates, lightWindows, hasLegalLightIntersection)
         } else {
             emptyList()
         }
+        val resultBlockers = if (effectiveMode == FlightOpportunityMode.TECHNICAL_PLANNING) {
+            (legalBlockers + blockers).distinct()
+        } else {
+            blockers
+        }
         return FlightOpportunityResult(
+            mode = effectiveMode,
             status = status,
             bestOpportunity = best,
             nextOpportunity = next,
@@ -320,7 +353,7 @@ class FlightOpportunityEngine(
             horizonFrom = horizonFrom,
             horizonTo = horizonTo,
             warnings = candidates.flatMap { it.warnings }.distinct(),
-            blockers = blockers,
+            blockers = resultBlockers,
             lightPreference = input.lightPreference,
             solarWindows = input.solarWindows
         )
@@ -417,7 +450,7 @@ class FlightOpportunityEngine(
         lightPhase: SolarLightPhase?
     ): List<FlightOpportunityReasonCode> =
         buildList {
-            add(FlightOpportunityReasonCode.LEGAL_OPEN)
+            add(segment.state.toFlightOpportunityLegalReasonCode())
             add(
                 if (timePreference == FlightOpportunityTimePreference.DAYTIME) {
                     FlightOpportunityReasonCode.DAYTIME_WINDOW
@@ -593,12 +626,15 @@ class FlightOpportunityEngine(
             .ifEmpty { listOf(FlightOpportunityReasonCode.LEGAL_UNKNOWN) }
 
     private fun emptyResult(
+        mode: FlightOpportunityMode = FlightOpportunityMode.OPEN,
         status: FlightOpportunityStatus,
         horizonFrom: Instant? = null,
         horizonTo: Instant? = null,
-        blockers: List<FlightOpportunityReasonCode>
+        blockers: List<FlightOpportunityReasonCode>,
+        technicalPlanningAvailable: Boolean = false
     ): FlightOpportunityResult =
         FlightOpportunityResult(
+            mode = mode,
             status = status,
             bestOpportunity = null,
             nextOpportunity = null,
@@ -607,9 +643,32 @@ class FlightOpportunityEngine(
             horizonFrom = horizonFrom,
             horizonTo = horizonTo,
             warnings = emptyList(),
-            blockers = blockers
+            blockers = blockers,
+            technicalPlanningAvailable = technicalPlanningAvailable
         )
 }
+
+private fun technicalPlanningAvailable(
+    legalSegments: List<LegalTimelineSegment>,
+    weatherSlots: List<FlightOpportunityWeatherSlot>,
+    blockers: List<FlightOpportunityReasonCode>
+): Boolean =
+    legalSegments.isNotEmpty() &&
+        weatherSlots.isNotEmpty() &&
+        blockers.any {
+            it == FlightOpportunityReasonCode.AUTHORIZATION_REQUIRED ||
+                it == FlightOpportunityReasonCode.LEGAL_UNAVAILABLE ||
+                it == FlightOpportunityReasonCode.LEGAL_UNKNOWN
+        }
+
+private fun LegalTimelineState.toFlightOpportunityLegalReasonCode(): FlightOpportunityReasonCode =
+    when (this) {
+        LegalTimelineState.AVAILABLE,
+        LegalTimelineState.AVAILABLE_WITH_LIMIT -> FlightOpportunityReasonCode.LEGAL_OPEN
+        LegalTimelineState.AUTH_REQUIRED -> FlightOpportunityReasonCode.AUTHORIZATION_REQUIRED
+        LegalTimelineState.UNAVAILABLE -> FlightOpportunityReasonCode.LEGAL_UNAVAILABLE
+        LegalTimelineState.UNKNOWN -> FlightOpportunityReasonCode.LEGAL_UNKNOWN
+    }
 
 private data class FlightPreferenceWindow(
     val window: TimeWindow,

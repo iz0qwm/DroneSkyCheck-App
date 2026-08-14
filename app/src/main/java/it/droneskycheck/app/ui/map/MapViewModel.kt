@@ -27,6 +27,7 @@ import it.droneskycheck.app.data.flight.FlightOpportunityDroneRecommendation
 import it.droneskycheck.app.data.flight.FlightOpportunityDroneRecommendationReason
 import it.droneskycheck.app.data.flight.FlightOpportunityInput
 import it.droneskycheck.app.data.flight.FlightOpportunityLevel
+import it.droneskycheck.app.data.flight.FlightOpportunityMode
 import it.droneskycheck.app.data.flight.FlightOpportunityResult
 import it.droneskycheck.app.data.flight.FlightOpportunityStatus
 import it.droneskycheck.app.data.flight.FlightOpportunityWeatherSlot
@@ -493,6 +494,7 @@ class MapViewModel(
             weatherForecast = null,
             weatherAssessment = null,
             droneOperationalAssessment = null,
+            flightOpportunityMode = FlightOpportunityMode.OPEN,
             flightOpportunityStatus = FlightOpportunityStatus.LOADING,
             flightOpportunityResult = null,
             isOperationalReportExpanded = false,
@@ -525,6 +527,7 @@ class MapViewModel(
                 weatherForecast = null,
                 weatherAssessment = null,
                 droneOperationalAssessment = null,
+                flightOpportunityMode = FlightOpportunityMode.OPEN,
                 flightOpportunityStatus = FlightOpportunityStatus.IDLE,
                 flightOpportunityResult = null,
                 isOperationalReportExpanded = false,
@@ -579,6 +582,7 @@ class MapViewModel(
             weatherForecast = null,
             weatherAssessment = null,
             droneOperationalAssessment = null,
+            flightOpportunityMode = FlightOpportunityMode.OPEN,
             flightOpportunityStatus = FlightOpportunityStatus.IDLE,
             flightOpportunityResult = null,
             isOperationalReportExpanded = false,
@@ -648,7 +652,8 @@ class MapViewModel(
                     isLegalTimelineLoading = false,
                     legalTimeline = response,
                     legalTimelineError = null
-                ).withFlightOpportunity(
+                )
+                _uiState.value = _uiState.value.withFlightOpportunity(
                     timeline = response,
                     forecast = _uiState.value.weatherForecast,
                     selectedDrone = _uiState.value.selectedDrone
@@ -715,7 +720,8 @@ class MapViewModel(
                     weatherAssessment = assessment,
                     droneOperationalAssessment = currentDroneAssessment(forecast, assessment),
                     weatherError = null
-                ).withFlightOpportunity(
+                )
+                _uiState.value = _uiState.value.withFlightOpportunity(
                     timeline = _uiState.value.legalTimeline,
                     forecast = forecast,
                     selectedDrone = _uiState.value.selectedDrone
@@ -995,6 +1001,18 @@ class MapViewModel(
         )
     }
 
+    fun onTechnicalPlanningRequested() {
+        val result = _uiState.value.flightOpportunityResult ?: return
+        if (!result.technicalPlanningAvailable) return
+        _uiState.value = _uiState.value.copy(
+            flightOpportunityMode = FlightOpportunityMode.TECHNICAL_PLANNING
+        ).withFlightOpportunity(
+            timeline = _uiState.value.legalTimeline,
+            forecast = _uiState.value.weatherForecast,
+            selectedDrone = _uiState.value.selectedDrone
+        )
+    }
+
     fun onOperationalReportExpansionChanged(expanded: Boolean) {
         _uiState.value = _uiState.value.copy(isOperationalReportExpanded = expanded)
     }
@@ -1116,7 +1134,8 @@ class MapViewModel(
                 zoneId = zoneId,
                 now = now,
                 lightPreference = selectedLightPreference,
-                solarWindows = solarWindows
+                solarWindows = solarWindows,
+                mode = flightOpportunityMode
             )
         )
         val resultWithDroneAdvice = result.withDroneRecommendation(
@@ -1160,7 +1179,8 @@ class MapViewModel(
                     zoneId = zoneId,
                     now = now,
                     lightPreference = lightPreference,
-                    solarWindows = solarWindows
+                    solarWindows = solarWindows,
+                    mode = mode
                 )
             )
             val best = evaluated.bestOpportunity
@@ -1425,6 +1445,9 @@ class MapViewModel(
             weatherForecast = null,
             weatherAssessment = null,
             droneOperationalAssessment = null,
+            flightOpportunityMode = FlightOpportunityMode.OPEN,
+            flightOpportunityStatus = FlightOpportunityStatus.IDLE,
+            flightOpportunityResult = null,
             weatherError = null,
             trafficAssessments = if (trafficEnabled) _uiState.value.trafficAssessments else emptyMap(),
             selectedTrafficTarget = _uiState.value.selectedTrafficTarget

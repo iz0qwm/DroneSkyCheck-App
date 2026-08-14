@@ -6,6 +6,7 @@ import it.droneskycheck.app.data.drone.DroneDataCompleteness
 import it.droneskycheck.app.data.drone.DroneOperationalAssessment
 import it.droneskycheck.app.data.drone.DroneOperationalCapabilities
 import it.droneskycheck.app.data.drone.DroneOperationalLevel
+import it.droneskycheck.app.data.solar.SolarLightPhase
 import it.droneskycheck.app.data.solar.SolarWindow
 import it.droneskycheck.app.data.solar.TimeWindow
 import it.droneskycheck.app.data.weather.WeatherAssessment
@@ -47,6 +48,7 @@ class FlightOpportunityEngineTest {
         )
 
         assertEquals(FlightOpportunityStatus.READY, result.status)
+        assertEquals(FlightOpportunityMode.OPEN, result.mode)
         assertEquals(Instant.parse("2026-08-14T07:00:00Z"), result.bestOpportunity?.from)
         assertEquals(Instant.parse("2026-08-14T08:00:00Z"), result.bestOpportunity?.to)
         assertEquals(60, result.bestOpportunity?.maxAltitudeAgl)
@@ -67,10 +69,105 @@ class FlightOpportunityEngineTest {
         )
 
         assertEquals(FlightOpportunityStatus.NO_OPEN_WINDOW, result.status)
+        assertEquals(FlightOpportunityMode.OPEN, result.mode)
         assertNull(result.bestOpportunity)
+        assertTrue(result.technicalPlanningAvailable)
         assertTrue(result.blockers.contains(FlightOpportunityReasonCode.AUTHORIZATION_REQUIRED))
         assertTrue(result.blockers.contains(FlightOpportunityReasonCode.LEGAL_UNKNOWN))
         assertTrue(result.blockers.contains(FlightOpportunityReasonCode.LEGAL_UNAVAILABLE))
+    }
+
+    @Test
+    fun authRequiredCanProduceTechnicalPlanningWindowWithoutLegalOpenReason() {
+        val result = engine.evaluate(
+            input(
+                legalSegments = listOf(
+                    segment("2026-08-14T06:00:00Z", "2026-08-14T10:00:00Z", LegalTimelineState.AUTH_REQUIRED)
+                ),
+                weatherSlots = listOf(slot("2026-08-14T06:00:00Z", "2026-08-14T10:00:00Z")),
+                mode = FlightOpportunityMode.TECHNICAL_PLANNING
+            )
+        )
+
+        assertEquals(FlightOpportunityMode.TECHNICAL_PLANNING, result.mode)
+        assertEquals(FlightOpportunityStatus.READY, result.status)
+        assertEquals(LegalTimelineState.AUTH_REQUIRED, result.bestOpportunity?.legalState)
+        assertFalse(result.bestOpportunity?.reasons?.contains(FlightOpportunityReasonCode.LEGAL_OPEN) == true)
+        assertTrue(result.bestOpportunity?.reasons?.contains(FlightOpportunityReasonCode.AUTHORIZATION_REQUIRED) == true)
+        assertTrue(result.blockers.contains(FlightOpportunityReasonCode.AUTHORIZATION_REQUIRED))
+    }
+
+    @Test
+    fun technicalPlanningUsesWeatherLightAndDroneAssessmentsWithoutChangingLegalState() {
+        val result = engine.evaluate(
+            input(
+                legalSegments = listOf(
+                    segment("2026-08-15T03:30:00Z", "2026-08-15T05:00:00Z", LegalTimelineState.AUTH_REQUIRED)
+                ),
+                weatherSlots = listOf(
+                    slot(
+                        "2026-08-15T03:30:00Z",
+                        "2026-08-15T05:00:00Z",
+                        weather = weather(score = 88, reasons = emptyList()),
+                        drone = drone(score = 82, level = DroneOperationalLevel.FAVORABLE)
+                    )
+                ),
+                lightPreference = FlightLightPreference.SUNRISE,
+                solarWindows = listOf(
+                    solarWindow(
+                        date = LocalDate.parse("2026-08-15"),
+                        sunrise = "2026-08-15T04:20:00Z",
+                        sunset = "2026-08-15T17:50:00Z",
+                        morningBlue = "2026-08-15T03:40:00Z" to "2026-08-15T03:55:00Z",
+                        morningGolden = "2026-08-15T03:55:00Z" to "2026-08-15T04:45:00Z",
+                        daylight = "2026-08-15T04:20:00Z" to "2026-08-15T17:50:00Z"
+                    )
+                ),
+                mode = FlightOpportunityMode.TECHNICAL_PLANNING
+            )
+        )
+        val best = requireNotNull(result.bestOpportunity)
+
+        assertEquals(FlightOpportunityMode.TECHNICAL_PLANNING, result.mode)
+        assertEquals(LegalTimelineState.AUTH_REQUIRED, best.legalState)
+        assertEquals(SolarLightPhase.GOLDEN_HOUR_MORNING, best.lightPhase)
+        assertEquals(88, best.weatherScore)
+        assertEquals(82, best.droneScore)
+        assertTrue(best.droneAssessmentAvailable)
+        assertTrue(best.reasons.contains(FlightOpportunityReasonCode.WEATHER_FAVORABLE))
+        assertTrue(best.reasons.contains(FlightOpportunityReasonCode.GOLDEN_HOUR_WINDOW))
+        assertTrue(best.reasons.contains(FlightOpportunityReasonCode.DRONE_COMPATIBLE))
+    }
+
+    @Test
+    fun unavailableAndUnknownRemainLegalBlockersInTechnicalPlanning() {
+        val unavailable = engine.evaluate(
+            input(
+                legalSegments = listOf(
+                    segment("2026-08-14T06:00:00Z", "2026-08-14T08:00:00Z", LegalTimelineState.UNAVAILABLE)
+                ),
+                weatherSlots = listOf(slot("2026-08-14T06:00:00Z", "2026-08-14T08:00:00Z")),
+                mode = FlightOpportunityMode.TECHNICAL_PLANNING
+            )
+        )
+        val unknown = engine.evaluate(
+            input(
+                legalSegments = listOf(
+                    segment("2026-08-14T06:00:00Z", "2026-08-14T08:00:00Z", LegalTimelineState.UNKNOWN)
+                ),
+                weatherSlots = listOf(slot("2026-08-14T06:00:00Z", "2026-08-14T08:00:00Z")),
+                mode = FlightOpportunityMode.TECHNICAL_PLANNING
+            )
+        )
+
+        assertEquals(FlightOpportunityMode.TECHNICAL_PLANNING, unavailable.mode)
+        assertEquals(LegalTimelineState.UNAVAILABLE, unavailable.bestOpportunity?.legalState)
+        assertTrue(unavailable.blockers.contains(FlightOpportunityReasonCode.LEGAL_UNAVAILABLE))
+        assertFalse(unavailable.bestOpportunity?.reasons?.contains(FlightOpportunityReasonCode.LEGAL_OPEN) == true)
+        assertEquals(FlightOpportunityMode.TECHNICAL_PLANNING, unknown.mode)
+        assertEquals(LegalTimelineState.UNKNOWN, unknown.bestOpportunity?.legalState)
+        assertTrue(unknown.blockers.contains(FlightOpportunityReasonCode.LEGAL_UNKNOWN))
+        assertFalse(unknown.bestOpportunity?.reasons?.contains(FlightOpportunityReasonCode.LEGAL_OPEN) == true)
     }
 
     @Test
@@ -411,7 +508,8 @@ class FlightOpportunityEngineTest {
         legalSegments: List<LegalTimelineSegment>,
         weatherSlots: List<FlightOpportunityWeatherSlot>,
         lightPreference: FlightLightPreference = FlightLightPreference.DAYLIGHT,
-        solarWindows: List<SolarWindow> = emptyList()
+        solarWindows: List<SolarWindow> = emptyList(),
+        mode: FlightOpportunityMode = FlightOpportunityMode.OPEN
     ): FlightOpportunityInput =
         FlightOpportunityInput(
             legalSegments = legalSegments,
@@ -419,7 +517,8 @@ class FlightOpportunityEngineTest {
             zoneId = zoneId,
             now = now,
             lightPreference = lightPreference,
-            solarWindows = solarWindows
+            solarWindows = solarWindows,
+            mode = mode
         )
 
     private fun segment(

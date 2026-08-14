@@ -16,6 +16,7 @@ import it.droneskycheck.app.data.traffic.TrafficRelevance
 import it.droneskycheck.app.data.traffic.TrafficSource
 import it.droneskycheck.app.data.traffic.TrafficSummary
 import it.droneskycheck.app.data.traffic.TrafficTarget
+import it.droneskycheck.app.data.traffic.TrafficTargetKind
 import it.droneskycheck.app.data.traffic.TrafficTime
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -262,6 +263,27 @@ class TrafficAwarenessPresentationTest {
         assertEquals("Quota ricevuta" to "68 m", presentation.sections.first { it.title == "Quota" }.rows.single().toPair())
         assertNull(presentation.sections.first { it.title == "Dati traffico" }.rows.firstOrNull { it.value.contains("null") })
     }
+
+    @Test
+    fun airSenseDroneSheetPresentationShowsDroneType() {
+        val target = trafficTarget(
+            id = "airsense:drone-7",
+            callsign = "DSC-DRONE-7",
+            provider = "AirSense",
+            source = "Drone Sky Check",
+            aglM = 42.0,
+            objectType = "drone"
+        )
+        val presentation = target.trafficSheetPresentation(assessment(TrafficRelevance.MONITOR))
+
+        assertEquals(TrafficTargetKind.DRONE, presentation.targetKind)
+        assertEquals("DSC-DRONE-7", presentation.title)
+        assertEquals("Drone rilevato", presentation.secondaryIdentity)
+        assertEquals(
+            "Tipo" to "Drone AirSense",
+            presentation.sections.first { it.title == "Dati traffico" }.rows.first().toPair()
+        )
+    }
 }
 
 private fun TrafficAwarenessInfoRow.toPair(): Pair<String, String> = label to value
@@ -315,7 +337,8 @@ private fun trafficTarget(
     sourceM: Double? = null,
     speedMps: Double? = null,
     trackDeg: Double? = null,
-    headingDeg: Double? = null
+    headingDeg: Double? = null,
+    objectType: String? = null
 ): TrafficTarget =
     TrafficTarget(
         id = id,
@@ -347,5 +370,6 @@ private fun trafficTarget(
         source = source,
         quality = null,
         sources = listOf(TrafficSource(provider = provider, source = source)),
-        provenance = null
+        provenance = null,
+        objectType = objectType
     )

@@ -6,7 +6,9 @@ import it.droneskycheck.app.data.traffic.TrafficCalculationConfidence
 import it.droneskycheck.app.data.traffic.TrafficRelevance
 import it.droneskycheck.app.data.traffic.TrafficRelevanceReason
 import it.droneskycheck.app.data.traffic.TrafficTarget
+import it.droneskycheck.app.data.traffic.TrafficTargetKind
 import it.droneskycheck.app.data.traffic.selectPrimaryTrafficAttentionTargetId
+import it.droneskycheck.app.data.traffic.trafficTargetKind
 import it.droneskycheck.app.map.displayName
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -25,6 +27,7 @@ data class TrafficAttentionPresentation(
 
 data class TrafficTargetSheetPresentation(
     val title: String,
+    val targetKind: TrafficTargetKind,
     val sourceLabel: String?,
     val secondaryIdentity: String?,
     val relevanceLabel: String,
@@ -98,6 +101,7 @@ fun trafficAttentionPresentation(
 
 fun TrafficTarget.trafficSheetPresentation(assessment: TrafficAssessment? = null): TrafficTargetSheetPresentation {
     val sourceLabel = trafficSourceText()
+    val targetKind = trafficTargetKind()
     val relationRows = buildList {
         (assessment?.currentDistanceM ?: relative.distanceM)?.let {
             add(TrafficAwarenessInfoRow("Distanza", formatTrafficDistance(it)))
@@ -136,6 +140,7 @@ fun TrafficTarget.trafficSheetPresentation(assessment: TrafficAssessment? = null
     }
 
     val dataRows = buildList {
+        add(TrafficAwarenessInfoRow("Tipo", targetKind.presentationLabel()))
         sourceLabel?.let { add(TrafficAwarenessInfoRow("Sorgente", it)) }
         identifiers.icao24?.let { add(TrafficAwarenessInfoRow("ICAO", it.uppercase(Locale.US))) }
         time.ageSec?.let { add(TrafficAwarenessInfoRow("Aggiornamento", "Aggiornato ${formatTrafficDuration(it)} fa")) }
@@ -143,8 +148,12 @@ fun TrafficTarget.trafficSheetPresentation(assessment: TrafficAssessment? = null
 
     return TrafficTargetSheetPresentation(
         title = displayName(),
+        targetKind = targetKind,
         sourceLabel = sourceLabel,
-        secondaryIdentity = identifiers.icao24?.let { "ICAO ${it.uppercase(Locale.US)}" },
+        secondaryIdentity = when (targetKind) {
+            TrafficTargetKind.DRONE -> "Drone rilevato"
+            TrafficTargetKind.AIRCRAFT -> identifiers.icao24?.let { "ICAO ${it.uppercase(Locale.US)}" }
+        },
         relevanceLabel = (assessment?.relevance ?: TrafficRelevance.INFORMATION).presentationLabel(),
         sections = listOf(
             TrafficTargetSheetSection("Rispetto all'area operativa", relationRows, relationNote),
@@ -236,6 +245,12 @@ private fun TrafficRelevance.presentationLabel(): String =
         TrafficRelevance.INFORMATION -> "Informativo"
         TrafficRelevance.MONITOR -> "Da monitorare"
         TrafficRelevance.ATTENTION -> "Attenzione"
+    }
+
+private fun TrafficTargetKind.presentationLabel(): String =
+    when (this) {
+        TrafficTargetKind.AIRCRAFT -> "Aeromobile"
+        TrafficTargetKind.DRONE -> "Drone AirSense"
     }
 
 private fun TrafficCalculationConfidence.presentationLabel(): String =
