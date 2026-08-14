@@ -29,4 +29,15 @@ class MapPreferencesRepositoryTest {
         assertFalse(preferences.isTrafficAlertSoundEnabled())
         assertFalse(preferences.isTrafficAlertVibrationEnabled())
     }
+
+    @Test
+    fun largeTextToggleDefaultsToOffAndPersistsLocally() {
+        val preferences = InMemoryMapPreferences()
+
+        assertFalse(preferences.isLargeTextEnabled())
+
+        preferences.setLargeTextEnabled(true)
+
+        assertTrue(preferences.isLargeTextEnabled())
+    }
 }

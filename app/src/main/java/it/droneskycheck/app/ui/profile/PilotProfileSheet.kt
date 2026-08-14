@@ -55,6 +55,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -73,6 +74,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -99,6 +101,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -309,6 +312,8 @@ fun PilotProfileSheet(
     helpManifest: HelpManifest = HelpManifest.empty(),
     isHelpRefreshing: Boolean = false,
     helpRefreshMessage: String? = null,
+    largeTextEnabled: Boolean = false,
+    onLargeTextEnabledChanged: (Boolean) -> Unit = {},
     onRefreshHelp: () -> Unit = {},
     onRepeatTour: () -> Unit = {},
     onDismiss: () -> Unit
@@ -599,6 +604,10 @@ fun PilotProfileSheet(
                         onExpandedChange = { draftsExpanded = it },
                         onRefresh = { reload() }
                     )
+                    AccessibilityCard(
+                        largeTextEnabled = largeTextEnabled,
+                        onLargeTextEnabledChanged = onLargeTextEnabledChanged
+                    )
                     HelpAccessCard(
                         onOpenHelp = { isHelpSheetVisible = true },
                         onRepeatTour = {
@@ -641,6 +650,7 @@ private fun PilotHeader(
     onPickPhoto: () -> Unit
 ) {
     val displayName = profile?.displayName?.takeIf { it.isNotBlank() } ?: "Profilo pilota"
+    val stackActions = LocalDensity.current.fontScale >= 1.5f
     Surface(
         color = MaterialTheme.colorScheme.primaryContainer,
         contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -675,24 +685,50 @@ private fun PilotHeader(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(onClick = onPickPhoto) {
-                    Icon(
-                        imageVector = Icons.Default.PhotoCamera,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(if (profile?.profilePhoto.isNullOrBlank()) "Aggiungi foto" else "Cambia foto")
+            if (stackActions) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(onClick = onPickPhoto, modifier = Modifier.fillMaxWidth()) {
+                        Icon(
+                            imageVector = Icons.Default.PhotoCamera,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(if (profile?.profilePhoto.isNullOrBlank()) "Aggiungi foto" else "Cambia foto")
+                    }
+                    Button(onClick = onEdit, modifier = Modifier.fillMaxWidth()) {
+                        Icon(
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Modifica")
+                    }
                 }
-                Button(onClick = onEdit) {
-                    Icon(
-                        imageVector = Icons.Default.Edit,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Modifica")
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedButton(onClick = onPickPhoto) {
+                        Icon(
+                            imageVector = Icons.Default.PhotoCamera,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(if (profile?.profilePhoto.isNullOrBlank()) "Aggiungi foto" else "Cambia foto")
+                    }
+                    Button(onClick = onEdit) {
+                        Icon(
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Modifica")
+                    }
                 }
             }
         }
@@ -866,7 +902,7 @@ private fun CertificateRow(
                         text = certificate.issuingAuthority.ifBlank { "Ente non indicato" },
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
@@ -1039,7 +1075,7 @@ private fun DroneRow(
                         text = drone.displayName,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
@@ -1172,6 +1208,55 @@ private fun HelpAccessCard(
 }
 
 @Composable
+private fun AccessibilityCard(
+    largeTextEnabled: Boolean,
+    onLargeTextEnabledChanged: (Boolean) -> Unit
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        shape = RoundedCornerShape(20.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = "ACCESSIBILITA",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                ProfileIconChip(icon = Icons.Default.Visibility)
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "Testo piu grande",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "Aumenta la leggibilita dei testi nell'app Drone Sky Check.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = largeTextEnabled,
+                    onCheckedChange = onLargeTextEnabledChanged
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun ProfileCard(
     title: String,
     subtitle: String,
@@ -1205,14 +1290,14 @@ private fun ProfileCard(
                         text = title,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
                         text = subtitle,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
+                        maxLines = 3,
                         overflow = TextOverflow.Ellipsis
                     )
                 }

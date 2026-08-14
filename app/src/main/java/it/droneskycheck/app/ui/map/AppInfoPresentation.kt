@@ -28,7 +28,14 @@ data class UasDatasetInfoPresentation(
 
 data class AppInfoPresentation(
     val build: AppBuildInfoPresentation,
-    val dataset: UasDatasetInfoPresentation
+    val dataset: UasDatasetInfoPresentation,
+    val textScale: TextScaleInfoPresentation? = null
+)
+
+data class TextScaleInfoPresentation(
+    val systemFontScaleLabel: String,
+    val largeTextEnabledLabel: String,
+    val effectiveFontScaleLabel: String
 )
 
 fun buildAppBuildInfoPresentation(
@@ -48,11 +55,24 @@ fun buildAppBuildInfoPresentation(
 fun appInfoPresentation(
     context: Context,
     mapStatusMessage: String?,
-    updates: UasDatasetUpdates?
+    updates: UasDatasetUpdates?,
+    textScale: TextScaleInfoPresentation? = null
 ): AppInfoPresentation =
     AppInfoPresentation(
         build = context.readAppBuildInfoPresentation(),
-        dataset = uasDatasetInfoPresentation(mapStatusMessage, updates)
+        dataset = uasDatasetInfoPresentation(mapStatusMessage, updates),
+        textScale = textScale
+    )
+
+fun textScaleInfoPresentation(
+    systemFontScale: Float,
+    largeTextEnabled: Boolean,
+    effectiveFontScale: Float
+): TextScaleInfoPresentation =
+    TextScaleInfoPresentation(
+        systemFontScaleLabel = systemFontScale.formatTextScale(),
+        largeTextEnabledLabel = if (largeTextEnabled) "Attivo" else "Non attivo",
+        effectiveFontScaleLabel = effectiveFontScale.formatTextScale()
     )
 
 fun mapTitleAppInfoEnabled(
@@ -95,6 +115,11 @@ fun appInfoDiagnosticText(info: AppInfoPresentation): String =
         appendLine(info.build.appName)
         appendLine("Versione app: ${info.build.versionName} (${info.build.versionCode})")
         appendLine("Piattaforma: ${info.build.platform}")
+        info.textScale?.let { textScale ->
+            appendLine("Scala testo Android: ${textScale.systemFontScaleLabel}")
+            appendLine("Testo piu grande DSC: ${textScale.largeTextEnabledLabel}")
+            appendLine("Scala testo effettiva DSC: ${textScale.effectiveFontScaleLabel}")
+        }
         appendLine("Dati UAS: ${info.dataset.availabilityLabel}")
         info.dataset.cacheLabel?.let { appendLine("Cache UAS: $it") }
         info.dataset.datasetVersion?.let { appendLine("Versione dataset UAS: $it") }
@@ -140,6 +165,9 @@ private fun String.formatDatasetInstant(): String? =
     runCatching {
         DatasetInstantFormatter.format(Instant.parse(this))
     }.getOrNull()
+
+private fun Float.formatTextScale(): String =
+    String.format(Locale.US, "%.2f", this)
 
 private val DatasetInstantFormatter: DateTimeFormatter =
     DateTimeFormatter

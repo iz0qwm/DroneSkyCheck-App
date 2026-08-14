@@ -117,6 +117,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -224,6 +225,8 @@ import it.droneskycheck.app.map.DscZoneMapColors
 import it.droneskycheck.app.map.DroneSkyMapView
 import it.droneskycheck.app.map.MapLayerIds
 import it.droneskycheck.app.ui.authorization.AuthorizationDraftSheet
+import it.droneskycheck.app.ui.accessibility.DroneSkyCheckTextScaleProvider
+import it.droneskycheck.app.ui.accessibility.effectiveDscFontScale
 import it.droneskycheck.app.ui.help.HelpBottomSheet
 import it.droneskycheck.app.ui.help.HelpTopicDialog
 import it.droneskycheck.app.ui.profile.PilotProfileSheet
@@ -267,6 +270,11 @@ fun MapScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     val hapticFeedback = LocalHapticFeedback.current
     val trafficAlertToneGenerator = rememberTrafficAlertToneGenerator()
+    val systemFontScale = LocalDensity.current.fontScale
+    val effectiveFontScale = effectiveDscFontScale(
+        systemFontScale = systemFontScale,
+        largeTextEnabled = uiState.isLargeTextEnabled
+    )
     val visibleLayerCategories = uiState.layerVisibility
         .filterValues { it }
         .keys
@@ -289,11 +297,23 @@ fun MapScreen(
         targets = uiState.trafficAwareness.response?.traffic?.targets.orEmpty(),
         assessments = uiState.trafficAssessments
     )
-    val appInfo = remember(context, uiState.mapStatusMessage, uiState.uasDatasetUpdates) {
+    val appInfo = remember(
+        context,
+        uiState.mapStatusMessage,
+        uiState.uasDatasetUpdates,
+        systemFontScale,
+        uiState.isLargeTextEnabled,
+        effectiveFontScale
+    ) {
         appInfoPresentation(
             context = context.applicationContext,
             mapStatusMessage = uiState.mapStatusMessage,
-            updates = uiState.uasDatasetUpdates
+            updates = uiState.uasDatasetUpdates,
+            textScale = textScaleInfoPresentation(
+                systemFontScale = systemFontScale,
+                largeTextEnabled = uiState.isLargeTextEnabled,
+                effectiveFontScale = effectiveFontScale
+            )
         )
     }
 
@@ -433,7 +453,8 @@ fun MapScreen(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    DroneSkyCheckTextScaleProvider(largeTextEnabled = uiState.isLargeTextEnabled) {
+        Box(modifier = Modifier.fillMaxSize()) {
         DroneSkyMapView(
             visibleLayerCategories = visibleLayerCategories,
             selectedPoint = uiState.selectedPoint,
@@ -676,6 +697,8 @@ fun MapScreen(
                 helpManifest = uiState.helpManifest,
                 isHelpRefreshing = uiState.isHelpManifestRefreshing,
                 helpRefreshMessage = uiState.helpManifestRefreshMessage,
+                largeTextEnabled = uiState.isLargeTextEnabled,
+                onLargeTextEnabledChanged = viewModel::onLargeTextEnabledChanged,
                 onRefreshHelp = viewModel::refreshHelpManifestNow,
                 onRepeatTour = {
                     isPilotProfileSheetVisible = false
@@ -846,6 +869,7 @@ fun MapScreen(
                 )
             }
         }
+    }
     }
 }
 
@@ -2360,6 +2384,14 @@ private fun AppInfoBottomSheet(
                 AppInfoRow("Tipo", "App Android nativa")
             }
 
+            info.textScale?.let { textScale ->
+                AppInfoSection(title = "Accessibilita") {
+                    AppInfoRow("Scala testo Android", textScale.systemFontScaleLabel)
+                    AppInfoRow("Testo piu grande DSC", textScale.largeTextEnabledLabel)
+                    AppInfoRow("Scala testo effettiva DSC", textScale.effectiveFontScaleLabel)
+                }
+            }
+
             AppInfoSection(title = "Dati UAS") {
                 AppInfoRow("Stato", info.dataset.availabilityLabel)
                 info.dataset.cacheLabel?.let { AppInfoRow("Cache", it) }
@@ -2381,21 +2413,39 @@ private fun AppInfoBottomSheet(
                 )
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                OutlinedButton(
-                    onClick = onOpenHelp,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text("Manuale")
+            val stackActions = LocalDensity.current.fontScale >= 1.5f
+            if (stackActions) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedButton(
+                        onClick = onOpenHelp,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Manuale")
+                    }
+                    OutlinedButton(
+                        onClick = onOpenWebApp,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Web app")
+                    }
                 }
-                OutlinedButton(
-                    onClick = onOpenWebApp,
-                    modifier = Modifier.weight(1f)
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text("Web app")
+                    OutlinedButton(
+                        onClick = onOpenHelp,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Manuale")
+                    }
+                    OutlinedButton(
+                        onClick = onOpenWebApp,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Web app")
+                    }
                 }
             }
 
@@ -2434,23 +2484,41 @@ private fun AppInfoRow(
     label: String,
     value: String
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.Top
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(132.dp)
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier.weight(1f)
-        )
+    if (LocalDensity.current.fontScale >= 1.5f) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = value,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium
+            )
+        }
+    } else {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.width(132.dp)
+            )
+            Text(
+                text = value,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.weight(1f)
+            )
+        }
     }
 }
 

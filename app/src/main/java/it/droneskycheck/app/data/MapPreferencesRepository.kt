@@ -5,6 +5,8 @@ import android.content.Context
 interface MapPreferences {
     fun isWeatherAnalysisEnabled(): Boolean
     fun setWeatherAnalysisEnabled(enabled: Boolean)
+    fun isLargeTextEnabled(): Boolean
+    fun setLargeTextEnabled(enabled: Boolean)
     fun isTrafficAlertSoundEnabled(): Boolean
     fun setTrafficAlertSoundEnabled(enabled: Boolean)
     fun isTrafficAlertVibrationEnabled(): Boolean
@@ -22,6 +24,15 @@ class MapPreferencesRepository(
     override fun setWeatherAnalysisEnabled(enabled: Boolean) {
         preferences.edit()
             .putBoolean(KeyWeatherAnalysisEnabled, enabled)
+            .apply()
+    }
+
+    override fun isLargeTextEnabled(): Boolean =
+        preferences.getBoolean(KeyLargeTextEnabled, false)
+
+    override fun setLargeTextEnabled(enabled: Boolean) {
+        preferences.edit()
+            .putBoolean(KeyLargeTextEnabled, enabled)
             .apply()
     }
 
@@ -46,6 +57,7 @@ class MapPreferencesRepository(
     private companion object {
         const val PreferencesName = "dsc_map_preferences"
         const val KeyWeatherAnalysisEnabled = "weather_analysis_enabled"
+        const val KeyLargeTextEnabled = "large_text_enabled"
         const val KeyTrafficAlertSoundEnabled = "traffic_alert_sound_enabled"
         const val KeyTrafficAlertVibrationEnabled = "traffic_alert_vibration_enabled"
     }
@@ -53,10 +65,12 @@ class MapPreferencesRepository(
 
 class InMemoryMapPreferences(
     initialWeatherAnalysisEnabled: Boolean = false,
+    initialLargeTextEnabled: Boolean = false,
     initialTrafficAlertSoundEnabled: Boolean = true,
     initialTrafficAlertVibrationEnabled: Boolean = true
 ) : MapPreferences {
     private var weatherAnalysisEnabled = initialWeatherAnalysisEnabled
+    private var largeTextEnabled = initialLargeTextEnabled
     private var trafficAlertSoundEnabled = initialTrafficAlertSoundEnabled
     private var trafficAlertVibrationEnabled = initialTrafficAlertVibrationEnabled
 
@@ -64,6 +78,12 @@ class InMemoryMapPreferences(
 
     override fun setWeatherAnalysisEnabled(enabled: Boolean) {
         weatherAnalysisEnabled = enabled
+    }
+
+    override fun isLargeTextEnabled(): Boolean = largeTextEnabled
+
+    override fun setLargeTextEnabled(enabled: Boolean) {
+        largeTextEnabled = enabled
     }
 
     override fun isTrafficAlertSoundEnabled(): Boolean = trafficAlertSoundEnabled

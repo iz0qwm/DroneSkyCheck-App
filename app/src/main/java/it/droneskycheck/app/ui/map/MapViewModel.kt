@@ -130,6 +130,7 @@ class MapViewModel(
     private val trafficAlertController = TrafficAlertController()
 
     init {
+        loadAccessibilityPreferences()
         loadTrafficAlertPreferences()
         if (loadHelpOnInit) loadHelpManifest()
         loadUasDatasetUpdates()
@@ -929,12 +930,23 @@ class MapViewModel(
         _uiState.value = _uiState.value.copy(trafficAlertVibrationEnabled = enabled)
     }
 
+    fun onLargeTextEnabledChanged(enabled: Boolean) {
+        mapPreferences.setLargeTextEnabled(enabled)
+        _uiState.value = _uiState.value.copy(isLargeTextEnabled = enabled)
+    }
+
     private fun trafficAwarenessStopReason(point: MapPoint): String =
         when {
             !_uiState.value.trafficAwareness.enabled -> "disabled"
             _uiState.value.selectedPoint != point -> "center_changed"
             else -> "cancelled"
         }
+
+    private fun loadAccessibilityPreferences() {
+        _uiState.value = _uiState.value.copy(
+            isLargeTextEnabled = mapPreferences.isLargeTextEnabled()
+        )
+    }
 
     private fun loadTrafficAlertPreferences() {
         _uiState.value = _uiState.value.copy(

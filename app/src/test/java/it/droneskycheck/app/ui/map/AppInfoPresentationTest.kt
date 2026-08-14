@@ -97,4 +97,29 @@ class AppInfoPresentationTest {
         assertFalse(text.contains("Aggiornamento sorgente UAS:"))
         assertFalse(text.contains("Cache dispositivo UAS:"))
     }
+
+    @Test
+    fun diagnosticTextIncludesTextScaleWhenAvailable() {
+        val text = appInfoDiagnosticText(
+            AppInfoPresentation(
+                build = buildAppBuildInfoPresentation(
+                    appName = "Drone Sky Check",
+                    versionName = "3.0-beta4",
+                    versionCode = 19,
+                    androidRelease = "15",
+                    sdkInt = 35
+                ),
+                dataset = uasDatasetInfoPresentation(mapStatusMessage = null),
+                textScale = textScaleInfoPresentation(
+                    systemFontScale = 1.0f,
+                    largeTextEnabled = true,
+                    effectiveFontScale = 1.25f
+                )
+            )
+        )
+
+        assertTrue(text.contains("Scala testo Android: 1.00"))
+        assertTrue(text.contains("Testo piu grande DSC: Attivo"))
+        assertTrue(text.contains("Scala testo effettiva DSC: 1.25"))
+    }
 }

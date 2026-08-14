@@ -36,6 +36,7 @@ data class MapUiState(
     val legalTimelineError: String? = null,
     val isOperationalContextRequested: Boolean = false,
     val isWeatherAnalysisEnabled: Boolean = false,
+    val isLargeTextEnabled: Boolean = false,
     val isWeatherAnalysisLoading: Boolean = false,
     val weatherForecast: WeatherForecast? = null,
     val weatherAssessment: WeatherAssessment? = null,
