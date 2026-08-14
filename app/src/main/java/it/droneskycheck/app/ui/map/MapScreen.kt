@@ -61,6 +61,7 @@ import androidx.compose.material.icons.filled.Flight
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LocationOff
 import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.NightsStay
 import androidx.compose.material.icons.filled.Opacity
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
@@ -70,6 +71,7 @@ import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Thermostat
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.WbSunny
+import androidx.compose.material.icons.filled.WbTwilight
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -2783,16 +2785,23 @@ private fun FlightLightPreferenceSelector(
             Surface(
                 modifier = Modifier
                     .weight(1f)
-                    .heightIn(min = 36.dp)
+                    .heightIn(min = 52.dp)
+                    .semantics { contentDescription = preference.shortLabel() }
                     .clickable { onSelected(preference) },
                 shape = CircleShape,
                 color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
                 contentColor = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
             ) {
-                Box(
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
-                    contentAlignment = Alignment.Center
+                Column(
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 7.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
+                    Icon(
+                        imageVector = preference.icon(),
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
                     Text(
                         text = preference.shortLabel(),
                         style = MaterialTheme.typography.labelSmall,
@@ -5627,6 +5636,14 @@ private fun FlightLightPreference.shortLabel(): String =
         FlightLightPreference.SUNRISE -> "Alba"
         FlightLightPreference.SUNSET -> "Tramonto"
         FlightLightPreference.NIGHT -> "Notturno"
+    }
+
+private fun FlightLightPreference.icon(): ImageVector =
+    when (this) {
+        FlightLightPreference.DAYLIGHT -> Icons.Default.WbSunny
+        FlightLightPreference.SUNRISE -> Icons.Default.WbTwilight
+        FlightLightPreference.SUNSET -> Icons.Default.WbTwilight
+        FlightLightPreference.NIGHT -> Icons.Default.NightsStay
     }
 
 private fun FlightLightPreference.userSentenceFragment(): String =
