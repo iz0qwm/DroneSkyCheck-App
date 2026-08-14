@@ -26,6 +26,14 @@ object TrafficAwarenessMapProperties {
     const val RotationDeg = "rotationDeg"
     const val HasRotation = "hasRotation"
     const val Relevance = "relevance"
+    const val AltitudeBand = "altitudeBand"
+}
+
+enum class TrafficAltitudeBand {
+    VERY_LOW,
+    LOW,
+    HIGH,
+    UNKNOWN
 }
 
 fun trafficTargetsFeatureCollection(
@@ -50,6 +58,7 @@ fun trafficTargetsFeatureCollection(
                 TrafficAwarenessMapProperties.Relevance,
                 (assessments[target.id]?.relevance ?: TrafficRelevance.INFORMATION).name
             )
+            addStringProperty(TrafficAwarenessMapProperties.AltitudeBand, target.trafficAltitudeBand().name)
         }.also {
             DscLogger.trace(
                 TrafficAwarenessLogTag,
@@ -113,6 +122,17 @@ fun TrafficTarget.mapRotationDeg(): Double =
 
 fun TrafficTarget.hasMapRotation(): Boolean =
     motion.trackDeg?.isFinite() == true || motion.headingDeg?.isFinite() == true
+
+fun TrafficTarget.trafficAltitudeBand(): TrafficAltitudeBand =
+    trafficAltitudeBandForAgl(altitude.aglM)
+
+fun trafficAltitudeBandForAgl(aglM: Double?): TrafficAltitudeBand =
+    when {
+        aglM?.isFinite() != true -> TrafficAltitudeBand.UNKNOWN
+        aglM < 300.0 -> TrafficAltitudeBand.VERY_LOW
+        aglM < 1_000.0 -> TrafficAltitudeBand.LOW
+        else -> TrafficAltitudeBand.HIGH
+    }
 
 private fun Double.toRadians(): Double = this * PI / 180.0
 

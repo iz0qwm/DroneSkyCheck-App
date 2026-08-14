@@ -204,11 +204,17 @@ private fun configureMap(
 
     map.setStyle(styleBuilder) {
         it.addImage(NOTAM_ZEBRA_PATTERN_ID, createNotamZebraPattern())
-        val trafficIcon = createTrafficAircraftIcon()
-        it.addImage(TRAFFIC_AWARENESS_ICON_ID, trafficIcon)
+        TrafficAircraftIconStyle.entries.forEach { iconStyle ->
+            val trafficIcon = createTrafficAircraftIcon(iconStyle.fillColor)
+            it.addImage(iconStyle.imageId, trafficIcon)
+            DscLogger.trace(
+                TrafficAwarenessLogTag,
+                "map icon registered id=${iconStyle.imageId} width=${trafficIcon.width} height=${trafficIcon.height}"
+            )
+        }
         DscLogger.trace(
             TrafficAwarenessLogTag,
-            "map icon registered id=$TRAFFIC_AWARENESS_ICON_ID width=${trafficIcon.width} height=${trafficIcon.height}"
+            "map traffic altitude icon variants=${TrafficAircraftIconStyle.entries.size}"
         )
         addDscLayers(it)
         addTrafficAwarenessLayers(it)
@@ -443,7 +449,7 @@ private fun addTrafficAwarenessLayers(style: Style) {
             MapLayerIds.TRAFFIC_AWARENESS_SYMBOL_LAYER_ID,
             MapLayerIds.TRAFFIC_AWARENESS_SOURCE_ID
         ).withProperties(
-            iconImage(TRAFFIC_AWARENESS_ICON_ID),
+            iconImage(trafficAircraftIconImageExpression()),
             iconRotate(Expression.get(TrafficAwarenessMapProperties.RotationDeg)),
             iconSize(TrafficMapStyle.AircraftIconScale),
             iconAllowOverlap(true),
@@ -910,11 +916,11 @@ private fun createNotamZebraPattern(): Bitmap {
     return bitmap
 }
 
-private fun createTrafficAircraftIcon(): Bitmap {
+private fun createTrafficAircraftIcon(fillColor: String): Bitmap {
     val bitmap = Bitmap.createBitmap(TRAFFIC_AWARENESS_ICON_SIZE_PX, TRAFFIC_AWARENESS_ICON_SIZE_PX, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
     val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor(TRAFFIC_AWARENESS_COLOR)
+        color = Color.parseColor(fillColor)
         style = Paint.Style.FILL
     }
     val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -971,6 +977,28 @@ private fun zoneFillColorExpression(): Expression =
 private fun zoneLineColorExpression(): Expression =
     DscZoneMapColors.lineExpression()
 
+private fun trafficAircraftIconImageExpression(): Expression =
+    Expression.match(
+        Expression.get(TrafficAwarenessMapProperties.AltitudeBand),
+        Expression.literal(TrafficAltitudeBand.VERY_LOW.name),
+        Expression.literal(TrafficAircraftIconStyle.VeryLow.imageId),
+        Expression.literal(TrafficAltitudeBand.LOW.name),
+        Expression.literal(TrafficAircraftIconStyle.Low.imageId),
+        Expression.literal(TrafficAltitudeBand.HIGH.name),
+        Expression.literal(TrafficAircraftIconStyle.High.imageId),
+        Expression.literal(TrafficAircraftIconStyle.Unknown.imageId)
+    )
+
+private enum class TrafficAircraftIconStyle(
+    val imageId: String,
+    val fillColor: String
+) {
+    VeryLow("dsc-traffic-awareness-aircraft-very-low", DscZoneMapColors.limited25m.webHex),
+    Low("dsc-traffic-awareness-aircraft-low", DscZoneMapColors.limited60m.webHex),
+    High("dsc-traffic-awareness-aircraft-high", TRAFFIC_AWARENESS_HIGH_ALTITUDE_COLOR),
+    Unknown("dsc-traffic-awareness-aircraft-unknown", TRAFFIC_AWARENESS_COLOR)
+}
+
 private const val ROME_LATITUDE = 41.9028
 private const val ROME_LONGITUDE = 12.4964
 private const val ROME_ZOOM = 10.0
@@ -994,9 +1022,9 @@ private const val USER_LOCATION_ACCURACY_LAYER_ID = "dsc-user-location-accuracy"
 private const val USER_LOCATION_DOT_LAYER_ID = "dsc-user-location-dot"
 private const val USER_LOCATION_PULSE_LAYER_ID = "dsc-user-location-pulse"
 private const val NOTAM_ZEBRA_PATTERN_ID = "dsc-notam-zebra"
-private const val TRAFFIC_AWARENESS_ICON_ID = "dsc-traffic-awareness-aircraft"
 private const val TRAFFIC_AWARENESS_ICON_SIZE_PX = 56
 private const val TRAFFIC_AWARENESS_COLOR = "#455a64"
+private const val TRAFFIC_AWARENESS_HIGH_ALTITUDE_COLOR = "#78909c"
 private const val TRAFFIC_AWARENESS_ATTENTION_COLOR = "#f9ab00"
 private const val TrafficRelevanceAttention = "ATTENTION"
 private const val NOTAM_ZEBRA_SIZE_PX = 32

@@ -12,6 +12,7 @@ import it.droneskycheck.app.data.LegalTimelineResponse
 import it.droneskycheck.app.data.LocalDrone
 import it.droneskycheck.app.data.LocalPilotStore
 import it.droneskycheck.app.data.MapPreferences
+import it.droneskycheck.app.data.UasDatasetUpdatesRepository
 import it.droneskycheck.app.data.ZoneCheckV3Client
 import it.droneskycheck.app.data.ZoneCheckV3Repository
 import it.droneskycheck.app.data.drone.DroneOperationalAssessmentEngine
@@ -91,6 +92,7 @@ class MapViewModel(
     private val solarLightCalculator: SolarLightCalculator = SolarLightCalculator(),
     private val droneTechnicalCatalog: DroneTechnicalCatalogClient = InMemoryDroneTechnicalCatalogClient(),
     private val mapPreferences: MapPreferences = InMemoryMapPreferences(),
+    private val uasDatasetUpdatesRepository: UasDatasetUpdatesRepository? = null,
     private val helpRepository: HelpManifestClient = InMemoryHelpManifestClient(),
     private val helpPreferences: HelpPreferences = InMemoryHelpPreferences(),
     private val localPilotStore: LocalPilotStore = InMemoryLocalPilotStore(),
@@ -130,7 +132,18 @@ class MapViewModel(
     init {
         loadTrafficAlertPreferences()
         if (loadHelpOnInit) loadHelpManifest()
+        loadUasDatasetUpdates()
         loadDroneCatalogAndFleet()
+    }
+
+    private fun loadUasDatasetUpdates() {
+        val repository = uasDatasetUpdatesRepository ?: return
+        scope.launch {
+            val updates = withContext(Dispatchers.IO) {
+                repository.getUpdates()
+            }
+            _uiState.value = _uiState.value.copy(uasDatasetUpdates = updates)
+        }
     }
 
     fun requestHelpOnboardingReplay(profileSheetVisible: Boolean = false) {
@@ -425,6 +438,20 @@ class MapViewModel(
         if (manifest.contentVersion > 0) {
             helpPreferences.setLastSeenContentVersion(manifest.contentVersion)
         }
+    }
+
+    fun onAppInfoRequested() {
+        val state = _uiState.value
+        val trafficAttention = trafficAttentionPresentation(
+            targets = state.trafficAwareness.response?.traffic?.targets.orEmpty(),
+            assessments = state.trafficAssessments
+        )
+        if (!mapTitleAppInfoEnabled(state.mapStatusMessage, trafficAttention)) return
+        _uiState.value = state.copy(isAppInfoSheetVisible = true)
+    }
+
+    fun onAppInfoDismissed() {
+        _uiState.value = _uiState.value.copy(isAppInfoSheetVisible = false)
     }
 
     fun onMapTapped(selection: MapTapSelection) {

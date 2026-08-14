@@ -3,6 +3,8 @@ package it.droneskycheck.app.ui.map
 import android.Manifest
 import android.app.Activity
 import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
@@ -17,6 +19,7 @@ import android.media.ToneGenerator
 import android.net.Uri
 import android.os.Bundle
 import android.os.Looper
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -161,6 +164,7 @@ import it.droneskycheck.app.data.PeriodicNoticePolicy
 import it.droneskycheck.app.data.PeriodicNoticePreferencesRepository
 import it.droneskycheck.app.data.SupInfo
 import it.droneskycheck.app.data.TemporalBarEntry
+import it.droneskycheck.app.data.UasDatasetUpdatesRepository
 import it.droneskycheck.app.data.UasGeographicalZoneInfo
 import it.droneskycheck.app.data.ValidityInfo
 import it.droneskycheck.app.data.ZoneCheckV3Response
@@ -220,6 +224,7 @@ import it.droneskycheck.app.map.DscZoneMapColors
 import it.droneskycheck.app.map.DroneSkyMapView
 import it.droneskycheck.app.map.MapLayerIds
 import it.droneskycheck.app.ui.authorization.AuthorizationDraftSheet
+import it.droneskycheck.app.ui.help.HelpBottomSheet
 import it.droneskycheck.app.ui.help.HelpTopicDialog
 import it.droneskycheck.app.ui.profile.PilotProfileSheet
 import kotlinx.coroutines.Dispatchers
@@ -277,8 +282,20 @@ fun MapScreen(
     var planningWarning by remember { mutableStateOf<String?>(null) }
     var isPlanningCardCompact by remember { mutableStateOf(true) }
     var contextualHelpTopic by remember { mutableStateOf<HelpTopic?>(null) }
+    var isHelpSheetVisible by remember { mutableStateOf(false) }
     var isPeriodicNoticeVisible by remember { mutableStateOf(false) }
     var periodicNoticeShownThisSession by remember { mutableStateOf(false) }
+    val trafficAttention = trafficAttentionPresentation(
+        targets = uiState.trafficAwareness.response?.traffic?.targets.orEmpty(),
+        assessments = uiState.trafficAssessments
+    )
+    val appInfo = remember(context, uiState.mapStatusMessage, uiState.uasDatasetUpdates) {
+        appInfoPresentation(
+            context = context.applicationContext,
+            mapStatusMessage = uiState.mapStatusMessage,
+            updates = uiState.uasDatasetUpdates
+        )
+    }
 
     suspend fun reloadActiveDraft() {
         currentDraft = authorizationRepository.getActiveDraft()
@@ -292,6 +309,16 @@ fun MapScreen(
         HelpTopicDialog(
             topic = topic,
             onDismiss = { contextualHelpTopic = null }
+        )
+    }
+
+    if (isHelpSheetVisible) {
+        HelpBottomSheet(
+            manifest = uiState.helpManifest,
+            isRefreshInProgress = uiState.isHelpManifestRefreshing,
+            refreshMessage = uiState.helpManifestRefreshMessage,
+            onRefresh = viewModel::refreshHelpManifestNow,
+            onDismiss = { isHelpSheetVisible = false }
         )
     }
 
@@ -378,12 +405,14 @@ fun MapScreen(
         !uiState.isLocationControlSheetVisible &&
         !isLocationSearchSheetVisible &&
         !uiState.isTrafficAlertSettingsSheetVisible &&
+        !uiState.isAppInfoSheetVisible &&
         uiState.selectedTrafficTarget == null &&
         !isPilotProfileSheetVisible &&
         !isDraftSheetVisible &&
         conflictingDraft == null &&
         !uiState.isZoneSheetVisible &&
         contextualHelpTopic == null &&
+        !isHelpSheetVisible &&
         !isPeriodicNoticeVisible
 
     LaunchedEffect(canShowPeriodicNotice, periodicNoticeShownThisSession, periodicNoticePreferences) {
@@ -461,11 +490,9 @@ fun MapScreen(
 
         MapTitlePill(
             statusMessage = uiState.mapStatusMessage,
-            trafficAttention = trafficAttentionPresentation(
-                targets = uiState.trafficAwareness.response?.traffic?.targets.orEmpty(),
-                assessments = uiState.trafficAssessments
-            ),
+            trafficAttention = trafficAttention,
             onTrafficAttentionClick = viewModel::onTrafficTargetSelected,
+            onAppInfoClick = viewModel::onAppInfoRequested,
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .windowInsetsPadding(WindowInsets.safeDrawing)
@@ -790,6 +817,21 @@ fun MapScreen(
                     isPeriodicNoticeVisible = false
                     openExternalUrl(context, PeriodicNoticeLinks.BuyMeACoffeeUrl)
                 }
+            )
+        }
+
+        if (uiState.isAppInfoSheetVisible) {
+            AppInfoBottomSheet(
+                info = appInfo,
+                onOpenHelp = {
+                    viewModel.onAppInfoDismissed()
+                    isHelpSheetVisible = true
+                },
+                onOpenWebApp = { openExternalUrl(context, DscWebAppUrl) },
+                onCopy = {
+                    copyAppInfoToClipboard(context, appInfo)
+                },
+                onDismiss = viewModel::onAppInfoDismissed
             )
         }
 
@@ -2198,11 +2240,23 @@ private fun MapTitlePill(
     statusMessage: String?,
     trafficAttention: TrafficAttentionPresentation?,
     onTrafficAttentionClick: (String) -> Unit,
+    onAppInfoClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val degraded = !statusMessage.isNullOrBlank()
+    val appInfoEnabled = mapTitleAppInfoEnabled(statusMessage, trafficAttention)
+    val surfaceModifier = if (appInfoEnabled) {
+        modifier
+            .widthIn(max = 340.dp)
+            .clickable(onClick = onAppInfoClick)
+            .semantics {
+                contentDescription = "Drone Sky Check. Mappa UAS. Tocca per informazioni sull'app."
+            }
+    } else {
+        modifier.widthIn(max = 340.dp)
+    }
     Surface(
-        modifier = modifier.widthIn(max = 340.dp),
+        modifier = surfaceModifier,
         shape = MaterialTheme.shapes.large,
         color = if (degraded) {
             MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.94f)
@@ -2252,6 +2306,166 @@ private fun MapTitlePill(
                 }
             }
         }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun AppInfoBottomSheet(
+    info: AppInfoPresentation,
+    onOpenHelp: () -> Unit,
+    onOpenWebApp: () -> Unit,
+    onCopy: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 620.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Info,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = "Informazioni sull'app",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = info.build.appName,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            AppInfoSection(title = "App") {
+                AppInfoRow("Versione", "${info.build.versionName} (${info.build.versionCode})")
+                AppInfoRow("Piattaforma", info.build.platform)
+                AppInfoRow("Tipo", "App Android nativa")
+            }
+
+            AppInfoSection(title = "Dati UAS") {
+                AppInfoRow("Stato", info.dataset.availabilityLabel)
+                info.dataset.cacheLabel?.let { AppInfoRow("Cache", it) }
+                AppInfoRow("Versione dataset", info.dataset.datasetVersion ?: "Non disponibile")
+                info.dataset.sourceUpdatedAt?.let { AppInfoRow("Aggiornamento sorgente", it) }
+                info.dataset.cachedOnDeviceAt?.let { AppInfoRow("Cache dispositivo", it) }
+                info.dataset.metadataFallbackLabel?.let { AppInfoNote(it) }
+            }
+
+            AppInfoSection(title = "Note") {
+                Text(
+                    text = "Drone Sky Check raccoglie e interpreta dati aeronautici e UAS per aiutarti a preparare il volo.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Text(
+                    text = "Usa sempre le fonti ufficiali e le verifiche richieste prima dell'operazione: l'app non le sostituisce.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onOpenHelp,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Manuale")
+                }
+                OutlinedButton(
+                    onClick = onOpenWebApp,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Web app")
+                }
+            }
+
+            Button(
+                onClick = onCopy,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Copia informazioni app")
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+    }
+}
+
+@Composable
+private fun AppInfoSection(
+    title: String,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            content()
+        }
+        HorizontalDivider()
+    }
+}
+
+@Composable
+private fun AppInfoRow(
+    label: String,
+    value: String
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(132.dp)
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+@Composable
+private fun AppInfoNote(text: String) {
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f),
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
+        )
     }
 }
 
@@ -6693,12 +6907,20 @@ private fun openExternalUrl(context: Context, url: String) {
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     try {
         context.startActivity(intent)
-        DscLogger.debug(PeriodicNoticeLogTag, "Buy Me a Coffee link opened")
+        DscLogger.debug(PeriodicNoticeLogTag, "External URL opened url=$url")
     } catch (error: ActivityNotFoundException) {
         DscLogger.warn(PeriodicNoticeLogTag, "External URL open failure", error)
     } catch (error: SecurityException) {
         DscLogger.warn(PeriodicNoticeLogTag, "External URL open failure", error)
     }
+}
+
+private fun copyAppInfoToClipboard(context: Context, info: AppInfoPresentation) {
+    val clipboard = ContextCompat.getSystemService(context, ClipboardManager::class.java) ?: return
+    clipboard.setPrimaryClip(
+        ClipData.newPlainText("Drone Sky Check app info", appInfoDiagnosticText(info))
+    )
+    Toast.makeText(context, "Informazioni copiate negli appunti", Toast.LENGTH_SHORT).show()
 }
 
 private class MapViewModelFactory(
@@ -6714,6 +6936,7 @@ private class MapViewModelFactory(
                 trafficAwarenessRepository = TrafficAwarenessRepository(),
                 weatherAssessmentEngine = WeatherAssessmentEngine(),
                 mapPreferences = MapPreferencesRepository(context),
+                uasDatasetUpdatesRepository = UasDatasetUpdatesRepository(context),
                 helpRepository = HelpRepository(context),
                 helpPreferences = HelpPreferencesRepository(context),
                 localPilotStore = LocalPilotRepository(context),
@@ -6747,6 +6970,7 @@ private const val TrafficAlertToneDurationMillis = 120
 private const val TrafficAlertToneVolume = 60
 private const val PeriodicNoticeLogTag = "DscPeriodicNotice"
 private const val PeriodicNoticeUiSettlingMillis = 700L
+private const val DscWebAppUrl = "https://mappa.droneskycheck.it/"
 private const val PeriodicNoticeCoffeeButtonText = "☕ Offrimi un caffè"
 private val PeriodicNoticeBody = """
     Drone Sky Check raccoglie, interpreta e presenta in modo più semplice dati provenienti da fonti ufficiali e da altri servizi utili alla pianificazione del volo.

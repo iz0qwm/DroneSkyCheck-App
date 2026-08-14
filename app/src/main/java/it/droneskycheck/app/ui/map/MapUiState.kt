@@ -3,6 +3,7 @@ package it.droneskycheck.app.ui.map
 import it.droneskycheck.app.data.ZoneCheckV3Response
 import it.droneskycheck.app.data.LegalTimelineResponse
 import it.droneskycheck.app.data.LocalDrone
+import it.droneskycheck.app.data.UasDatasetUpdates
 import it.droneskycheck.app.data.drone.DroneCatalogMatchResult
 import it.droneskycheck.app.data.drone.DroneOperationalAssessment
 import it.droneskycheck.app.data.flight.FlightLightPreference
@@ -54,6 +55,8 @@ data class MapUiState(
     val flightOpportunityResult: FlightOpportunityResult? = null,
     val isOperationalReportExpanded: Boolean = false,
     val mapStatusMessage: String? = null,
+    val isAppInfoSheetVisible: Boolean = false,
+    val uasDatasetUpdates: UasDatasetUpdates? = null,
     val cameraBounds: CameraBounds? = null,
     val layerVisibility: Map<DscLayerCategory, Boolean> = DscLayerCategory.defaultVisibility,
     val isLayerSheetVisible: Boolean = false,

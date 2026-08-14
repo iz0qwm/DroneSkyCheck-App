@@ -126,6 +126,63 @@ class TrafficAwarenessMapFeaturesTest {
     }
 
     @Test
+    fun classifiesTrafficAltitudeBandFromAglOnly() {
+        assertEquals(TrafficAltitudeBand.VERY_LOW, trafficAltitudeBandForAgl(0.0))
+        assertEquals(TrafficAltitudeBand.VERY_LOW, trafficAltitudeBandForAgl(299.0))
+        assertEquals(TrafficAltitudeBand.LOW, trafficAltitudeBandForAgl(300.0))
+        assertEquals(TrafficAltitudeBand.LOW, trafficAltitudeBandForAgl(999.0))
+        assertEquals(TrafficAltitudeBand.HIGH, trafficAltitudeBandForAgl(1_000.0))
+        assertEquals(TrafficAltitudeBand.HIGH, trafficAltitudeBandForAgl(8_000.0))
+        assertEquals(TrafficAltitudeBand.UNKNOWN, trafficAltitudeBandForAgl(null))
+        assertEquals(TrafficAltitudeBand.UNKNOWN, trafficAltitudeBandForAgl(Double.NaN))
+    }
+
+    @Test
+    fun geoJsonIncludesAltitudeBandIndependentlyFromRelevance() {
+        val collection = trafficTargetsFeatureCollection(
+            targets = listOf(
+                trafficTarget(id = "traffic:very-low-info", aglM = 180.0),
+                trafficTarget(id = "traffic:low-attention", aglM = 750.0)
+            ),
+            assessments = mapOf(
+                "traffic:very-low-info" to assessment(TrafficRelevance.INFORMATION),
+                "traffic:low-attention" to assessment(TrafficRelevance.ATTENTION)
+            )
+        )
+        val featuresById = collection.features().orEmpty()
+            .associateBy { it.properties()?.get(TrafficAwarenessMapProperties.TargetId)?.asString }
+
+        assertEquals(
+            "VERY_LOW",
+            featuresById["traffic:very-low-info"]?.properties()?.get(TrafficAwarenessMapProperties.AltitudeBand)?.asString
+        )
+        assertEquals(
+            "INFORMATION",
+            featuresById["traffic:very-low-info"]?.properties()?.get(TrafficAwarenessMapProperties.Relevance)?.asString
+        )
+        assertEquals(
+            "LOW",
+            featuresById["traffic:low-attention"]?.properties()?.get(TrafficAwarenessMapProperties.AltitudeBand)?.asString
+        )
+        assertEquals(
+            "ATTENTION",
+            featuresById["traffic:low-attention"]?.properties()?.get(TrafficAwarenessMapProperties.Relevance)?.asString
+        )
+    }
+
+    @Test
+    fun altitudeBandDoesNotUseGeometricAltitudeAsAglFallback() {
+        val feature = trafficTargetsFeatureCollection(
+            listOf(trafficTarget(id = "traffic:geo-only", geoM = 11_000.0, aglM = null))
+        ).features().orEmpty().single()
+
+        assertEquals(
+            "UNKNOWN",
+            feature.properties()?.get(TrafficAwarenessMapProperties.AltitudeBand)?.asString
+        )
+    }
+
+    @Test
     fun mapsCardinalTrackRotationsWithoutOffset() {
         listOf(0.0, 90.0, 180.0, 270.0).forEach { rotation ->
             val feature = trafficTargetsFeatureCollection(
@@ -214,7 +271,8 @@ private fun trafficTarget(
     source: String? = "OpenSky",
     trackDeg: Double? = 0.0,
     headingDeg: Double? = null,
-    geoM: Double? = null
+    geoM: Double? = null,
+    aglM: Double? = null
 ): TrafficTarget =
     TrafficTarget(
         id = id,
@@ -229,7 +287,7 @@ private fun trafficTarget(
             baroM = null,
             geoM = geoM,
             mslM = null,
-            aglM = null,
+            aglM = aglM,
             sourceM = null,
             sourceReference = null
         ),
