@@ -6,6 +6,8 @@ import it.droneskycheck.app.data.drone.DroneDataCompleteness
 import it.droneskycheck.app.data.drone.DroneOperationalAssessment
 import it.droneskycheck.app.data.drone.DroneOperationalCapabilities
 import it.droneskycheck.app.data.drone.DroneOperationalLevel
+import it.droneskycheck.app.data.solar.SolarWindow
+import it.droneskycheck.app.data.solar.TimeWindow
 import it.droneskycheck.app.data.weather.WeatherAssessment
 import it.droneskycheck.app.data.weather.WeatherCodeCategory
 import it.droneskycheck.app.data.weather.WeatherConfidence
@@ -13,6 +15,7 @@ import it.droneskycheck.app.data.weather.WeatherConfidenceLevel
 import it.droneskycheck.app.data.weather.WeatherReasonCode
 import it.droneskycheck.app.data.weather.WeatherState
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -195,6 +198,103 @@ class FlightOpportunityEngineTest {
     }
 
     @Test
+    fun sunsetGoldenHourIsCutByOpenLegalWindow() {
+        val result = engine.evaluate(
+            input(
+                legalSegments = listOf(segment("2026-08-14T17:20:00Z", "2026-08-14T17:40:00Z")),
+                weatherSlots = listOf(slot("2026-08-14T17:00:00Z", "2026-08-14T18:20:00Z")),
+                lightPreference = FlightLightPreference.SUNSET,
+                solarWindows = listOf(
+                    solarWindow(
+                        eveningGolden = "2026-08-14T17:10:00Z" to "2026-08-14T18:05:00Z",
+                        eveningBlue = "2026-08-14T18:05:00Z" to "2026-08-14T18:30:00Z"
+                    )
+                )
+            )
+        )
+
+        assertEquals(FlightOpportunityStatus.READY, result.status)
+        assertEquals(Instant.parse("2026-08-14T17:20:00Z"), result.bestOpportunity?.from)
+        assertEquals(Instant.parse("2026-08-14T17:40:00Z"), result.bestOpportunity?.to)
+        assertTrue(result.bestOpportunity?.reasons?.contains(FlightOpportunityReasonCode.GOLDEN_HOUR_WINDOW) == true)
+    }
+
+    @Test
+    fun sunsetGoldenHourOutsideOpenWindowReturnsNoOpenOpportunity() {
+        val result = engine.evaluate(
+            input(
+                legalSegments = listOf(segment("2026-08-14T15:00:00Z", "2026-08-14T16:00:00Z")),
+                weatherSlots = listOf(slot("2026-08-14T15:00:00Z", "2026-08-14T18:30:00Z")),
+                lightPreference = FlightLightPreference.SUNSET,
+                solarWindows = listOf(
+                    solarWindow(
+                        eveningGolden = "2026-08-14T17:10:00Z" to "2026-08-14T18:05:00Z",
+                        eveningBlue = "2026-08-14T18:05:00Z" to "2026-08-14T18:30:00Z"
+                    )
+                )
+            )
+        )
+
+        assertEquals(FlightOpportunityStatus.NO_OPEN_WINDOW, result.status)
+        assertNull(result.bestOpportunity)
+        assertEquals(listOf(FlightOpportunityReasonCode.LIGHT_WINDOW_MISSING), result.blockers)
+    }
+
+    @Test
+    fun nightOpportunityStartsAfterEveningBlueHour() {
+        val result = engine.evaluate(
+            input(
+                legalSegments = listOf(segment("2026-08-14T20:00:00Z", "2026-08-14T22:00:00Z")),
+                weatherSlots = listOf(slot("2026-08-14T18:00:00Z", "2026-08-14T22:00:00Z")),
+                lightPreference = FlightLightPreference.NIGHT,
+                solarWindows = listOf(
+                    solarWindow(
+                        eveningBlue = "2026-08-14T18:05:00Z" to "2026-08-14T18:30:00Z"
+                    )
+                )
+            )
+        )
+
+        assertEquals(FlightOpportunityStatus.READY, result.status)
+        assertEquals(Instant.parse("2026-08-14T20:00:00Z"), result.bestOpportunity?.from)
+        assertEquals(FlightOpportunityTimePreference.NIGHT, result.bestOpportunity?.timePreference)
+        assertTrue(result.bestOpportunity?.reasons?.contains(FlightOpportunityReasonCode.NIGHT_WINDOW) == true)
+    }
+
+    @Test
+    fun rankingChoosesBestCompatibleSunsetWindow() {
+        val result = engine.evaluate(
+            input(
+                legalSegments = listOf(segment("2026-08-14T17:00:00Z", "2026-08-14T18:30:00Z")),
+                weatherSlots = listOf(
+                    slot(
+                        "2026-08-14T17:00:00Z",
+                        "2026-08-14T17:30:00Z",
+                        weather = weather(score = 72),
+                        drone = drone(score = 72)
+                    ),
+                    slot(
+                        "2026-08-14T17:30:00Z",
+                        "2026-08-14T18:00:00Z",
+                        weather = weather(score = 94),
+                        drone = drone(score = 94)
+                    )
+                ),
+                lightPreference = FlightLightPreference.SUNSET,
+                solarWindows = listOf(
+                    solarWindow(
+                        eveningGolden = "2026-08-14T17:00:00Z" to "2026-08-14T18:00:00Z"
+                    )
+                )
+            )
+        )
+
+        assertEquals(FlightOpportunityStatus.READY, result.status)
+        assertEquals(Instant.parse("2026-08-14T17:30:00Z"), result.bestOpportunity?.from)
+        assertEquals(84, result.bestOpportunity?.opportunityScore)
+    }
+
+    @Test
     fun unknownDroneKeepsOpportunityPartial() {
         val result = engine.evaluate(
             input(
@@ -309,13 +409,17 @@ class FlightOpportunityEngineTest {
 
     private fun input(
         legalSegments: List<LegalTimelineSegment>,
-        weatherSlots: List<FlightOpportunityWeatherSlot>
+        weatherSlots: List<FlightOpportunityWeatherSlot>,
+        lightPreference: FlightLightPreference = FlightLightPreference.DAYLIGHT,
+        solarWindows: List<SolarWindow> = emptyList()
     ): FlightOpportunityInput =
         FlightOpportunityInput(
             legalSegments = legalSegments,
             weatherSlots = weatherSlots,
             zoneId = zoneId,
-            now = now
+            now = now,
+            lightPreference = lightPreference,
+            solarWindows = solarWindows
         )
 
     private fun segment(
@@ -382,5 +486,39 @@ class FlightOpportunityEngineTest {
                 droneId = "fixture",
                 displayName = "Fixture Drone"
             )
+        )
+
+    private fun solarWindow(
+        date: LocalDate = LocalDate.parse("2026-08-14"),
+        sunrise: String = "2026-08-14T04:20:00Z",
+        sunset: String = "2026-08-14T17:50:00Z",
+        morningBlue: Pair<String, String>? = "2026-08-14T03:40:00Z" to "2026-08-14T03:55:00Z",
+        morningGolden: Pair<String, String>? = "2026-08-14T03:55:00Z" to "2026-08-14T04:45:00Z",
+        daylight: Pair<String, String>? = "2026-08-14T04:20:00Z" to "2026-08-14T17:50:00Z",
+        eveningGolden: Pair<String, String>? = null,
+        eveningBlue: Pair<String, String>? = null
+    ): SolarWindow =
+        SolarWindow(
+            date = date,
+            zoneId = zoneId,
+            sunrise = Instant.parse(sunrise),
+            sunset = Instant.parse(sunset),
+            blueHourMorningStart = morningBlue?.first?.let(Instant::parse),
+            goldenHourMorningStart = morningGolden?.first?.let(Instant::parse),
+            goldenHourMorningEnd = morningGolden?.second?.let(Instant::parse),
+            goldenHourEveningStart = eveningGolden?.first?.let(Instant::parse),
+            blueHourEveningStart = eveningBlue?.first?.let(Instant::parse) ?: eveningGolden?.second?.let(Instant::parse),
+            blueHourEveningEnd = eveningBlue?.second?.let(Instant::parse),
+            morningBlueHour = morningBlue?.toTimeWindow(),
+            morningGoldenHour = morningGolden?.toTimeWindow(),
+            daylight = daylight?.toTimeWindow(),
+            eveningGoldenHour = eveningGolden?.toTimeWindow(),
+            eveningBlueHour = eveningBlue?.toTimeWindow()
+        )
+
+    private fun Pair<String, String>.toTimeWindow(): TimeWindow =
+        TimeWindow(
+            from = Instant.parse(first),
+            to = Instant.parse(second)
         )
 }

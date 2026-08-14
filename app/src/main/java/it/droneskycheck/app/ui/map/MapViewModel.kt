@@ -15,9 +15,11 @@ import it.droneskycheck.app.data.MapPreferences
 import it.droneskycheck.app.data.ZoneCheckV3Client
 import it.droneskycheck.app.data.ZoneCheckV3Repository
 import it.droneskycheck.app.data.drone.DroneOperationalAssessmentEngine
+import it.droneskycheck.app.data.drone.DroneOperationalLevel
 import it.droneskycheck.app.data.drone.DroneTechnicalCatalogClient
 import it.droneskycheck.app.data.drone.DroneTechnicalCatalogResolver
 import it.droneskycheck.app.data.drone.InMemoryDroneTechnicalCatalogClient
+import it.droneskycheck.app.data.flight.FlightLightPreference
 import it.droneskycheck.app.data.flight.FlightOpportunityEngine
 import it.droneskycheck.app.data.flight.FlightOpportunityDroneCandidate
 import it.droneskycheck.app.data.flight.FlightOpportunityDroneRecommendation
@@ -27,6 +29,7 @@ import it.droneskycheck.app.data.flight.FlightOpportunityLevel
 import it.droneskycheck.app.data.flight.FlightOpportunityResult
 import it.droneskycheck.app.data.flight.FlightOpportunityStatus
 import it.droneskycheck.app.data.flight.FlightOpportunityWeatherSlot
+import it.droneskycheck.app.data.flight.DroneWindowCompatibility
 import it.droneskycheck.app.data.help.ActiveHelpOnboarding
 import it.droneskycheck.app.data.help.HelpManifest
 import it.droneskycheck.app.data.help.HelpManifestClient
@@ -40,6 +43,8 @@ import it.droneskycheck.app.data.help.HelpTourEnvironment
 import it.droneskycheck.app.data.help.HelpTourSession
 import it.droneskycheck.app.data.help.InMemoryHelpManifestClient
 import it.droneskycheck.app.data.help.InMemoryHelpPreferences
+import it.droneskycheck.app.data.solar.SolarLightCalculator
+import it.droneskycheck.app.data.solar.SolarWindow
 import it.droneskycheck.app.data.weather.WeatherAssessmentEngine
 import it.droneskycheck.app.data.weather.WeatherForecast
 import it.droneskycheck.app.data.weather.WeatherForecastClient
@@ -83,6 +88,7 @@ class MapViewModel(
     private val weatherAssessmentEngine: WeatherAssessmentEngine = WeatherAssessmentEngine(),
     private val droneAssessmentEngine: DroneOperationalAssessmentEngine = DroneOperationalAssessmentEngine(),
     private val flightOpportunityEngine: FlightOpportunityEngine = FlightOpportunityEngine(),
+    private val solarLightCalculator: SolarLightCalculator = SolarLightCalculator(),
     private val droneTechnicalCatalog: DroneTechnicalCatalogClient = InMemoryDroneTechnicalCatalogClient(),
     private val mapPreferences: MapPreferences = InMemoryMapPreferences(),
     private val helpRepository: HelpManifestClient = InMemoryHelpManifestClient(),
@@ -939,6 +945,17 @@ class MapViewModel(
         }
     }
 
+    fun onFlightLightPreferenceSelected(preference: FlightLightPreference) {
+        if (_uiState.value.selectedLightPreference == preference) return
+        _uiState.value = _uiState.value.copy(
+            selectedLightPreference = preference
+        ).withFlightOpportunity(
+            timeline = _uiState.value.legalTimeline,
+            forecast = _uiState.value.weatherForecast,
+            selectedDrone = _uiState.value.selectedDrone
+        )
+    }
+
     fun onOperationalReportExpansionChanged(expanded: Boolean) {
         _uiState.value = _uiState.value.copy(isOperationalReportExpanded = expanded)
     }
@@ -1040,6 +1057,16 @@ class MapViewModel(
         }
 
         val now = clock.instant()
+        val zoneId = forecast.timezone ?: timelineZoneId
+        val solarWindows = selectedPoint?.let { point ->
+            solarLightCalculator.windowsForRange(
+                latitude = point.lat,
+                longitude = point.lon,
+                zoneId = zoneId,
+                from = now,
+                to = timeline.segments.maxOfOrNull { it.to } ?: forecast.hours.maxOfOrNull { it.instant } ?: now
+            )
+        }.orEmpty()
         val result = flightOpportunityEngine.evaluate(
             FlightOpportunityInput(
                 legalSegments = timeline.segments,
@@ -1047,15 +1074,19 @@ class MapViewModel(
                     now = now,
                     selectedDrone = selectedDrone
                 ),
-                zoneId = forecast.timezone ?: timelineZoneId,
-                now = now
+                zoneId = zoneId,
+                now = now,
+                lightPreference = selectedLightPreference,
+                solarWindows = solarWindows
             )
         )
         val resultWithDroneAdvice = result.withDroneRecommendation(
             timeline = timeline,
             forecast = forecast,
             now = now,
-            zoneId = forecast.timezone ?: timelineZoneId,
+            zoneId = zoneId,
+            solarWindows = solarWindows,
+            lightPreference = selectedLightPreference,
             selectedDrone = selectedDrone
         )
         return copy(
@@ -1069,6 +1100,8 @@ class MapViewModel(
         forecast: WeatherForecast,
         now: Instant,
         zoneId: ZoneId,
+        solarWindows: List<SolarWindow>,
+        lightPreference: FlightLightPreference,
         selectedDrone: LocalDrone?
     ): FlightOpportunityResult {
         val drones = _uiState.value.droneFleet
@@ -1077,18 +1110,28 @@ class MapViewModel(
             ?: return this
         val compared = drones.map { drone ->
             val capabilities = catalogResolver.capabilitiesFor(drone).first
+            val weatherSlots = forecast.toFlightOpportunityWeatherSlots(
+                now = now,
+                selectedDrone = drone
+            )
             val evaluated = flightOpportunityEngine.evaluate(
                 FlightOpportunityInput(
                     legalSegments = timeline.segments,
-                    weatherSlots = forecast.toFlightOpportunityWeatherSlots(
-                        now = now,
-                        selectedDrone = drone
-                    ),
+                    weatherSlots = weatherSlots,
                     zoneId = zoneId,
-                    now = now
+                    now = now,
+                    lightPreference = lightPreference,
+                    solarWindows = solarWindows
                 )
             )
             val best = evaluated.bestOpportunity
+            val bestDroneAssessment = best?.let { opportunity ->
+                weatherSlots.firstOrNull { slot ->
+                    slot.droneAssessment != null &&
+                        slot.from.isBefore(opportunity.to) &&
+                        slot.to.isAfter(opportunity.from)
+                }?.droneAssessment
+            } ?: weatherSlots.firstOrNull { it.droneAssessment != null }?.droneAssessment
             FlightOpportunityDroneCandidate(
                 droneId = drone.id,
                 displayName = drone.displayName,
@@ -1097,6 +1140,9 @@ class MapViewModel(
                 droneScore = best?.droneScore,
                 droneLevel = best?.droneLevel,
                 windResistanceMs = capabilities.maxWindResistanceMs,
+                massGrams = capabilities.massGrams,
+                compatibility = best.toDroneWindowCompatibility(evaluated.status, bestDroneAssessment),
+                compatibilityReason = best.toDroneCompatibilityReason(evaluated.status, bestDroneAssessment),
                 bestFrom = best?.from,
                 bestTo = best?.to
             )
@@ -1104,12 +1150,20 @@ class MapViewModel(
             compareByDescending<FlightOpportunityDroneCandidate> { it.candidateRank() }
                 .thenBy { it.bestFrom ?: Instant.MAX }
         )
-        val recommended = compared.firstOrNull { it.isUsableRecommendation() } ?: return this
+        val usable = compared.filter { it.compatibility == DroneWindowCompatibility.USABLE }
+        val usableWithCaution = compared.filter { it.compatibility == DroneWindowCompatibility.USABLE_WITH_CAUTION }
+        val bestOperationalMargin = usable.firstOrNull() ?: usableWithCaution.firstOrNull()
+        val lightestCompatible = usable
+            .filter { it.massGrams != null && it.massGrams > 0.0 }
+            .minByOrNull { requireNotNull(it.massGrams) }
+        val recommended = bestOperationalMargin ?: compared.firstOrNull() ?: return this
         val selectedCandidate = selectedDrone?.let { drone ->
             compared.firstOrNull { it.droneId == drone.id }
         }
         val reason = when {
-            compared.count { it.isUsableRecommendation() } == 1 -> FlightOpportunityDroneRecommendationReason.ONLY_USABLE
+            usable.size == 1 && usableWithCaution.isEmpty() -> FlightOpportunityDroneRecommendationReason.ONLY_USABLE
+            lightestCompatible != null && lightestCompatible.droneId == recommended.droneId ->
+                FlightOpportunityDroneRecommendationReason.LIGHTEST_COMPATIBLE
             selectedCandidate != null &&
                 recommended.bestFrom != null &&
                 selectedCandidate.bestFrom != null &&
@@ -1117,22 +1171,25 @@ class MapViewModel(
             recommended.windResistanceMs != null &&
                 compared.drop(1).any { (recommended.windResistanceMs ?: 0.0) > (it.windResistanceMs ?: 0.0) } ->
                 FlightOpportunityDroneRecommendationReason.WIND_MARGIN
+            bestOperationalMargin != null -> FlightOpportunityDroneRecommendationReason.BEST_OPERATIONAL_MARGIN
             else -> FlightOpportunityDroneRecommendationReason.NO_CLEAR_ADVANTAGE
         }
         return copy(
             droneRecommendation = FlightOpportunityDroneRecommendation(
                 recommended = recommended,
                 compared = compared,
-                reason = reason
+                reason = reason,
+                lightestCompatible = lightestCompatible,
+                bestOperationalMargin = bestOperationalMargin,
+                usableCount = usable.size,
+                cautionCount = usableWithCaution.size
             )
         )
     }
 
     private fun FlightOpportunityDroneCandidate.isUsableRecommendation(): Boolean =
-        opportunityScore != null &&
-            opportunityLevel != FlightOpportunityLevel.POOR &&
-            bestFrom != null &&
-            bestTo != null
+        compatibility == DroneWindowCompatibility.USABLE ||
+            compatibility == DroneWindowCompatibility.USABLE_WITH_CAUTION
 
     private fun FlightOpportunityDroneCandidate.candidateRank(): Int {
         val base = opportunityScore ?: -100
@@ -1146,7 +1203,91 @@ class MapViewModel(
             FlightOpportunityLevel.POOR,
             null -> -40
         }
-        return base + drone + wind + levelBonus
+        val compatibilityBonus = when (compatibility) {
+            DroneWindowCompatibility.USABLE -> 80
+            DroneWindowCompatibility.USABLE_WITH_CAUTION -> 35
+            DroneWindowCompatibility.NOT_RECOMMENDED -> -20
+            DroneWindowCompatibility.NOT_COMPATIBLE -> -80
+            DroneWindowCompatibility.UNKNOWN -> -40
+        }
+        return base + drone + wind + levelBonus + compatibilityBonus
+    }
+
+    private fun it.droneskycheck.app.data.flight.FlightOpportunity?.toDroneWindowCompatibility(
+        status: FlightOpportunityStatus,
+        droneAssessment: it.droneskycheck.app.data.drone.DroneOperationalAssessment?
+    ): DroneWindowCompatibility {
+        val opportunity = this
+        if (droneAssessment?.factors?.any { it.level == DroneOperationalLevel.UNFAVORABLE } == true ||
+            droneAssessment?.level == DroneOperationalLevel.UNFAVORABLE
+        ) {
+            return DroneWindowCompatibility.NOT_COMPATIBLE
+        }
+        if (droneAssessment?.factors?.any { it.level == DroneOperationalLevel.CAUTION } == true ||
+            droneAssessment?.level == DroneOperationalLevel.CAUTION
+        ) {
+            return DroneWindowCompatibility.USABLE_WITH_CAUTION
+        }
+        if (opportunity == null && droneAssessment != null) {
+            return when (droneAssessment.level) {
+                DroneOperationalLevel.FAVORABLE,
+                DroneOperationalLevel.ACCEPTABLE -> DroneWindowCompatibility.USABLE
+                DroneOperationalLevel.UNKNOWN -> DroneWindowCompatibility.UNKNOWN
+                DroneOperationalLevel.CAUTION -> DroneWindowCompatibility.USABLE_WITH_CAUTION
+                DroneOperationalLevel.UNFAVORABLE -> DroneWindowCompatibility.NOT_COMPATIBLE
+            }
+        }
+        if (opportunity == null) {
+            return when (status) {
+                FlightOpportunityStatus.DRONE_UNFAVORABLE -> DroneWindowCompatibility.NOT_COMPATIBLE
+                FlightOpportunityStatus.NO_FAVORABLE_WEATHER -> DroneWindowCompatibility.NOT_RECOMMENDED
+                FlightOpportunityStatus.INSUFFICIENT_DATA,
+                FlightOpportunityStatus.ERROR -> DroneWindowCompatibility.UNKNOWN
+                else -> DroneWindowCompatibility.NOT_RECOMMENDED
+            }
+        }
+        if (!opportunity.droneAssessmentAvailable) return DroneWindowCompatibility.UNKNOWN
+        return when (opportunity.droneLevel) {
+            DroneOperationalLevel.FAVORABLE,
+            DroneOperationalLevel.ACCEPTABLE -> DroneWindowCompatibility.USABLE
+            DroneOperationalLevel.CAUTION -> DroneWindowCompatibility.USABLE_WITH_CAUTION
+            DroneOperationalLevel.UNFAVORABLE -> DroneWindowCompatibility.NOT_COMPATIBLE
+            DroneOperationalLevel.UNKNOWN,
+            null -> DroneWindowCompatibility.UNKNOWN
+        }
+    }
+
+    private fun it.droneskycheck.app.data.flight.FlightOpportunity?.toDroneCompatibilityReason(
+        status: FlightOpportunityStatus,
+        droneAssessment: it.droneskycheck.app.data.drone.DroneOperationalAssessment?
+    ): String {
+        val opportunity = this
+        droneAssessment?.factors?.firstOrNull { it.level == DroneOperationalLevel.UNFAVORABLE }?.let { return it.message }
+        droneAssessment?.factors?.firstOrNull { it.level == DroneOperationalLevel.CAUTION }?.let { return it.message }
+        if (opportunity == null && droneAssessment != null) {
+            return when (droneAssessment.level) {
+                DroneOperationalLevel.FAVORABLE -> "Vento e raffiche entro un buon margine operativo."
+                DroneOperationalLevel.ACCEPTABLE -> "Condizioni entro i limiti operativi disponibili."
+                DroneOperationalLevel.CAUTION -> "Margine ridotto rispetto alle condizioni previste."
+                DroneOperationalLevel.UNFAVORABLE -> "Condizioni oltre i limiti operativi considerati."
+                DroneOperationalLevel.UNKNOWN -> "Dati tecnici insufficienti per una valutazione completa."
+            }
+        }
+        if (opportunity == null) {
+            return when (status) {
+                FlightOpportunityStatus.DRONE_UNFAVORABLE -> "Condizioni oltre i limiti operativi considerati."
+                FlightOpportunityStatus.NO_FAVORABLE_WEATHER -> "Finestra poco favorevole per meteo o margine drone."
+                else -> "Dati insufficienti per una valutazione completa."
+            }
+        }
+        return when (opportunity.droneLevel) {
+            DroneOperationalLevel.FAVORABLE -> "Vento e raffiche entro un buon margine operativo."
+            DroneOperationalLevel.ACCEPTABLE -> "Condizioni entro i limiti operativi disponibili."
+            DroneOperationalLevel.CAUTION -> "Margine ridotto rispetto alle condizioni previste."
+            DroneOperationalLevel.UNFAVORABLE -> "Condizioni oltre i limiti operativi considerati."
+            DroneOperationalLevel.UNKNOWN,
+            null -> "Dati tecnici insufficienti per una valutazione completa."
+        }
     }
 
     private fun WeatherForecast.toFlightOpportunityWeatherSlots(

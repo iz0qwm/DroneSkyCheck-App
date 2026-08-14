@@ -23,6 +23,8 @@ import it.droneskycheck.app.data.drone.DroneTechnicalCatalogClient
 import it.droneskycheck.app.data.drone.DroneTechnicalCatalogResolver
 import it.droneskycheck.app.data.drone.InMemoryDroneTechnicalCatalogClient
 import it.droneskycheck.app.data.drone.parseDroneTechnicalCatalog
+import it.droneskycheck.app.data.flight.DroneWindowCompatibility
+import it.droneskycheck.app.data.flight.FlightLightPreference
 import it.droneskycheck.app.data.flight.FlightOpportunityStatus
 import it.droneskycheck.app.data.help.HelpManifest
 import it.droneskycheck.app.data.help.HelpManifestClient
@@ -71,6 +73,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -324,11 +327,46 @@ class MapViewModelTest {
     }
 
     @Test
+    fun changingLightPreferenceRecalculatesOpportunityWithoutReloadingData() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val legal = FakeLegalTimelineClient()
+        val weather = FakeWeatherClient(
+            forecast = weatherForecast(
+                start = Instant.parse("2026-08-14T04:00:00Z"),
+                hours = 18
+            )
+        )
+        val viewModel = viewModel(
+            scope = scope,
+            legal = legal,
+            weather = weather,
+            preferences = InMemoryMapPreferences()
+        )
+
+        viewModel.onMapTapped(selection(41.9, 12.5))
+        viewModel.onOperationalContextRequested()
+        waitUntil { viewModel.uiState.value.flightOpportunityResult?.bestOpportunity != null }
+        val selectedPoint = viewModel.uiState.value.selectedPoint
+        val daylightBest = viewModel.uiState.value.flightOpportunityResult?.bestOpportunity?.from
+        val legalCalls = legal.calls
+        val weatherCalls = weather.calls
+
+        viewModel.onFlightLightPreferenceSelected(FlightLightPreference.SUNSET)
+        waitUntil { viewModel.uiState.value.selectedLightPreference == FlightLightPreference.SUNSET }
+
+        assertEquals(selectedPoint, viewModel.uiState.value.selectedPoint)
+        assertEquals(legalCalls, legal.calls)
+        assertEquals(weatherCalls, weather.calls)
+        assertNotEquals(daylightBest, viewModel.uiState.value.flightOpportunityResult?.bestOpportunity?.from)
+        scope.cancel()
+    }
+
+    @Test
     fun flightOpportunityRecommendsBestDroneFromFleetForWind() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val viewModel = viewModel(
             scope = scope,
-            weather = FakeWeatherClient(forecast = weatherForecast(windKmh = 10.0, gustKmh = 20.0)),
+            weather = FakeWeatherClient(forecast = weatherForecast(windKmh = 8.0, gustKmh = 12.0)),
             preferences = InMemoryMapPreferences(),
             pilotStore = FakePilotStore(
                 listOf(
@@ -336,6 +374,7 @@ class MapViewModelTest {
                         id = "mini",
                         manufacturer = "DJI",
                         model = "Mini 3 Pro",
+                        weight = 249.0,
                         manualMaxWindResistanceMs = 6.0,
                         isSelected = true
                     ),
@@ -343,6 +382,7 @@ class MapViewModelTest {
                         id = "air",
                         manufacturer = "DJI",
                         model = "AIR 3S",
+                        weight = 724.0,
                         manualMaxWindResistanceMs = 12.0
                     )
                 )
@@ -357,11 +397,125 @@ class MapViewModelTest {
 
         val recommendation = viewModel.uiState.value.flightOpportunityResult?.droneRecommendation
         assertEquals("air", recommendation?.recommended?.droneId)
+        assertEquals("air", recommendation?.bestOperationalMargin?.droneId)
+        assertEquals("mini", recommendation?.lightestCompatible?.droneId)
+        assertEquals(2, recommendation?.usableCount)
+        assertEquals(DroneWindowCompatibility.USABLE, recommendation?.compared?.firstOrNull { it.droneId == "mini" }?.compatibility)
+        assertEquals(DroneWindowCompatibility.USABLE, recommendation?.compared?.firstOrNull { it.droneId == "air" }?.compatibility)
         assertEquals(2, recommendation?.compared?.size)
         assertTrue(
             (recommendation?.recommended?.droneScore ?: 0) >=
                 (recommendation?.compared?.firstOrNull { it.droneId == "mini" }?.droneScore ?: 0)
         )
+        scope.cancel()
+    }
+
+    @Test
+    fun lightDroneAtGustLimitIsCautionNotLightestCompatible() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val viewModel = fleetRecommendationViewModel(
+            scope = scope,
+            windKmh = 10.0,
+            gustKmh = 17.0,
+            drones = listOf(
+                LocalDrone(id = "mini", manufacturer = "DJI", model = "Mini 3 Pro", weight = 249.0, manualMaxWindResistanceMs = 6.0, isSelected = true),
+                LocalDrone(id = "air", manufacturer = "DJI", model = "AIR 3S", weight = 724.0, manualMaxWindResistanceMs = 12.0)
+            )
+        )
+
+        val recommendation = requireNotNull(viewModel.uiState.value.flightOpportunityResult?.droneRecommendation)
+        assertEquals(DroneWindowCompatibility.USABLE_WITH_CAUTION, recommendation.compared.first { it.droneId == "mini" }.compatibility)
+        assertEquals(DroneWindowCompatibility.USABLE, recommendation.compared.first { it.droneId == "air" }.compatibility)
+        assertEquals("air", recommendation.lightestCompatible?.droneId)
+        assertEquals("air", recommendation.bestOperationalMargin?.droneId)
+        scope.cancel()
+    }
+
+    @Test
+    fun onlyOneCompatibleDroneDoesNotHideOtherFleetStatuses() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val viewModel = fleetRecommendationViewModel(
+            scope = scope,
+            windKmh = 18.0,
+            gustKmh = 24.0,
+            drones = listOf(
+                LocalDrone(id = "mini", manufacturer = "DJI", model = "Mini 3 Pro", weight = 249.0, manualMaxWindResistanceMs = 6.0, isSelected = true),
+                LocalDrone(id = "air", manufacturer = "DJI", model = "AIR 3S", weight = 724.0, manualMaxWindResistanceMs = 14.0)
+            )
+        )
+
+        val recommendation = requireNotNull(viewModel.uiState.value.flightOpportunityResult?.droneRecommendation)
+        assertEquals(1, recommendation.usableCount)
+        assertEquals("air", recommendation.lightestCompatible?.droneId)
+        assertEquals("air", recommendation.bestOperationalMargin?.droneId)
+        assertEquals(DroneWindowCompatibility.NOT_COMPATIBLE, recommendation.compared.first { it.droneId == "mini" }.compatibility)
+        scope.cancel()
+    }
+
+    @Test
+    fun noCompatibleDroneKeepsMainReasonVisible() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val viewModel = fleetRecommendationViewModel(
+            scope = scope,
+            windKmh = 25.0,
+            gustKmh = 40.0,
+            drones = listOf(
+                LocalDrone(id = "mini", manufacturer = "DJI", model = "Mini 3 Pro", weight = 249.0, manualMaxWindResistanceMs = 6.0, isSelected = true),
+                LocalDrone(id = "neo", manufacturer = "DJI", model = "Neo", weight = 135.0, manualMaxWindResistanceMs = 5.0)
+            )
+        )
+
+        val recommendation = requireNotNull(viewModel.uiState.value.flightOpportunityResult?.droneRecommendation)
+        assertEquals(0, recommendation.usableCount)
+        assertEquals(0, recommendation.cautionCount)
+        assertNull(recommendation.lightestCompatible)
+        assertNull(recommendation.bestOperationalMargin)
+        assertTrue(recommendation.compared.all { it.compatibility == DroneWindowCompatibility.NOT_COMPATIBLE })
+        assertTrue(recommendation.compared.any { !it.compatibilityReason.isNullOrBlank() })
+        scope.cancel()
+    }
+
+    @Test
+    fun compatibleDroneWithoutWeightIsNotAssumedLightest() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val viewModel = fleetRecommendationViewModel(
+            scope = scope,
+            windKmh = 8.0,
+            gustKmh = 12.0,
+            drones = listOf(
+                LocalDrone(id = "unknown-weight", manufacturer = "DJI", model = "Mini 3 Pro", weight = null, manualMaxWindResistanceMs = 6.0, isSelected = true),
+                LocalDrone(id = "air", manufacturer = "DJI", model = "AIR 3S", weight = 724.0, manualMaxWindResistanceMs = 12.0)
+            )
+        )
+
+        val recommendation = requireNotNull(viewModel.uiState.value.flightOpportunityResult?.droneRecommendation)
+        assertEquals(2, recommendation.usableCount)
+        assertEquals("air", recommendation.lightestCompatible?.droneId)
+        assertEquals(DroneWindowCompatibility.USABLE, recommendation.compared.first { it.droneId == "unknown-weight" }.compatibility)
+        scope.cancel()
+    }
+
+    @Test
+    fun lowerScoreDoesNotMakeDroneNotRecommendedWhenUsable() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val viewModel = fleetRecommendationViewModel(
+            scope = scope,
+            windKmh = 9.0,
+            gustKmh = 13.0,
+            drones = listOf(
+                LocalDrone(id = "mini", manufacturer = "DJI", model = "Mini 3 Pro", weight = 249.0, manualMaxWindResistanceMs = 6.0, isSelected = true),
+                LocalDrone(id = "air", manufacturer = "DJI", model = "AIR 3S", weight = 724.0, manualMaxWindResistanceMs = 12.0)
+            )
+        )
+
+        val recommendation = requireNotNull(viewModel.uiState.value.flightOpportunityResult?.droneRecommendation)
+        val mini = recommendation.compared.first { it.droneId == "mini" }
+        val air = recommendation.compared.first { it.droneId == "air" }
+        assertEquals(DroneWindowCompatibility.USABLE, mini.compatibility)
+        assertEquals(DroneWindowCompatibility.USABLE, air.compatibility)
+        assertTrue((mini.droneScore ?: 0) < (air.droneScore ?: 0))
+        assertEquals("mini", recommendation.lightestCompatible?.droneId)
+        assertEquals("air", recommendation.bestOperationalMargin?.droneId)
         scope.cancel()
     }
 
@@ -996,6 +1150,26 @@ class MapViewModelTest {
             externalScope = scope
         )
 
+    private suspend fun fleetRecommendationViewModel(
+        scope: CoroutineScope,
+        windKmh: Double,
+        gustKmh: Double,
+        drones: List<LocalDrone>
+    ): MapViewModel {
+        val viewModel = viewModel(
+            scope = scope,
+            weather = FakeWeatherClient(forecast = weatherForecast(windKmh = windKmh, gustKmh = gustKmh)),
+            preferences = InMemoryMapPreferences(),
+            pilotStore = FakePilotStore(drones)
+        )
+        waitUntil { viewModel.uiState.value.selectedDrone != null }
+        viewModel.onMapTapped(selection(41.9, 12.5))
+        waitUntil { viewModel.uiState.value.selectedPoint != null }
+        viewModel.onOperationalContextRequested()
+        waitUntil { viewModel.uiState.value.flightOpportunityResult?.droneRecommendation != null }
+        return viewModel
+    }
+
     private fun helpTourManifest(): HelpManifest =
         HelpManifest(
             schemaVersion = 1,
@@ -1328,18 +1502,22 @@ private class FakePilotStore(
 
 private fun weatherForecast(
     windKmh: Double = 8.0,
-    gustKmh: Double = 12.0
+    gustKmh: Double = 12.0,
+    start: Instant? = null,
+    hours: Int = 1
 ): WeatherForecast {
     val rome = ZoneId.of("Europe/Rome")
-    val local = LocalDate.parse("2026-08-11").atTime(8, 0)
+    val firstInstant = start ?: LocalDate.parse("2026-08-11").atTime(8, 0).atZone(rome).toInstant()
     return WeatherForecast(
         location = WeatherForecastLocation(null, null, null, "Europe/Rome", "CEST", 7200),
         timezone = rome,
         generatedAt = Instant.parse("2026-08-11T06:00:00Z"),
         providerFetchedAt = Instant.parse("2026-08-11T06:00:00Z"),
-        hours = listOf(
+        hours = (0 until hours).map { index ->
+            val instant = firstInstant.plusSeconds(index * 3600L)
+            val local = instant.atZone(rome).toLocalDateTime()
             WeatherForecastHour(
-                instant = local.atZone(rome).toInstant(),
+                instant = instant,
                 offsetDateTime = null,
                 localDateTime = local,
                 localTimeText = local.toString(),
@@ -1356,7 +1534,7 @@ private fun weatherForecast(
                 ),
                 missingFields = emptyList()
             )
-        ),
+        },
         days = emptyList(),
         warnings = emptyList(),
         metadata = WeatherForecastMetadata(

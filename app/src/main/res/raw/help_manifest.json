@@ -24,8 +24,8 @@
         "id": "weather_flow",
         "target": "flight_opportunity_card",
         "action": "open_weather",
-        "title": "Meteo e finestre di volo",
-        "text": "Dal pannello del punto puoi aprire il report operativo per vedere meteo, finestre favorevoli e compatibilita con il drone.",
+        "title": "Opportunita di volo OPEN",
+        "text": "Dal pannello del punto puoi aprire il report operativo per vedere quando la zona OPEN, la luce, il meteo e il drone rendono il volo piu favorevole.",
         "order": 3
       },
       {
@@ -89,11 +89,11 @@
     },
     {
       "id": "weather",
-      "title": "Meteo per il volo",
-      "summary": "Condizioni previste, vento, raffiche e finestre favorevoli.",
-      "introduction": "Drone Sky Check analizza le condizioni meteorologiche previste nel punto selezionato e individua le finestre piu favorevoli per il volo.",
+      "title": "Opportunita di volo",
+      "summary": "Finestre OPEN, luce, vento, raffiche e condizioni favorevoli.",
+      "introduction": "Drone Sky Check incrocia stato della zona, luce, meteo e drone selezionato per individuare le finestre piu favorevoli per il volo.",
       "image": "weather_overview.webp",
-      "imageAlt": "Schermata Meteo per il volo",
+      "imageAlt": "Schermata Opportunita di volo",
       "order": 3,
       "blocks": [
         {

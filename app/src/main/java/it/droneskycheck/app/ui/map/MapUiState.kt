@@ -5,6 +5,7 @@ import it.droneskycheck.app.data.LegalTimelineResponse
 import it.droneskycheck.app.data.LocalDrone
 import it.droneskycheck.app.data.drone.DroneCatalogMatchResult
 import it.droneskycheck.app.data.drone.DroneOperationalAssessment
+import it.droneskycheck.app.data.flight.FlightLightPreference
 import it.droneskycheck.app.data.flight.FlightOpportunityResult
 import it.droneskycheck.app.data.flight.FlightOpportunityStatus
 import it.droneskycheck.app.data.help.ActiveHelpOnboarding
@@ -48,6 +49,7 @@ data class MapUiState(
     val selectedDrone: LocalDrone? = null,
     val selectedDroneCatalogMatch: DroneCatalogMatchResult? = null,
     val droneOperationalAssessment: DroneOperationalAssessment? = null,
+    val selectedLightPreference: FlightLightPreference = FlightLightPreference.DAYLIGHT,
     val flightOpportunityStatus: FlightOpportunityStatus = FlightOpportunityStatus.IDLE,
     val flightOpportunityResult: FlightOpportunityResult? = null,
     val isOperationalReportExpanded: Boolean = false,

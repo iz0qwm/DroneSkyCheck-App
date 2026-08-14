@@ -185,6 +185,8 @@ import it.droneskycheck.app.data.drone.DroneOperationalLevel
 import it.droneskycheck.app.data.drone.DroneTechnicalCatalogRepository
 import it.droneskycheck.app.data.drone.formatOneDecimal
 import it.droneskycheck.app.data.drone.msToKmh
+import it.droneskycheck.app.data.flight.FlightLightPreference
+import it.droneskycheck.app.data.flight.DroneWindowCompatibility
 import it.droneskycheck.app.data.flight.FlightOpportunity
 import it.droneskycheck.app.data.flight.FlightOpportunityDroneCandidate
 import it.droneskycheck.app.data.flight.FlightOpportunityDroneRecommendation
@@ -194,6 +196,7 @@ import it.droneskycheck.app.data.flight.FlightOpportunityReasonCode
 import it.droneskycheck.app.data.flight.FlightOpportunityResult
 import it.droneskycheck.app.data.flight.FlightOpportunityStatus
 import it.droneskycheck.app.data.flight.FlightOpportunityWarning
+import it.droneskycheck.app.data.solar.TimeWindow
 import it.droneskycheck.app.data.formatLocalRange
 import it.droneskycheck.app.data.help.ActiveHelpOnboarding
 import it.droneskycheck.app.data.help.HelpOnboardingStep
@@ -737,12 +740,14 @@ fun MapScreen(
                 selectedDrone = uiState.selectedDrone,
                 selectedDroneCatalogMatch = uiState.selectedDroneCatalogMatch,
                 droneOperationalAssessment = uiState.droneOperationalAssessment,
+                selectedLightPreference = uiState.selectedLightPreference,
                 flightOpportunityStatus = uiState.flightOpportunityStatus,
                 flightOpportunityResult = uiState.flightOpportunityResult,
                 isOperationalReportExpanded = uiState.isOperationalReportExpanded,
                 draftError = draftError,
                 onRetry = viewModel::onZoneCheckRetryRequested,
                 onOperationalContextRequested = viewModel::onOperationalContextRequested,
+                onFlightLightPreferenceSelected = viewModel::onFlightLightPreferenceSelected,
                 onOperationalReportExpansionChanged = viewModel::onOperationalReportExpansionChanged,
                 onDroneSelected = viewModel::onDroneSelected,
                 onContextualHelpRequested = { topicId ->
@@ -990,7 +995,7 @@ private fun HelpTourTarget.label(): String =
         HelpTourTarget.TRAFFIC_BUTTON -> "Traffico"
         HelpTourTarget.PROFILE_BUTTON -> "Profilo"
         HelpTourTarget.SELECTED_POINT_PANEL -> "Punto selezionato"
-        HelpTourTarget.WEATHER_ACTION -> "Meteo"
+        HelpTourTarget.WEATHER_ACTION -> "Opportunita"
         HelpTourTarget.FLIGHT_OPPORTUNITY_CARD -> "Report operativo"
     }
 
@@ -1002,7 +1007,7 @@ private fun HelpTourTarget.icon(): ImageVector =
         HelpTourTarget.TRAFFIC_BUTTON -> Icons.Default.Flight
         HelpTourTarget.PROFILE_BUTTON -> Icons.Default.Settings
         HelpTourTarget.SELECTED_POINT_PANEL -> Icons.Default.Info
-        HelpTourTarget.WEATHER_ACTION -> Icons.Default.Cloud
+        HelpTourTarget.WEATHER_ACTION -> Icons.Default.WbSunny
         HelpTourTarget.FLIGHT_OPPORTUNITY_CARD -> Icons.Default.WbSunny
     }
 
@@ -2514,12 +2519,14 @@ private fun ZoneBottomSheet(
     selectedDrone: LocalDrone?,
     selectedDroneCatalogMatch: DroneCatalogMatchResult?,
     droneOperationalAssessment: DroneOperationalAssessment?,
+    selectedLightPreference: FlightLightPreference,
     flightOpportunityStatus: FlightOpportunityStatus,
     flightOpportunityResult: FlightOpportunityResult?,
     isOperationalReportExpanded: Boolean,
     draftError: String?,
     onRetry: () -> Unit,
     onOperationalContextRequested: () -> Unit,
+    onFlightLightPreferenceSelected: (FlightLightPreference) -> Unit,
     onOperationalReportExpansionChanged: (Boolean) -> Unit,
     onDroneSelected: (String) -> Unit,
     onContextualHelpRequested: (String) -> Unit,
@@ -2577,6 +2584,8 @@ private fun ZoneBottomSheet(
                         status = flightOpportunityStatus,
                         result = flightOpportunityResult,
                         forecast = weatherForecast,
+                        selectedLightPreference = selectedLightPreference,
+                        onLightPreferenceSelected = onFlightLightPreferenceSelected,
                         onReportClick = { onOperationalReportExpansionChanged(!isOperationalReportExpanded) }
                     )
                     if (isOperationalReportExpanded) {
@@ -2679,6 +2688,8 @@ private fun FlightOpportunitySummaryCard(
     status: FlightOpportunityStatus,
     result: FlightOpportunityResult?,
     forecast: WeatherForecast?,
+    selectedLightPreference: FlightLightPreference,
+    onLightPreferenceSelected: (FlightLightPreference) -> Unit,
     onReportClick: () -> Unit
 ) {
     Surface(
@@ -2699,17 +2710,22 @@ private fun FlightOpportunitySummaryCard(
                 Icon(Icons.Default.WbSunny, contentDescription = null)
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Opportunita di volo",
+                        text = "Opportunita di volo OPEN",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = flightOpportunityStatusText(status, result),
+                        text = flightOpportunityStatusText(status, result, selectedLightPreference),
                         style = MaterialTheme.typography.bodySmall,
                         color = LocalContentColor.current.copy(alpha = 0.78f)
                     )
                 }
             }
+
+            FlightLightPreferenceSelector(
+                selected = selectedLightPreference,
+                onSelected = onLightPreferenceSelected
+            )
 
             if (status == FlightOpportunityStatus.LOADING) {
                 FlightOpportunityLoadingRows()
@@ -2717,6 +2733,7 @@ private fun FlightOpportunitySummaryCard(
                 val best = result?.bestOpportunity
                 if (best != null) {
                     FlightOpportunityMainWindow(best, forecast)
+                    FlightOpportunitySolarRows(best, forecast)
                     result.nextOpportunity
                         ?.takeIf { it.from != best.from }
                         ?.let { next ->
@@ -2752,6 +2769,80 @@ private fun FlightOpportunitySummaryCard(
 }
 
 @Composable
+private fun FlightLightPreferenceSelector(
+    selected: FlightLightPreference,
+    onSelected: (FlightLightPreference) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        FlightLightPreference.values().forEach { preference ->
+            val active = preference == selected
+            Surface(
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 36.dp)
+                    .clickable { onSelected(preference) },
+                shape = CircleShape,
+                color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
+                contentColor = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+            ) {
+                Box(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = preference.shortLabel(),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FlightOpportunitySolarRows(opportunity: FlightOpportunity, forecast: WeatherForecast?) {
+    val solar = opportunity.solarWindow ?: return
+    val zoneId = forecast?.timezone ?: solar.zoneId
+    val rows = when (opportunity.lightPreference) {
+        FlightLightPreference.DAYLIGHT -> listOfNotNull(
+            solar.sunrise?.let { "Alba" to it.formatSolarInstant(zoneId) },
+            solar.sunset?.let { "Tramonto" to it.formatSolarInstant(zoneId) }
+        )
+        FlightLightPreference.SUNRISE -> listOfNotNull(
+            solar.morningBlueHour?.let { "Blue Hour" to it.formatSolarWindow(zoneId) },
+            solar.morningGoldenHour?.let { "Golden Hour" to it.formatSolarWindow(zoneId) },
+            solar.sunrise?.let { "Alba" to it.formatSolarInstant(zoneId) }
+        )
+        FlightLightPreference.SUNSET -> listOfNotNull(
+            solar.eveningGoldenHour?.let { "Golden Hour" to it.formatSolarWindow(zoneId) },
+            solar.sunset?.let { "Tramonto" to it.formatSolarInstant(zoneId) },
+            solar.eveningBlueHour?.let { "Blue Hour" to it.formatSolarWindow(zoneId) }
+        )
+        FlightLightPreference.NIGHT -> listOfNotNull(
+            solar.sunset?.let { "Tramonto" to it.formatSolarInstant(zoneId) },
+            solar.blueHourEveningEnd?.let { "Fine Blue Hour / inizio notte" to it.formatSolarInstant(zoneId) }
+        )
+    }
+    if (rows.isEmpty()) return
+
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        opportunity.requestedLightWindow?.let { window ->
+            IconTextRow(Icons.Default.Schedule, "Finestra disponibile: ${window.formatSolarWindow(zoneId)}")
+        }
+        rows.forEach { (label, value) ->
+            IconTextRow(Icons.Default.WbSunny, "$label: $value")
+        }
+    }
+}
+
+@Composable
 private fun FlightOpportunityLoadingRows() {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -2778,7 +2869,7 @@ private fun FlightOpportunityMainWindow(opportunity: FlightOpportunity, forecast
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Text(
-                text = "Migliore finestra",
+                text = "Migliore opportunita",
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.Bold
             )
@@ -2818,20 +2909,45 @@ private fun FlightOpportunityReasons(opportunity: FlightOpportunity) {
 
 @Composable
 private fun FlightOpportunityDroneRecommendationRow(recommendation: FlightOpportunityDroneRecommendation) {
-    val recommended = recommendation.recommended
-    val comparison = recommendation.compared
-        .filter { it.droneId != recommended.droneId }
-        .take(2)
-        .joinToString(" - ") { it.compactDroneComparisonText() }
-        .takeIf { it.isNotBlank() }
-    val text = buildString {
-        append("Drone consigliato: ${recommended.displayName}")
-        recommended.droneScore?.let { append(" ($it/100)") }
-        append(". ")
-        append(recommendation.reason.toUserText())
-        comparison?.let { append(" Confronto: $it.") }
+    val usableSummary = recommendation.fleetCompatibilitySummary()
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        IconTextRow(Icons.Default.Air, "Droni per questa finestra: $usableSummary.")
+
+        if (recommendation.usableCount == 0 && recommendation.cautionCount == 0) {
+            val mainReason = recommendation.compared
+                .firstOrNull()
+                ?.compatibilityReason
+                ?: "Condizioni non consigliabili per i droni presenti nella flotta."
+            IconTextRow(Icons.Default.Info, "Nessuno dei tuoi droni risulta consigliabile. $mainReason")
+        } else if (recommendation.usableCount == 1 && recommendation.cautionCount == 0) {
+            val onlyUsable = recommendation.compared.firstOrNull { it.compatibility == DroneWindowCompatibility.USABLE }
+            onlyUsable?.let {
+                IconTextRow(Icons.Default.Air, "${it.displayName}: compatibile. ${it.compatibilityReason.orEmpty()}")
+            }
+        } else {
+            recommendation.lightestCompatible?.let { lightest ->
+                IconTextRow(
+                    Icons.Default.Flight,
+                    "Piu leggero compatibile: ${lightest.displayName}${lightest.massText(prefix = " - ")}. ${lightest.compatibilityReason.orEmpty()}"
+                )
+            }
+            recommendation.bestOperationalMargin
+                ?.takeIf { margin -> margin.droneId != recommendation.lightestCompatible?.droneId || recommendation.usableCount + recommendation.cautionCount > 1 }
+                ?.let { margin ->
+                    IconTextRow(
+                        Icons.Default.Speed,
+                        "Maggior margine operativo: ${margin.displayName}. ${margin.marginReasonText()}"
+                    )
+                }
+        }
+
+        recommendation.compared
+            .filter { it.compatibility != DroneWindowCompatibility.UNKNOWN || it.compatibilityReason != null }
+            .take(4)
+            .forEach { candidate ->
+                IconTextRow(Icons.Default.Info, candidate.fleetAssessmentText(recommendation))
+            }
     }
-    IconTextRow(Icons.Default.Air, text)
 }
 
 @Composable
@@ -3877,7 +3993,7 @@ private fun OperationalContextActionSection(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Text(
-                text = "Meteo e prossime ore",
+                text = "Opportunita di volo OPEN",
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold
             )
@@ -3886,12 +4002,12 @@ private fun OperationalContextActionSection(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Icon(
-                    imageVector = Icons.Default.Cloud,
+                    imageVector = Icons.Default.WbSunny,
                     contentDescription = null,
                     modifier = Modifier.size(18.dp)
                 )
                 Spacer(modifier = Modifier.size(8.dp))
-                Text("Controlla meteo e prossime ore")
+                Text("Scopri quando puoi volare")
             }
         }
     }
@@ -5385,6 +5501,11 @@ private fun LocalDate.dayTitle(): String {
     return text.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ITALY) else it.toString() }
 }
 
+private fun LocalDate.shortDayTitle(): String {
+    val text = DateTimeFormatter.ofPattern("EEE d MMM", Locale.ITALY).format(this)
+    return text.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ITALY) else it.toString() }
+}
+
 private fun LegalDailyWindow.coversDisplayedDay(): Boolean =
     start == LocalTime.MIDNIGHT && end == LocalTime.MIDNIGHT
 
@@ -5473,30 +5594,47 @@ private fun DroneDailyOperationalTrend.droneTrendNote(): String? =
 
 private fun flightOpportunityStatusText(
     status: FlightOpportunityStatus,
-    result: FlightOpportunityResult?
+    result: FlightOpportunityResult?,
+    lightPreference: FlightLightPreference
 ): String =
     when (status) {
-        FlightOpportunityStatus.IDLE -> "Avvia il controllo meteo per cercare una finestra OPEN."
-        FlightOpportunityStatus.LOADING -> "Sto incrociando zona, meteo e drone selezionato."
-        FlightOpportunityStatus.READY -> "Finestra OPEN trovata."
+        FlightOpportunityStatus.IDLE -> "Scopri quando puoi volare in OPEN nell'area selezionata."
+        FlightOpportunityStatus.LOADING -> "Sto incrociando zona, luce, meteo e drone selezionato."
+        FlightOpportunityStatus.READY -> "Finestra OPEN ${lightPreference.userSentenceFragment()} trovata."
         FlightOpportunityStatus.PARTIAL -> "Valutazione parziale: alcuni dati drone non sono completi."
         FlightOpportunityStatus.NO_OPEN_WINDOW -> "Nessuna finestra OPEN nell'orizzonte disponibile."
         FlightOpportunityStatus.NO_FAVORABLE_WEATHER -> "Sono presenti finestre OPEN, ma il meteo non e' favorevole."
         FlightOpportunityStatus.DRONE_UNFAVORABLE -> "Meteo disponibile, ma il drone selezionato e' il punto critico."
         FlightOpportunityStatus.INSUFFICIENT_DATA -> "Dati insufficienti per una valutazione completa."
-        FlightOpportunityStatus.ERROR -> "Controllo meteo non disponibile."
+        FlightOpportunityStatus.ERROR -> "Analisi opportunita non disponibile."
     }.let { base ->
         result?.horizonTo?.let { "$base Orizzonte: fino al ${it.formatOpportunityHorizon(result.bestOpportunity)}." } ?: base
     }
 
 private fun FlightOpportunityResult.noOpportunityText(): String =
     when (status) {
-        FlightOpportunityStatus.NO_OPEN_WINDOW -> "Nessuna finestra OPEN disponibile nell'orizzonte analizzato."
+        FlightOpportunityStatus.NO_OPEN_WINDOW -> "Nessuna opportunita OPEN ${lightPreference.userSentenceFragment()} nel periodo analizzato."
         FlightOpportunityStatus.NO_FAVORABLE_WEATHER -> "Sono presenti finestre OPEN, ma le condizioni meteorologiche risultano sfavorevoli."
         FlightOpportunityStatus.DRONE_UNFAVORABLE -> "Le condizioni meteo generali sono utilizzabili, ma risultano poco compatibili con il drone selezionato."
         FlightOpportunityStatus.INSUFFICIENT_DATA -> "Non ci sono dati sufficienti per una valutazione completa."
         FlightOpportunityStatus.ERROR -> "Controllo meteo non disponibile."
         else -> blockers.firstOrNull()?.toUserText() ?: "Nessuna opportunita favorevole trovata."
+    }
+
+private fun FlightLightPreference.shortLabel(): String =
+    when (this) {
+        FlightLightPreference.DAYLIGHT -> "Diurno"
+        FlightLightPreference.SUNRISE -> "Alba"
+        FlightLightPreference.SUNSET -> "Tramonto"
+        FlightLightPreference.NIGHT -> "Notturno"
+    }
+
+private fun FlightLightPreference.userSentenceFragment(): String =
+    when (this) {
+        FlightLightPreference.DAYLIGHT -> "diurna"
+        FlightLightPreference.SUNRISE -> "all'alba"
+        FlightLightPreference.SUNSET -> "al tramonto"
+        FlightLightPreference.NIGHT -> "notturna"
     }
 
 private fun FlightOpportunity.fullRangeText(forecast: WeatherForecast?): String {
@@ -5511,6 +5649,27 @@ private fun FlightOpportunity.compactRangeText(forecast: WeatherForecast?): Stri
     val start = from.atZone(zoneId)
     val end = to.atZone(zoneId)
     return "${start.toLocalDate().dayTitle()} ${start.toLocalTime().formatHourMinute()}-${end.toLocalTime().formatHourMinute()}"
+}
+
+private fun TimeWindow.formatSolarWindow(zoneId: ZoneId): String {
+    val start = from.atZone(zoneId)
+    val end = to.atZone(zoneId)
+    val range = "${start.toLocalTime().formatHourMinute()}-${end.toLocalTime().formatHourMinute()}"
+    return if (start.toLocalDate() == LocalDate.now(zoneId)) {
+        range
+    } else {
+        "${start.toLocalDate().shortDayTitle()} - $range"
+    }
+}
+
+private fun Instant.formatSolarInstant(zoneId: ZoneId): String {
+    val local = atZone(zoneId)
+    val time = local.toLocalTime().formatHourMinute()
+    return if (local.toLocalDate() == LocalDate.now(zoneId)) {
+        time
+    } else {
+        "${local.toLocalDate().shortDayTitle()} - $time"
+    }
 }
 
 private fun FlightOpportunity.legalSummaryText(): String =
@@ -5548,13 +5707,24 @@ private fun FlightOpportunityReasonCode.isUsefulSummaryReason(): Boolean =
         FlightOpportunityReasonCode.LOW_GUSTS,
         FlightOpportunityReasonCode.NO_PRECIPITATION,
         FlightOpportunityReasonCode.DRONE_COMPATIBLE,
-        FlightOpportunityReasonCode.DRONE_PARTIAL
+        FlightOpportunityReasonCode.DRONE_PARTIAL,
+        FlightOpportunityReasonCode.SUNRISE_LIGHT_WINDOW,
+        FlightOpportunityReasonCode.SUNSET_LIGHT_WINDOW,
+        FlightOpportunityReasonCode.GOLDEN_HOUR_WINDOW,
+        FlightOpportunityReasonCode.BLUE_HOUR_WINDOW,
+        FlightOpportunityReasonCode.NIGHT_WINDOW
     )
 
 private fun FlightOpportunityReasonCode.summaryIcon(): ImageVector =
     when (this) {
         FlightOpportunityReasonCode.DAYTIME_WINDOW,
-        FlightOpportunityReasonCode.EVENING_OR_NIGHT_WINDOW -> Icons.Default.Schedule
+        FlightOpportunityReasonCode.EVENING_OR_NIGHT_WINDOW,
+        FlightOpportunityReasonCode.SUNRISE_LIGHT_WINDOW,
+        FlightOpportunityReasonCode.SUNSET_LIGHT_WINDOW,
+        FlightOpportunityReasonCode.GOLDEN_HOUR_WINDOW,
+        FlightOpportunityReasonCode.BLUE_HOUR_WINDOW,
+        FlightOpportunityReasonCode.NIGHT_WINDOW,
+        FlightOpportunityReasonCode.LIGHT_WINDOW_MISSING -> Icons.Default.Schedule
         FlightOpportunityReasonCode.ALTITUDE_LIMIT -> Icons.Default.Speed
         FlightOpportunityReasonCode.DRONE_COMPATIBLE,
         FlightOpportunityReasonCode.DRONE_PARTIAL,
@@ -5589,6 +5759,12 @@ private fun FlightOpportunityReasonCode.toUserText(): String =
         FlightOpportunityReasonCode.FORECAST_CONFIDENCE_LOW -> "Affidabilita bassa"
         FlightOpportunityReasonCode.FORECAST_CONFIDENCE_INDICATIVE -> "Previsione indicativa"
         FlightOpportunityReasonCode.SHORT_WINDOW -> "Finestra breve"
+        FlightOpportunityReasonCode.SUNRISE_LIGHT_WINDOW -> "Fascia alba"
+        FlightOpportunityReasonCode.SUNSET_LIGHT_WINDOW -> "Fascia tramonto"
+        FlightOpportunityReasonCode.GOLDEN_HOUR_WINDOW -> "Golden Hour"
+        FlightOpportunityReasonCode.BLUE_HOUR_WINDOW -> "Blue Hour"
+        FlightOpportunityReasonCode.NIGHT_WINDOW -> "Finestra notturna"
+        FlightOpportunityReasonCode.LIGHT_WINDOW_MISSING -> "Fascia luce richiesta non disponibile"
         FlightOpportunityReasonCode.AUTHORIZATION_REQUIRED -> "In queste fasce sarebbe necessaria autorizzazione"
         FlightOpportunityReasonCode.LEGAL_UNAVAILABLE -> "Zona non OPEN"
         FlightOpportunityReasonCode.LEGAL_UNKNOWN -> "Stato legale non determinato"
@@ -5617,10 +5793,51 @@ private fun Instant.formatOpportunityHorizon(reference: FlightOpportunity?): Str
 
 private fun FlightOpportunityDroneRecommendationReason.toUserText(): String =
     when (this) {
+        FlightOpportunityDroneRecommendationReason.BEST_OPERATIONAL_MARGIN -> "Offre il maggior margine operativo."
+        FlightOpportunityDroneRecommendationReason.LIGHTEST_COMPATIBLE -> "E' anche il piu leggero tra quelli compatibili."
         FlightOpportunityDroneRecommendationReason.WIND_MARGIN -> "Margine vento migliore per questa finestra."
         FlightOpportunityDroneRecommendationReason.ONLY_USABLE -> "E' l'unico con una finestra utilizzabile."
         FlightOpportunityDroneRecommendationReason.BETTER_WINDOW -> "Ha una finestra migliore rispetto al drone selezionato."
         FlightOpportunityDroneRecommendationReason.NO_CLEAR_ADVANTAGE -> "Differenza contenuta, ma resta il profilo piu prudente."
+    }
+
+private fun FlightOpportunityDroneRecommendation.fleetCompatibilitySummary(): String {
+    val parts = listOfNotNull(
+        usableCount.takeIf { it > 0 }?.let { count -> "$count ${if (count == 1) "compatibile" else "compatibili"}" },
+        cautionCount.takeIf { it > 0 }?.let { count -> "$count con cautela" }
+    )
+    return parts.ifEmpty { listOf("nessun drone consigliabile") }.joinToString(" - ")
+}
+
+private fun FlightOpportunityDroneCandidate.fleetAssessmentText(
+    recommendation: FlightOpportunityDroneRecommendation
+): String {
+    val tags = buildList {
+        add(compatibility.toUserText())
+        if (droneId == recommendation.lightestCompatible?.droneId) add("piu leggero compatibile")
+        if (droneId == recommendation.bestOperationalMargin?.droneId) add("margine migliore")
+        massText()?.let { add(it) }
+    }.joinToString(" - ")
+    return "$displayName: $tags. ${compatibilityReason.orEmpty()}".trim()
+}
+
+private fun FlightOpportunityDroneCandidate.marginReasonText(): String =
+    when {
+        windResistanceMs != null -> "Maggiore margine rispetto a vento e raffiche."
+        compatibilityReason != null -> compatibilityReason
+        else -> "Piu adatto alle condizioni previste tra i droni valutati."
+    }
+
+private fun FlightOpportunityDroneCandidate.massText(prefix: String = ""): String? =
+    massGrams?.takeIf { it > 0.0 }?.let { "$prefix${it.roundToInt()} g" }
+
+private fun DroneWindowCompatibility.toUserText(): String =
+    when (this) {
+        DroneWindowCompatibility.USABLE -> "compatibile"
+        DroneWindowCompatibility.USABLE_WITH_CAUTION -> "con cautela"
+        DroneWindowCompatibility.NOT_RECOMMENDED -> "non consigliato"
+        DroneWindowCompatibility.NOT_COMPATIBLE -> "non compatibile"
+        DroneWindowCompatibility.UNKNOWN -> "da verificare"
     }
 
 private fun FlightOpportunityDroneCandidate.compactDroneComparisonText(): String =

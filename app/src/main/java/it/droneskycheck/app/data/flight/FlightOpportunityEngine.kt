@@ -5,6 +5,9 @@ import it.droneskycheck.app.data.LegalTimelineState
 import it.droneskycheck.app.data.drone.DroneDataCompleteness
 import it.droneskycheck.app.data.drone.DroneOperationalAssessment
 import it.droneskycheck.app.data.drone.DroneOperationalLevel
+import it.droneskycheck.app.data.solar.SolarLightPhase
+import it.droneskycheck.app.data.solar.SolarWindow
+import it.droneskycheck.app.data.solar.TimeWindow
 import it.droneskycheck.app.data.weather.WeatherAssessment
 import it.droneskycheck.app.data.weather.WeatherConfidenceLevel
 import it.droneskycheck.app.data.weather.WeatherReasonCode
@@ -21,7 +24,9 @@ data class FlightOpportunityInput(
     val legalSegments: List<LegalTimelineSegment>,
     val weatherSlots: List<FlightOpportunityWeatherSlot>,
     val zoneId: ZoneId,
-    val now: Instant
+    val now: Instant,
+    val lightPreference: FlightLightPreference = FlightLightPreference.DAYLIGHT,
+    val solarWindows: List<SolarWindow> = emptyList()
 )
 
 data class FlightOpportunityWeatherSlot(
@@ -41,13 +46,19 @@ data class FlightOpportunityResult(
     val horizonTo: Instant?,
     val warnings: List<FlightOpportunityWarning>,
     val blockers: List<FlightOpportunityReasonCode>,
+    val lightPreference: FlightLightPreference = FlightLightPreference.DAYLIGHT,
+    val solarWindows: List<SolarWindow> = emptyList(),
     val droneRecommendation: FlightOpportunityDroneRecommendation? = null
 )
 
 data class FlightOpportunityDroneRecommendation(
     val recommended: FlightOpportunityDroneCandidate,
     val compared: List<FlightOpportunityDroneCandidate>,
-    val reason: FlightOpportunityDroneRecommendationReason
+    val reason: FlightOpportunityDroneRecommendationReason,
+    val lightestCompatible: FlightOpportunityDroneCandidate? = null,
+    val bestOperationalMargin: FlightOpportunityDroneCandidate? = recommended,
+    val usableCount: Int = compared.count { it.compatibility == DroneWindowCompatibility.USABLE },
+    val cautionCount: Int = compared.count { it.compatibility == DroneWindowCompatibility.USABLE_WITH_CAUTION }
 )
 
 data class FlightOpportunityDroneCandidate(
@@ -58,11 +69,24 @@ data class FlightOpportunityDroneCandidate(
     val droneScore: Int?,
     val droneLevel: DroneOperationalLevel?,
     val windResistanceMs: Double?,
+    val massGrams: Double? = null,
+    val compatibility: DroneWindowCompatibility = DroneWindowCompatibility.UNKNOWN,
+    val compatibilityReason: String? = null,
     val bestFrom: Instant?,
     val bestTo: Instant?
 )
 
+enum class DroneWindowCompatibility {
+    USABLE,
+    USABLE_WITH_CAUTION,
+    NOT_RECOMMENDED,
+    NOT_COMPATIBLE,
+    UNKNOWN
+}
+
 enum class FlightOpportunityDroneRecommendationReason {
+    BEST_OPERATIONAL_MARGIN,
+    LIGHTEST_COMPATIBLE,
     WIND_MARGIN,
     ONLY_USABLE,
     BETTER_WINDOW,
@@ -86,8 +110,19 @@ data class FlightOpportunity(
     val warnings: List<FlightOpportunityWarning>,
     val durationMinutes: Long,
     val timePreference: FlightOpportunityTimePreference = FlightOpportunityTimePreference.UNKNOWN,
+    val lightPreference: FlightLightPreference = FlightLightPreference.DAYLIGHT,
+    val lightPhase: SolarLightPhase? = null,
+    val solarWindow: SolarWindow? = null,
+    val requestedLightWindow: TimeWindow? = null,
     val dailyConservativeScoreCap: Int? = null
 )
+
+enum class FlightLightPreference {
+    DAYLIGHT,
+    SUNRISE,
+    SUNSET,
+    NIGHT
+}
 
 enum class FlightOpportunityStatus {
     IDLE,
@@ -135,6 +170,12 @@ enum class FlightOpportunityReasonCode {
     FORECAST_CONFIDENCE_LOW,
     FORECAST_CONFIDENCE_INDICATIVE,
     SHORT_WINDOW,
+    SUNRISE_LIGHT_WINDOW,
+    SUNSET_LIGHT_WINDOW,
+    GOLDEN_HOUR_WINDOW,
+    BLUE_HOUR_WINDOW,
+    NIGHT_WINDOW,
+    LIGHT_WINDOW_MISSING,
     AUTHORIZATION_REQUIRED,
     LEGAL_UNAVAILABLE,
     LEGAL_UNKNOWN,
@@ -207,25 +248,43 @@ class FlightOpportunityEngine(
             )
         }
 
+        val lightWindows = input.preferenceWindows(horizonFrom, horizonTo)
+        val hasOpenLightIntersection = openSegments.any { segment ->
+            lightWindows.any { lightWindow ->
+                val from = maxInstant(maxInstant(segment.from, lightWindow.window.from), horizonFrom)
+                val to = minInstant(minInstant(segment.to, lightWindow.window.to), horizonTo)
+                to.isAfter(from)
+            }
+        }
         val dailyScoreCaps = input.weatherSlots.dailyConservativeScoreCaps(input.zoneId)
         val candidates = openSegments.flatMap { segment ->
-            input.weatherSlots.mapNotNull { slot ->
-                val from = maxInstant(maxInstant(segment.from, slot.from), horizonFrom)
-                val to = minInstant(minInstant(segment.to, slot.to), horizonTo)
-                if (!to.isAfter(from)) return@mapNotNull null
-                opportunityFor(
-                    segment = segment,
-                    slot = slot,
-                    from = from,
-                    to = to,
-                    zoneId = input.zoneId,
-                    dailyScoreCap = dailyScoreCaps[from.atZone(input.zoneId).toLocalDate()]
-                )
+            lightWindows.flatMap { lightWindow ->
+                input.weatherSlots.mapNotNull { slot ->
+                    val from = maxInstant(
+                        maxInstant(maxInstant(segment.from, slot.from), lightWindow.window.from),
+                        horizonFrom
+                    )
+                    val to = minInstant(
+                        minInstant(minInstant(segment.to, slot.to), lightWindow.window.to),
+                        horizonTo
+                    )
+                    if (!to.isAfter(from)) return@mapNotNull null
+                    opportunityFor(
+                        segment = segment,
+                        slot = slot,
+                        from = from,
+                        to = to,
+                        zoneId = input.zoneId,
+                        lightPreference = input.lightPreference,
+                        lightWindow = lightWindow,
+                        dailyScoreCap = dailyScoreCaps[from.atZone(input.zoneId).toLocalDate()]
+                    )
+                }
             }
         }.mergeAdjacentEquivalent()
 
         val viable = candidates.filter { it.opportunityLevel != FlightOpportunityLevel.POOR }
-        val ranked = viable.rankedWithDaytimePreference()
+        val ranked = viable.ranked(input)
         val chronological = viable.sortedBy { it.from }
         val best = ranked.firstOrNull()
         val next = chronological.firstOrNull()
@@ -241,10 +300,15 @@ class FlightOpportunityEngine(
             candidates.any { it.weatherState == WeatherState.FAVORABLE || it.weatherScore >= config.goodScore } ->
                 FlightOpportunityStatus.DRONE_UNFAVORABLE
             candidates.isNotEmpty() -> FlightOpportunityStatus.NO_FAVORABLE_WEATHER
+            lightWindows.isEmpty() || !hasOpenLightIntersection -> FlightOpportunityStatus.NO_OPEN_WINDOW
             else -> FlightOpportunityStatus.INSUFFICIENT_DATA
         }
 
-        val blockers = if (viable.isEmpty()) noOpportunityReasons(candidates) else emptyList()
+        val blockers = if (viable.isEmpty()) {
+            noOpportunityReasons(candidates, lightWindows, hasOpenLightIntersection)
+        } else {
+            emptyList()
+        }
         return FlightOpportunityResult(
             status = status,
             bestOpportunity = best,
@@ -256,7 +320,9 @@ class FlightOpportunityEngine(
             horizonFrom = horizonFrom,
             horizonTo = horizonTo,
             warnings = candidates.flatMap { it.warnings }.distinct(),
-            blockers = blockers
+            blockers = blockers,
+            lightPreference = input.lightPreference,
+            solarWindows = input.solarWindows
         )
     }
 
@@ -266,11 +332,13 @@ class FlightOpportunityEngine(
         from: Instant,
         to: Instant,
         zoneId: ZoneId,
+        lightPreference: FlightLightPreference,
+        lightWindow: FlightPreferenceWindow,
         dailyScoreCap: Int?
     ): FlightOpportunity {
         val durationMinutes = Duration.between(from, to).toMinutes()
         val drone = slot.droneAssessment
-        val timePreference = timePreferenceFor(from, to, zoneId)
+        val timePreference = timePreferenceFor(from, to, zoneId, lightWindow.phase, lightPreference)
         val droneAvailable = drone != null && drone.dataCompleteness != DroneDataCompleteness.MINIMAL
         val rawScore = when {
             slot.weatherAssessment.state == WeatherState.INSUFFICIENT_DATA -> null
@@ -319,10 +387,22 @@ class FlightOpportunityEngine(
             droneLevel = drone?.level,
             droneAssessmentAvailable = droneAvailable,
             forecastConfidence = slot.weatherAssessment.confidence.level,
-            reasons = reasonCodes(segment, slot, drone, durationMinutes, timePreference),
+            reasons = reasonCodes(
+                segment = segment,
+                slot = slot,
+                drone = drone,
+                durationMinutes = durationMinutes,
+                timePreference = timePreference,
+                lightPreference = lightPreference,
+                lightPhase = lightWindow.phase
+            ),
             warnings = warnings,
             durationMinutes = durationMinutes,
             timePreference = timePreference,
+            lightPreference = lightPreference,
+            lightPhase = lightWindow.phase,
+            solarWindow = lightWindow.solarWindow,
+            requestedLightWindow = lightWindow.window,
             dailyConservativeScoreCap = dailyScoreCap
         )
     }
@@ -332,7 +412,9 @@ class FlightOpportunityEngine(
         slot: FlightOpportunityWeatherSlot,
         drone: DroneOperationalAssessment?,
         durationMinutes: Long,
-        timePreference: FlightOpportunityTimePreference
+        timePreference: FlightOpportunityTimePreference,
+        lightPreference: FlightLightPreference,
+        lightPhase: SolarLightPhase?
     ): List<FlightOpportunityReasonCode> =
         buildList {
             add(FlightOpportunityReasonCode.LEGAL_OPEN)
@@ -343,6 +425,7 @@ class FlightOpportunityEngine(
                     FlightOpportunityReasonCode.EVENING_OR_NIGHT_WINDOW
                 }
             )
+            addAll(lightReasonCodes(lightPreference, lightPhase))
             if (segment.state == LegalTimelineState.AVAILABLE_WITH_LIMIT || segment.maxAltitudeAgl != null && segment.maxAltitudeAgl < 120) {
                 add(FlightOpportunityReasonCode.ALTITUDE_LIMIT)
             }
@@ -375,21 +458,31 @@ class FlightOpportunityEngine(
             if (durationMinutes < config.minimumUsefulDurationMinutes) add(FlightOpportunityReasonCode.SHORT_WINDOW)
         }.distinct()
 
+    private fun List<FlightOpportunity>.ranked(input: FlightOpportunityInput): List<FlightOpportunity> {
+        if (input.solarWindows.isNotEmpty()) {
+            return sortedWith(
+                compareByDescending<FlightOpportunity> { rankingScore(it, input.lightPreference) }
+                    .thenBy { it.from }
+            )
+        }
+        return rankedWithDaytimePreference()
+    }
+
     private fun List<FlightOpportunity>.rankedWithDaytimePreference(): List<FlightOpportunity> {
         val daytime = filter { it.timePreference == FlightOpportunityTimePreference.DAYTIME }
         val pool = daytime.ifEmpty { this }
         val rankedPreferred = pool.sortedWith(
-            compareByDescending<FlightOpportunity> { rankingScore(it) }
+            compareByDescending<FlightOpportunity> { rankingScore(it, FlightLightPreference.DAYLIGHT) }
                 .thenBy { it.from }
         )
         val rankedAlternatives = filterNot { it in rankedPreferred }.sortedWith(
-            compareByDescending<FlightOpportunity> { rankingScore(it) }
+            compareByDescending<FlightOpportunity> { rankingScore(it, FlightLightPreference.DAYLIGHT) }
                 .thenBy { it.from }
         )
         return rankedPreferred + rankedAlternatives
     }
 
-    private fun rankingScore(opportunity: FlightOpportunity): Int {
+    private fun rankingScore(opportunity: FlightOpportunity, lightPreference: FlightLightPreference): Int {
         val base = opportunity.opportunityScore ?: 45
         val durationBonus = when {
             opportunity.durationMinutes >= config.preferredDurationMinutes -> 8
@@ -403,16 +496,32 @@ class FlightOpportunityEngine(
             WeatherConfidenceLevel.INSUFFICIENT -> -8
         }
         val dronePenalty = if (!opportunity.droneAssessmentAvailable) -6 else 0
-        val timePenalty = when (opportunity.timePreference) {
-            FlightOpportunityTimePreference.DAYTIME -> 0
-            FlightOpportunityTimePreference.EVENING -> -35
-            FlightOpportunityTimePreference.NIGHT -> -45
-            FlightOpportunityTimePreference.UNKNOWN -> -20
+        val timePenalty = when {
+            opportunity.lightPhase != null -> 0
+            lightPreference != FlightLightPreference.DAYLIGHT -> 0
+            opportunity.timePreference == FlightOpportunityTimePreference.DAYTIME -> 0
+            opportunity.timePreference == FlightOpportunityTimePreference.EVENING -> -35
+            opportunity.timePreference == FlightOpportunityTimePreference.NIGHT -> -45
+            else -> -20
         }
         return base + durationBonus + confidenceBonus + dronePenalty + timePenalty
     }
 
-    private fun timePreferenceFor(from: Instant, to: Instant, zoneId: ZoneId): FlightOpportunityTimePreference {
+    private fun timePreferenceFor(
+        from: Instant,
+        to: Instant,
+        zoneId: ZoneId,
+        lightPhase: SolarLightPhase?,
+        lightPreference: FlightLightPreference
+    ): FlightOpportunityTimePreference {
+        if (lightPhase != null) {
+            return when (lightPreference) {
+                FlightLightPreference.NIGHT -> FlightOpportunityTimePreference.NIGHT
+                FlightLightPreference.SUNSET -> FlightOpportunityTimePreference.EVENING
+                FlightLightPreference.SUNRISE,
+                FlightLightPreference.DAYLIGHT -> FlightOpportunityTimePreference.DAYTIME
+            }
+        }
         if (!to.isAfter(from)) return FlightOpportunityTimePreference.UNKNOWN
         val totalMinutes = Duration.between(from, to).toMinutes().coerceAtLeast(1)
         val daytimeMinutes = sampledMinutesInRange(from, to, zoneId, config.daytimeStart, config.daytimeEnd)
@@ -454,8 +563,13 @@ class FlightOpportunityEngine(
                 .coerceIn(0, rawScore)
         }
 
-    private fun noOpportunityReasons(candidates: List<FlightOpportunity>): List<FlightOpportunityReasonCode> =
+    private fun noOpportunityReasons(
+        candidates: List<FlightOpportunity>,
+        lightWindows: List<FlightPreferenceWindow>,
+        hasOpenLightIntersection: Boolean
+    ): List<FlightOpportunityReasonCode> =
         when {
+            lightWindows.isEmpty() || !hasOpenLightIntersection -> listOf(FlightOpportunityReasonCode.LIGHT_WINDOW_MISSING)
             candidates.any { it.droneLevel == DroneOperationalLevel.UNFAVORABLE } ->
                 listOf(FlightOpportunityReasonCode.DRONE_UNFAVORABLE)
             candidates.any { it.weatherState == WeatherState.UNFAVORABLE } ->
@@ -497,6 +611,86 @@ class FlightOpportunityEngine(
         )
 }
 
+private data class FlightPreferenceWindow(
+    val window: TimeWindow,
+    val solarWindow: SolarWindow?,
+    val phase: SolarLightPhase?
+)
+
+private fun FlightOpportunityInput.preferenceWindows(horizonFrom: Instant, horizonTo: Instant): List<FlightPreferenceWindow> {
+    if (solarWindows.isEmpty()) {
+        return listOf(
+            FlightPreferenceWindow(
+                window = TimeWindow(horizonFrom, horizonTo),
+                solarWindow = null,
+                phase = null
+            )
+        )
+    }
+
+    val sortedWindows = solarWindows.sortedBy { it.date }
+    val requested = when (lightPreference) {
+        FlightLightPreference.DAYLIGHT -> sortedWindows.mapNotNull { solar ->
+            solar.daylight?.let { FlightPreferenceWindow(it, solar, SolarLightPhase.DAYLIGHT) }
+        }
+        FlightLightPreference.SUNRISE -> sortedWindows.flatMap { solar ->
+            listOfNotNull(
+                solar.morningBlueHour?.let { FlightPreferenceWindow(it, solar, SolarLightPhase.BLUE_HOUR_MORNING) },
+                solar.morningGoldenHour?.let { FlightPreferenceWindow(it, solar, SolarLightPhase.GOLDEN_HOUR_MORNING) }
+            )
+        }
+        FlightLightPreference.SUNSET -> sortedWindows.flatMap { solar ->
+            listOfNotNull(
+                solar.eveningGoldenHour?.let { FlightPreferenceWindow(it, solar, SolarLightPhase.GOLDEN_HOUR_EVENING) },
+                solar.eveningBlueHour?.let { FlightPreferenceWindow(it, solar, SolarLightPhase.BLUE_HOUR_EVENING) }
+            )
+        }
+        FlightLightPreference.NIGHT -> sortedWindows.flatMapIndexed { index, solar ->
+            val dayStart = solar.date.atStartOfDay(zoneId).toInstant()
+            val nextSolar = sortedWindows.getOrNull(index + 1)
+            val nextMorningBlueStart = nextSolar?.blueHourMorningStart
+                ?: solar.date.plusDays(1).atStartOfDay(zoneId).toInstant()
+            listOfNotNull(
+                solar.blueHourMorningStart?.let { morningStart ->
+                    timeWindowOrNull(dayStart, morningStart)
+                }?.let { FlightPreferenceWindow(it, solar, SolarLightPhase.NIGHT) },
+                solar.blueHourEveningEnd?.let { eveningEnd ->
+                    timeWindowOrNull(eveningEnd, nextMorningBlueStart)
+                }?.let { FlightPreferenceWindow(it, solar, SolarLightPhase.NIGHT) }
+            )
+        }
+    }
+
+    val horizon = TimeWindow(horizonFrom, horizonTo)
+    return requested.mapNotNull { requestedWindow ->
+        requestedWindow.window.intersection(horizon)?.let { intersection ->
+            requestedWindow.copy(window = intersection)
+        }
+    }
+}
+
+private fun lightReasonCodes(
+    lightPreference: FlightLightPreference,
+    lightPhase: SolarLightPhase?
+): List<FlightOpportunityReasonCode> =
+    buildList {
+        when (lightPreference) {
+            FlightLightPreference.SUNRISE -> add(FlightOpportunityReasonCode.SUNRISE_LIGHT_WINDOW)
+            FlightLightPreference.SUNSET -> add(FlightOpportunityReasonCode.SUNSET_LIGHT_WINDOW)
+            FlightLightPreference.NIGHT -> add(FlightOpportunityReasonCode.NIGHT_WINDOW)
+            FlightLightPreference.DAYLIGHT -> Unit
+        }
+        when (lightPhase) {
+            SolarLightPhase.BLUE_HOUR_MORNING,
+            SolarLightPhase.BLUE_HOUR_EVENING -> add(FlightOpportunityReasonCode.BLUE_HOUR_WINDOW)
+            SolarLightPhase.GOLDEN_HOUR_MORNING,
+            SolarLightPhase.GOLDEN_HOUR_EVENING -> add(FlightOpportunityReasonCode.GOLDEN_HOUR_WINDOW)
+            SolarLightPhase.NIGHT -> add(FlightOpportunityReasonCode.NIGHT_WINDOW)
+            SolarLightPhase.DAYLIGHT,
+            null -> Unit
+        }
+    }.distinct()
+
 private val LegalTimelineSegment.isOpenOpportunity: Boolean
     get() = state == LegalTimelineState.AVAILABLE || state == LegalTimelineState.AVAILABLE_WITH_LIMIT
 
@@ -514,6 +708,15 @@ private val WeatherReasonCode.isPrecipitationReason: Boolean
         this == WeatherReasonCode.SHOWERS ||
         this == WeatherReasonCode.THUNDERSTORM ||
         this == WeatherReasonCode.THUNDERSTORM_WITH_HAIL
+
+private fun timeWindowOrNull(from: Instant, to: Instant): TimeWindow? =
+    if (to.isAfter(from)) TimeWindow(from, to) else null
+
+private fun TimeWindow.intersection(other: TimeWindow): TimeWindow? {
+    val from = maxInstant(from, other.from)
+    val to = minInstant(to, other.to)
+    return timeWindowOrNull(from, to)
+}
 
 private fun List<FlightOpportunity>.mergeAdjacentEquivalent(): List<FlightOpportunity> =
     sortedBy { it.from }.fold(emptyList()) { acc, current ->
@@ -541,6 +744,9 @@ private fun FlightOpportunity.canMergeWith(other: FlightOpportunity): Boolean =
         droneAssessmentAvailable == other.droneAssessmentAvailable &&
         forecastConfidence == other.forecastConfidence &&
         timePreference == other.timePreference &&
+        lightPreference == other.lightPreference &&
+        lightPhase == other.lightPhase &&
+        requestedLightWindow == other.requestedLightWindow &&
         dailyConservativeScoreCap == other.dailyConservativeScoreCap &&
         reasons == other.reasons &&
         warnings == other.warnings
