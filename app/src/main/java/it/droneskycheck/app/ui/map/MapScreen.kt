@@ -325,23 +325,6 @@ fun MapScreen(
         reloadActiveDraft()
     }
 
-    contextualHelpTopic?.let { topic ->
-        HelpTopicDialog(
-            topic = topic,
-            onDismiss = { contextualHelpTopic = null }
-        )
-    }
-
-    if (isHelpSheetVisible) {
-        HelpBottomSheet(
-            manifest = uiState.helpManifest,
-            isRefreshInProgress = uiState.isHelpManifestRefreshing,
-            refreshMessage = uiState.helpManifestRefreshMessage,
-            onRefresh = viewModel::refreshHelpManifestNow,
-            onDismiss = { isHelpSheetVisible = false }
-        )
-    }
-
     LaunchedEffect(viewModel, lifecycleOwner) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             viewModel.helpTourUiCommands.collect { command ->
@@ -454,6 +437,23 @@ fun MapScreen(
     }
 
     DroneSkyCheckTextScaleProvider(largeTextEnabled = uiState.isLargeTextEnabled) {
+        contextualHelpTopic?.let { topic ->
+            HelpTopicDialog(
+                topic = topic,
+                onDismiss = { contextualHelpTopic = null }
+            )
+        }
+
+        if (isHelpSheetVisible) {
+            HelpBottomSheet(
+                manifest = uiState.helpManifest,
+                isRefreshInProgress = uiState.isHelpManifestRefreshing,
+                refreshMessage = uiState.helpManifestRefreshMessage,
+                onRefresh = viewModel::refreshHelpManifestNow,
+                onDismiss = { isHelpSheetVisible = false }
+            )
+        }
+
         Box(modifier = Modifier.fillMaxSize()) {
         DroneSkyMapView(
             visibleLayerCategories = visibleLayerCategories,
