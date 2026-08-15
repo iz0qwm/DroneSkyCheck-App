@@ -284,6 +284,24 @@ class TrafficAwarenessPresentationTest {
             presentation.sections.first { it.title == "Dati traffico" }.rows.first().toPair()
         )
     }
+
+    @Test
+    fun adsbHelicopterSheetPresentationShowsHelicopterType() {
+        val target = trafficTarget(
+            id = "icao:heli",
+            callsign = "HELI01",
+            icao24 = "300001",
+            category = "A7"
+        )
+        val presentation = target.trafficSheetPresentation(assessment(TrafficRelevance.MONITOR))
+
+        assertEquals(TrafficTargetKind.HELICOPTER, presentation.targetKind)
+        assertEquals("Elicottero - ICAO 300001", presentation.secondaryIdentity)
+        assertEquals(
+            "Tipo" to "Elicottero",
+            presentation.sections.first { it.title == "Dati traffico" }.rows.first().toPair()
+        )
+    }
 }
 
 private fun TrafficAwarenessInfoRow.toPair(): Pair<String, String> = label to value
@@ -338,6 +356,8 @@ private fun trafficTarget(
     speedMps: Double? = null,
     trackDeg: Double? = null,
     headingDeg: Double? = null,
+    category: String? = null,
+    aircraftType: String? = null,
     objectType: String? = null
 ): TrafficTarget =
     TrafficTarget(
@@ -363,7 +383,7 @@ private fun trafficTarget(
             trackDeg = trackDeg,
             headingDeg = headingDeg
         ),
-        aircraft = TrafficAircraft(category = null, type = null),
+        aircraft = TrafficAircraft(category = category, type = aircraftType),
         time = TrafficTime(timestamp = null, ageSec = null),
         relative = TrafficRelative(distanceM = distanceM, bearingDeg = bearingDeg),
         provider = provider,

@@ -199,6 +199,27 @@ class TrafficAwarenessMapFeaturesTest {
     }
 
     @Test
+    fun geoJsonDiscriminatesAdsbHelicopterAndUavCategories() {
+        val collection = trafficTargetsFeatureCollection(
+            targets = listOf(
+                trafficTarget(id = "icao:heli", category = "A7"),
+                trafficTarget(id = "icao:uav", category = "B6")
+            )
+        )
+        val featuresById = collection.features().orEmpty()
+            .associateBy { it.properties()?.get(TrafficAwarenessMapProperties.TargetId)?.asString }
+
+        assertEquals(
+            "HELICOPTER",
+            featuresById["icao:heli"]?.properties()?.get(TrafficAwarenessMapProperties.TargetKind)?.asString
+        )
+        assertEquals(
+            "DRONE",
+            featuresById["icao:uav"]?.properties()?.get(TrafficAwarenessMapProperties.TargetKind)?.asString
+        )
+    }
+
+    @Test
     fun altitudeBandDoesNotUseGeometricAltitudeAsAglFallback() {
         val feature = trafficTargetsFeatureCollection(
             listOf(trafficTarget(id = "traffic:geo-only", geoM = 11_000.0, aglM = null))
@@ -299,6 +320,8 @@ private fun trafficTarget(
     source: String? = "OpenSky",
     trackDeg: Double? = 0.0,
     headingDeg: Double? = null,
+    category: String? = null,
+    aircraftType: String? = null,
     geoM: Double? = null,
     aglM: Double? = null,
     objectType: String? = null
@@ -326,7 +349,7 @@ private fun trafficTarget(
             trackDeg = trackDeg,
             headingDeg = headingDeg
         ),
-        aircraft = TrafficAircraft(category = null, type = null),
+        aircraft = TrafficAircraft(category = category, type = aircraftType),
         time = TrafficTime(timestamp = null, ageSec = null),
         relative = TrafficRelative(distanceM = null, bearingDeg = null),
         provider = provider,

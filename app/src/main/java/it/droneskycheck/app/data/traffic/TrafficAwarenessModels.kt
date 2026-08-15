@@ -51,6 +51,7 @@ data class TrafficTarget(
 
 enum class TrafficTargetKind {
     AIRCRAFT,
+    HELICOPTER,
     DRONE
 }
 
@@ -215,11 +216,20 @@ private fun JSONObject.toTrafficTargetOrNull(): TrafficTarget? {
 }
 
 fun TrafficTarget.trafficTargetKind(): TrafficTargetKind =
-    if (droneTrafficHints().any { it.hasDroneTrafficHint() }) {
-        TrafficTargetKind.DRONE
-    } else {
-        TrafficTargetKind.AIRCRAFT
+    when {
+        isDroneTrafficTarget() -> TrafficTargetKind.DRONE
+        isHelicopterTrafficTarget() -> TrafficTargetKind.HELICOPTER
+        else -> TrafficTargetKind.AIRCRAFT
     }
+
+private fun TrafficTarget.isDroneTrafficTarget(): Boolean =
+    aircraft.category.isAdsbUavCategory() ||
+        droneTrafficHints().any { it.hasDroneTrafficHint() }
+
+private fun TrafficTarget.isHelicopterTrafficTarget(): Boolean =
+    aircraft.category.isAdsbHelicopterCategory() ||
+        aircraft.type.hasHelicopterTrafficHint() ||
+        objectType.hasHelicopterTrafficHint()
 
 private fun TrafficTarget.droneTrafficHints(): List<String> =
     buildList {
@@ -258,6 +268,26 @@ private fun String.hasDroneTrafficHint(): Boolean {
         .replace("-", " ")
     return DroneTrafficKeywords.any { keyword -> normalized.contains(keyword) }
 }
+
+private fun String?.isAdsbHelicopterCategory(): Boolean =
+    normalizedTrafficCode() == "A7"
+
+private fun String?.isAdsbUavCategory(): Boolean =
+    normalizedTrafficCode()?.startsWith("B6") == true
+
+private fun String?.hasHelicopterTrafficHint(): Boolean {
+    val normalized = this?.lowercase(Locale.US)
+        ?.replace("_", " ")
+        ?.replace("-", " ")
+        ?: return false
+    return HelicopterTrafficKeywords.any { keyword -> normalized.contains(keyword) }
+}
+
+private fun String?.normalizedTrafficCode(): String? =
+    this
+        ?.trim()
+        ?.uppercase(Locale.US)
+        ?.takeIf { it.isNotBlank() }
 
 private fun JSONObject?.toTrafficIdentifiers(): TrafficIdentifiers {
     val json = this ?: JSONObject()
@@ -425,4 +455,11 @@ private val DroneTrafficKeywords = listOf(
     "rpas",
     "remoteid",
     "remote id"
+)
+
+private val HelicopterTrafficKeywords = listOf(
+    "helicopter",
+    "helicopter rotorcraft",
+    "rotorcraft",
+    "elicottero"
 )

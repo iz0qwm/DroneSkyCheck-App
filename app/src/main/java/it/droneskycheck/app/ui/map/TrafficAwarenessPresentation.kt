@@ -152,6 +152,7 @@ fun TrafficTarget.trafficSheetPresentation(assessment: TrafficAssessment? = null
         sourceLabel = sourceLabel,
         secondaryIdentity = when (targetKind) {
             TrafficTargetKind.DRONE -> "Drone rilevato"
+            TrafficTargetKind.HELICOPTER -> identifiers.icao24?.let { "Elicottero - ICAO ${it.uppercase(Locale.US)}" }
             TrafficTargetKind.AIRCRAFT -> identifiers.icao24?.let { "ICAO ${it.uppercase(Locale.US)}" }
         },
         relevanceLabel = (assessment?.relevance ?: TrafficRelevance.INFORMATION).presentationLabel(),
@@ -250,6 +251,7 @@ private fun TrafficRelevance.presentationLabel(): String =
 private fun TrafficTargetKind.presentationLabel(): String =
     when (this) {
         TrafficTargetKind.AIRCRAFT -> "Aeromobile"
+        TrafficTargetKind.HELICOPTER -> "Elicottero"
         TrafficTargetKind.DRONE -> "Drone AirSense"
     }
 

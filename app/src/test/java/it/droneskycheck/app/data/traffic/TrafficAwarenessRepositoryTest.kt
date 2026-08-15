@@ -94,6 +94,36 @@ class TrafficAwarenessRepositoryTest {
     }
 
     @Test
+    fun parsesAdsbCategoryA7AsHelicopterAndB6AsDrone() {
+        val response = parseTrafficAwarenessResponse(
+            JSONObject(
+                fixtureJson(
+                    targetsJson = """
+                        [
+                          {
+                            "id": "icao:heli",
+                            "identifiers": { "icao24": "300001", "callsign": "HELI01", "sourceId": "300001" },
+                            "position": { "lat": 41.901, "lon": 12.501 },
+                            "aircraft": { "category": "A7", "type": null }
+                          },
+                          {
+                            "id": "icao:uav",
+                            "identifiers": { "icao24": "300002", "callsign": "UAV01", "sourceId": "300002" },
+                            "position": { "lat": 41.902, "lon": 12.502 },
+                            "aircraft": { "category": "B6", "type": null }
+                          }
+                        ]
+                    """.trimIndent(),
+                    count = 2
+                )
+            )
+        )
+
+        assertEquals(TrafficTargetKind.HELICOPTER, response.traffic.targets.first { it.id == "icao:heli" }.trafficTargetKind())
+        assertEquals(TrafficTargetKind.DRONE, response.traffic.targets.first { it.id == "icao:uav" }.trafficTargetKind())
+    }
+
+    @Test
     fun parsesMixedTrafficResponse() {
         val response = parseTrafficAwarenessResponse(JSONObject(fixtureJson()))
 

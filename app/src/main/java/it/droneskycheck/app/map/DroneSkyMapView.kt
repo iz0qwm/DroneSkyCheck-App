@@ -1,8 +1,10 @@
 package it.droneskycheck.app.map
 
 import android.content.ComponentCallbacks
+import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -21,6 +23,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import it.droneskycheck.app.R
 import it.droneskycheck.app.data.CachedGeoJsonRepository
 import it.droneskycheck.app.data.DscLogger
 import it.droneskycheck.app.data.ZonesRepository
@@ -213,10 +216,14 @@ private fun configureMap(
                 "map icon registered id=${iconStyle.imageId} width=${trafficIcon.width} height=${trafficIcon.height}"
             )
         }
-        it.addImage(TRAFFIC_AWARENESS_DRONE_ICON_ID, createTrafficDroneIcon())
+        TrafficHelicopterIconStyle.entries.forEach { iconStyle ->
+            val trafficIcon = createTrafficHelicopterIcon(iconStyle.fillColor)
+            it.addImage(iconStyle.imageId, trafficIcon)
+        }
+        it.addImage(TRAFFIC_AWARENESS_DRONE_ICON_ID, createTrafficDroneIcon(mapView.context))
         DscLogger.trace(
             TrafficAwarenessLogTag,
-            "map traffic altitude icon variants=${TrafficAircraftIconStyle.entries.size}"
+            "map traffic altitude icon variants=${TrafficAircraftIconStyle.entries.size} helicopterVariants=${TrafficHelicopterIconStyle.entries.size}"
         )
         addDscLayers(it)
         addTrafficAwarenessLayers(it)
@@ -955,45 +962,71 @@ private fun createTrafficAircraftIcon(fillColor: String): Bitmap {
     return bitmap
 }
 
-private fun createTrafficDroneIcon(): Bitmap {
+private fun createTrafficHelicopterIcon(fillColor: String): Bitmap {
     val bitmap = Bitmap.createBitmap(TRAFFIC_AWARENESS_ICON_SIZE_PX, TRAFFIC_AWARENESS_ICON_SIZE_PX, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
-    val armPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
-        style = Paint.Style.STROKE
-        strokeWidth = 5.0f
-        strokeCap = Paint.Cap.ROUND
-    }
-    val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor(TRAFFIC_AWARENESS_DRONE_COLOR)
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor(fillColor)
         style = Paint.Style.FILL
     }
-    val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         style = Paint.Style.STROKE
         strokeWidth = 2.2f
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
     }
     val cx = TRAFFIC_AWARENESS_ICON_SIZE_PX / 2f
     val cy = TRAFFIC_AWARENESS_ICON_SIZE_PX / 2f
-    val rotorCenters = listOf(
-        PointF(cx - 16f, cy - 16f),
-        PointF(cx + 16f, cy - 16f),
-        PointF(cx - 16f, cy + 16f),
-        PointF(cx + 16f, cy + 16f)
-    )
 
-    canvas.drawLine(cx - 12f, cy - 12f, cx + 12f, cy + 12f, armPaint)
-    canvas.drawLine(cx + 12f, cy - 12f, cx - 12f, cy + 12f, armPaint)
-    rotorCenters.forEach { center ->
-        canvas.drawCircle(center.x, center.y, 8.5f, fillPaint)
-        canvas.drawCircle(center.x, center.y, 8.5f, strokePaint)
+    val body = android.graphics.Path().apply {
+        moveTo(cx, 8f)
+        cubicTo(cx + 8f, 15f, cx + 9f, 36f, cx + 3f, 43f)
+        lineTo(cx + 3f, 50f)
+        lineTo(cx - 3f, 50f)
+        lineTo(cx - 3f, 43f)
+        cubicTo(cx - 9f, 36f, cx - 8f, 15f, cx, 8f)
+        close()
     }
-    canvas.drawRoundRect(RectF(cx - 9f, cy - 7f, cx + 9f, cy + 7f), 5f, 5f, fillPaint)
-    canvas.drawRoundRect(RectF(cx - 9f, cy - 7f, cx + 9f, cy + 7f), 5f, 5f, strokePaint)
-    canvas.drawCircle(cx, cy, 2.8f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
+    val rotor = android.graphics.Path().apply {
+        moveTo(8f, cy - 2f)
+        lineTo(48f, cy + 2f)
+        moveTo(48f, cy - 2f)
+        lineTo(8f, cy + 2f)
+    }
+    val tail = android.graphics.Path().apply {
+        moveTo(cx, 43f)
+        lineTo(cx, 55f)
+        moveTo(cx - 7f, 55f)
+        lineTo(cx + 7f, 55f)
+    }
+
+    canvas.drawPath(body, paint)
+    canvas.drawPath(body, stroke)
+    canvas.drawPath(rotor, stroke)
+    canvas.drawPath(tail, stroke)
+    return bitmap
+}
+
+private fun createTrafficDroneIcon(context: Context): Bitmap {
+    val bitmap = Bitmap.createBitmap(TRAFFIC_AWARENESS_ICON_SIZE_PX, TRAFFIC_AWARENESS_ICON_SIZE_PX, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    val source = BitmapFactory.decodeResource(context.resources, R.drawable.dsc_traffic_drone)
+    val haloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor(TRAFFIC_AWARENESS_DRONE_COLOR)
         style = Paint.Style.FILL
-    })
+        alpha = 82
+    }
+    val imagePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    val cx = TRAFFIC_AWARENESS_ICON_SIZE_PX / 2.0f
+    val cy = TRAFFIC_AWARENESS_ICON_SIZE_PX / 2.0f
+    val half = TRAFFIC_AWARENESS_DRONE_PNG_SIZE_PX / 2.0f
+    val destination = RectF(cx - half, cy - half, cx + half, cy + half)
+
+    canvas.drawCircle(cx, cy, TRAFFIC_AWARENESS_DRONE_HALO_RADIUS_PX, haloPaint)
+    if (source != null) {
+        canvas.drawBitmap(source, null, destination, imagePaint)
+    }
     return bitmap
 }
 
@@ -1026,7 +1059,21 @@ private fun trafficIconImageExpression(): Expression =
         Expression.get(TrafficAwarenessMapProperties.TargetKind),
         Expression.literal(TrafficTargetKind.DRONE.name),
         Expression.literal(TRAFFIC_AWARENESS_DRONE_ICON_ID),
+        Expression.literal(TrafficTargetKind.HELICOPTER.name),
+        trafficHelicopterIconImageExpression(),
         trafficAircraftIconImageExpression()
+    )
+
+private fun trafficHelicopterIconImageExpression(): Expression =
+    Expression.match(
+        Expression.get(TrafficAwarenessMapProperties.AltitudeBand),
+        Expression.literal(TrafficAltitudeBand.VERY_LOW.name),
+        Expression.literal(TrafficHelicopterIconStyle.VeryLow.imageId),
+        Expression.literal(TrafficAltitudeBand.LOW.name),
+        Expression.literal(TrafficHelicopterIconStyle.Low.imageId),
+        Expression.literal(TrafficAltitudeBand.HIGH.name),
+        Expression.literal(TrafficHelicopterIconStyle.High.imageId),
+        Expression.literal(TrafficHelicopterIconStyle.Unknown.imageId)
     )
 
 private fun trafficAircraftIconImageExpression(): Expression =
@@ -1049,6 +1096,16 @@ private enum class TrafficAircraftIconStyle(
     Low("dsc-traffic-awareness-aircraft-low", DscZoneMapColors.limited60m.webHex),
     High("dsc-traffic-awareness-aircraft-high", TRAFFIC_AWARENESS_HIGH_ALTITUDE_COLOR),
     Unknown("dsc-traffic-awareness-aircraft-unknown", TRAFFIC_AWARENESS_COLOR)
+}
+
+private enum class TrafficHelicopterIconStyle(
+    val imageId: String,
+    val fillColor: String
+) {
+    VeryLow("dsc-traffic-awareness-helicopter-very-low", DscZoneMapColors.limited25m.webHex),
+    Low("dsc-traffic-awareness-helicopter-low", DscZoneMapColors.limited60m.webHex),
+    High("dsc-traffic-awareness-helicopter-high", TRAFFIC_AWARENESS_HIGH_ALTITUDE_COLOR),
+    Unknown("dsc-traffic-awareness-helicopter-unknown", TRAFFIC_AWARENESS_COLOR)
 }
 
 private const val ROME_LATITUDE = 41.9028
@@ -1075,6 +1132,8 @@ private const val USER_LOCATION_DOT_LAYER_ID = "dsc-user-location-dot"
 private const val USER_LOCATION_PULSE_LAYER_ID = "dsc-user-location-pulse"
 private const val NOTAM_ZEBRA_PATTERN_ID = "dsc-notam-zebra"
 private const val TRAFFIC_AWARENESS_ICON_SIZE_PX = 56
+private const val TRAFFIC_AWARENESS_DRONE_PNG_SIZE_PX = 34.0f
+private const val TRAFFIC_AWARENESS_DRONE_HALO_RADIUS_PX = 21.0f
 private const val TRAFFIC_AWARENESS_DRONE_ICON_ID = "dsc-traffic-awareness-drone"
 private const val TRAFFIC_AWARENESS_COLOR = "#455a64"
 private const val TRAFFIC_AWARENESS_DRONE_COLOR = "#00796b"
