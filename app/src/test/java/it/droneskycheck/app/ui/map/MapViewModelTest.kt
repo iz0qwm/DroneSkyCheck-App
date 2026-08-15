@@ -696,6 +696,61 @@ class MapViewModelTest {
     }
 
     @Test
+    fun lockedTrafficAwarenessKeepsOriginalCenterWhenSelectingAnotherMapPoint() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val traffic = FakeTrafficAwarenessClient()
+        val viewModel = viewModel(
+            scope = scope,
+            traffic = traffic,
+            preferences = InMemoryMapPreferences(),
+            trafficPollingIntervalMillis = 10_000
+        )
+
+        val originalPoint = MapPoint(41.9, 12.5)
+        val exploredPoint = MapPoint(42.1, 12.7)
+        viewModel.onMapTapped(selection(originalPoint.lat, originalPoint.lon))
+        waitUntil { viewModel.uiState.value.selectedPoint == originalPoint }
+        viewModel.enableTrafficAwareness()
+        waitUntil { traffic.calls == 1 && !viewModel.uiState.value.trafficAwareness.loading }
+        viewModel.onTrafficAwarenessPositionLockedChanged(true)
+
+        viewModel.onMapTapped(selection(exploredPoint.lat, exploredPoint.lon))
+        delay(80)
+
+        assertTrue(viewModel.uiState.value.trafficAwareness.enabled)
+        assertEquals(exploredPoint, viewModel.uiState.value.selectedPoint)
+        assertEquals(originalPoint, viewModel.uiState.value.trafficAwarenessCenter)
+        assertEquals(originalPoint, traffic.lastPoint)
+        assertEquals(1, traffic.calls)
+        scope.cancel()
+    }
+
+    @Test
+    fun unlockedTrafficAwarenessMovesCenterWhenSelectingAnotherMapPoint() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val traffic = FakeTrafficAwarenessClient()
+        val viewModel = viewModel(
+            scope = scope,
+            traffic = traffic,
+            preferences = InMemoryMapPreferences(),
+            trafficPollingIntervalMillis = 10_000
+        )
+
+        viewModel.onMapTapped(selection(41.9, 12.5))
+        waitUntil { viewModel.uiState.value.selectedPoint != null }
+        viewModel.enableTrafficAwareness()
+        waitUntil { traffic.calls == 1 && !viewModel.uiState.value.trafficAwareness.loading }
+
+        val exploredPoint = MapPoint(42.1, 12.7)
+        viewModel.onMapTapped(selection(exploredPoint.lat, exploredPoint.lon))
+        waitUntil { traffic.calls == 2 && !viewModel.uiState.value.trafficAwareness.loading }
+
+        assertEquals(exploredPoint, viewModel.uiState.value.trafficAwarenessCenter)
+        assertEquals(exploredPoint, traffic.lastPoint)
+        scope.cancel()
+    }
+
+    @Test
     fun enablingTrafficAwarenessWithoutSelectedPointDoesNotRequestInvalidCoordinates() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val traffic = FakeTrafficAwarenessClient()

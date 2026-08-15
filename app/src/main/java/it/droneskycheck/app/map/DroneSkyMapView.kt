@@ -82,6 +82,7 @@ import org.maplibre.geojson.Polygon
 fun DroneSkyMapView(
     visibleLayerCategories: Set<DscLayerCategory>,
     selectedPoint: MapPoint?,
+    trafficAwarenessCenter: MapPoint?,
     authorizationTakeoff: MapPoint?,
     authorizationAreaPoints: List<MapPoint>,
     authorizationAreaClosed: Boolean,
@@ -171,7 +172,7 @@ fun DroneSkyMapView(
                     )
                     updatePointMarkers(style, selectedPoint, userLocation)
                     updateAuthorizationDrawing(style, authorizationTakeoff, authorizationAreaPoints, authorizationAreaClosed)
-                    updateTrafficAwareness(style, selectedPoint, trafficAwareness, trafficAssessments)
+                    updateTrafficAwareness(style, trafficAwarenessCenter ?: selectedPoint, trafficAwareness, trafficAssessments)
                     if (shouldCenterOnUserLocation && userLocation != null) {
                         centerOnUserLocation(map, userLocation)
                         onUserLocationCentered()

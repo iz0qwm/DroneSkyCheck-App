@@ -43,6 +43,8 @@ data class MapUiState(
     val weatherAssessment: WeatherAssessment? = null,
     val weatherError: String? = null,
     val trafficAwareness: TrafficAwarenessState = TrafficAwarenessState(),
+    val trafficAwarenessCenter: MapPoint? = null,
+    val trafficAwarenessPositionLocked: Boolean = false,
     val trafficAssessments: Map<String, TrafficAssessment> = emptyMap(),
     val selectedTrafficTarget: TrafficTarget? = null,
     val trafficAlertSoundEnabled: Boolean = true,

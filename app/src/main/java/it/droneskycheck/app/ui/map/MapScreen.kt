@@ -145,6 +145,8 @@ import it.droneskycheck.app.data.AuthorizationDraft
 import it.droneskycheck.app.data.AuthorizationOperationData
 import it.droneskycheck.app.data.AuthorizationWorkflowSteps
 import it.droneskycheck.app.data.AuthorizationZoneReference
+import it.droneskycheck.app.data.AppExternalLinks
+import it.droneskycheck.app.data.AppLegalContent
 import it.droneskycheck.app.data.AuthorityInfo
 import it.droneskycheck.app.data.CreateAuthorizationDraftResult
 import it.droneskycheck.app.data.DscLogger
@@ -233,6 +235,7 @@ import it.droneskycheck.app.ui.accessibility.effectiveDscFontScale
 import it.droneskycheck.app.ui.help.HelpBottomSheet
 import it.droneskycheck.app.ui.help.HelpTopicDialog
 import it.droneskycheck.app.ui.profile.PilotProfileSheet
+import it.droneskycheck.app.ui.settings.SettingsSheet
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -283,6 +286,7 @@ fun MapScreen(
         .keys
     val permissionState = currentLocationPermissionState(context)
     var isPilotProfileSheetVisible by remember { mutableStateOf(false) }
+    var isSettingsSheetVisible by remember { mutableStateOf(false) }
     var isLocationSearchSheetVisible by remember { mutableStateOf(false) }
     var pendingCameraFocusPoint by remember { mutableStateOf<MapPoint?>(null) }
     var currentDraft by remember { mutableStateOf<AuthorizationDraft?>(null) }
@@ -354,16 +358,21 @@ fun MapScreen(
     ) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             viewModel.trafficAlertEvents.collect {
-                if (uiState.trafficAlertSoundEnabled) {
-                    trafficAlertToneGenerator?.startTone(
-                        ToneGenerator.TONE_PROP_ACK,
-                        TrafficAlertToneDurationMillis
-                    )
-                }
-                if (uiState.trafficAlertVibrationEnabled) {
-                    hapticFeedback.performHapticFeedback(
-                        androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress
-                    )
+                repeat(TrafficAlertPulseCount) { index ->
+                    if (uiState.trafficAlertSoundEnabled) {
+                        trafficAlertToneGenerator?.startTone(
+                            ToneGenerator.TONE_PROP_BEEP,
+                            TrafficAlertToneDurationMillis
+                        )
+                    }
+                    if (uiState.trafficAlertVibrationEnabled) {
+                        hapticFeedback.performHapticFeedback(
+                            androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress
+                        )
+                    }
+                    if (index < TrafficAlertPulseCount - 1) {
+                        delay(TrafficAlertPulseGapMillis)
+                    }
                 }
             }
         }
@@ -410,6 +419,7 @@ fun MapScreen(
         !uiState.locationPermissionSheetVisible &&
         !uiState.isLocationControlSheetVisible &&
         !isLocationSearchSheetVisible &&
+        !isSettingsSheetVisible &&
         !uiState.isTrafficAlertSettingsSheetVisible &&
         !uiState.isAppInfoSheetVisible &&
         uiState.selectedTrafficTarget == null &&
@@ -461,6 +471,7 @@ fun MapScreen(
         DroneSkyMapView(
             visibleLayerCategories = visibleLayerCategories,
             selectedPoint = uiState.selectedPoint,
+            trafficAwarenessCenter = uiState.trafficAwarenessCenter,
             authorizationTakeoff = currentDraft?.operationData?.takeoffMapPoint(),
             authorizationAreaPoints = currentDraft?.operationData?.areaPoints.orEmpty().map { MapPoint(it.lat, it.lon) },
             authorizationAreaClosed = currentDraft?.operationData?.areaClosed == true,
@@ -587,6 +598,7 @@ fun MapScreen(
                 }
             },
             onTrafficSettingsClick = viewModel::onTrafficAlertSettingsRequested,
+            onSettingsClick = { isSettingsSheetVisible = true },
             onLocationClick = {
                 when {
                     uiState.isUserLocationEnabled -> viewModel.onLocationControlRequested()
@@ -682,9 +694,11 @@ fun MapScreen(
                 soundEnabled = uiState.trafficAlertSoundEnabled,
                 vibrationEnabled = uiState.trafficAlertVibrationEnabled,
                 highAltitudeAlertsEnabled = uiState.highAltitudeTrafficAlertEnabled,
+                positionLocked = uiState.trafficAwarenessPositionLocked,
                 onSoundEnabledChanged = viewModel::onTrafficAlertSoundEnabledChanged,
                 onVibrationEnabledChanged = viewModel::onTrafficAlertVibrationEnabledChanged,
                 onHighAltitudeAlertsEnabledChanged = viewModel::onHighAltitudeTrafficAlertEnabledChanged,
+                onPositionLockedChanged = viewModel::onTrafficAwarenessPositionLockedChanged,
                 onDismiss = viewModel::onTrafficAlertSettingsDismissed
             )
         }
@@ -714,6 +728,23 @@ fun MapScreen(
                     isPilotProfileSheetVisible = false
                     viewModel.onHelpTourProfileVisibilityChanged(false)
                 }
+            )
+        }
+
+        if (isSettingsSheetVisible) {
+            SettingsSheet(
+                helpManifest = uiState.helpManifest,
+                isHelpRefreshing = uiState.isHelpManifestRefreshing,
+                helpRefreshMessage = uiState.helpManifestRefreshMessage,
+                largeTextEnabled = uiState.isLargeTextEnabled,
+                onLargeTextEnabledChanged = viewModel::onLargeTextEnabledChanged,
+                onRefreshHelp = viewModel::refreshHelpManifestNow,
+                onRepeatTour = {
+                    isSettingsSheetVisible = false
+                    viewModel.requestHelpOnboardingReplay(profileSheetVisible = isPilotProfileSheetVisible)
+                },
+                onOpenUrl = { url -> openExternalUrl(context, url) },
+                onDismiss = { isSettingsSheetVisible = false }
             )
         }
 
@@ -859,7 +890,7 @@ fun MapScreen(
                     viewModel.onAppInfoDismissed()
                     isHelpSheetVisible = true
                 },
-                onOpenWebApp = { openExternalUrl(context, DscWebAppUrl) },
+                onOpenWebApp = { openExternalUrl(context, AppExternalLinks.WebMapUrl) },
                 onCopy = {
                     copyAppInfoToClipboard(context, appInfo)
                 },
@@ -894,7 +925,7 @@ private fun PeriodicNoticeDialog(
         },
         text = {
             Text(
-                text = PeriodicNoticeBody,
+                text = AppLegalContent.DisclaimerText,
                 style = MaterialTheme.typography.bodyMedium
             )
         },
@@ -1149,6 +1180,7 @@ private fun MapControlsToolbar(
     onLayersClick: () -> Unit,
     onTrafficClick: () -> Unit,
     onTrafficSettingsClick: () -> Unit,
+    onSettingsClick: () -> Unit,
     onLocationClick: () -> Unit,
     onSearchClick: () -> Unit,
     onProfileClick: () -> Unit,
@@ -1320,6 +1352,33 @@ private fun MapControlsToolbar(
             exit = actionExit,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
+                .offset(x = (-216).dp)
+        ) {
+            MapActionFab(
+                label = "Impostazioni",
+                direction = MapActionDirection.Left,
+                contentDescription = "Apri impostazioni",
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                contentColor = MaterialTheme.colorScheme.onSurface,
+                onClick = {
+                    expanded = false
+                    onSettingsClick()
+                }
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        }
+
+        AnimatedVisibility(
+            visible = expanded,
+            enter = actionEnter,
+            exit = actionExit,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
                 .offset(x = (-72).dp)
         ) {
             MapActionFab(
@@ -1380,12 +1439,10 @@ private fun MapActionFab(
 ) {
     when (direction) {
         MapActionDirection.Up -> {
-            Row(
+            Box(
                 modifier = modifier,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
+                contentAlignment = Alignment.Center
             ) {
-                MapActionLabel(label)
                 MapActionButton(
                     onClick = onClick,
                     contentDescription = contentDescription,
@@ -1396,12 +1453,10 @@ private fun MapActionFab(
             }
         }
         MapActionDirection.Left -> {
-            Column(
+            Box(
                 modifier = modifier,
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                contentAlignment = Alignment.Center
             ) {
-                MapActionLabel(label)
                 MapActionButton(
                     onClick = onClick,
                     contentDescription = contentDescription,
@@ -1411,25 +1466,6 @@ private fun MapActionFab(
                 )
             }
         }
-    }
-}
-
-@Composable
-private fun MapActionLabel(label: String) {
-    Surface(
-        shape = CircleShape,
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        tonalElevation = 4.dp,
-        shadowElevation = 4.dp
-    ) {
-        Text(
-            text = label,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1
-        )
     }
 }
 
@@ -1510,9 +1546,11 @@ private fun TrafficAlertSettingsBottomSheet(
     soundEnabled: Boolean,
     vibrationEnabled: Boolean,
     highAltitudeAlertsEnabled: Boolean,
+    positionLocked: Boolean,
     onSoundEnabledChanged: (Boolean) -> Unit,
     onVibrationEnabledChanged: (Boolean) -> Unit,
     onHighAltitudeAlertsEnabledChanged: (Boolean) -> Unit,
+    onPositionLockedChanged: (Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -1535,6 +1573,11 @@ private fun TrafficAlertSettingsBottomSheet(
                 text = "Gli avvisi vengono emessi quando un traffico entra nello stato di attenzione.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            TrafficAlertPreferenceRow(
+                title = "Blocca posizione traffico",
+                checked = positionLocked,
+                onCheckedChange = onPositionLockedChanged
             )
             TrafficAlertPreferenceRow(
                 title = "Suono",
@@ -7250,16 +7293,10 @@ private val TemporalActiveColor = Color(198, 40, 40)
 private val TemporalInactiveColor = Color(46, 125, 50)
 private val TemporalUnknownColor = Color(144, 164, 174)
 private const val CoordinateDecimals = 5
-private const val TrafficAlertToneDurationMillis = 120
+private const val TrafficAlertPulseCount = 4
+private const val TrafficAlertPulseGapMillis = 180L
+private const val TrafficAlertToneDurationMillis = 220
 private const val TrafficAlertToneVolume = 60
 private const val PeriodicNoticeLogTag = "DscPeriodicNotice"
 private const val PeriodicNoticeUiSettlingMillis = 700L
-private const val DscWebAppUrl = "https://mappa.droneskycheck.it/"
 private const val PeriodicNoticeCoffeeButtonText = "☕ Offrimi un caffè"
-private val PeriodicNoticeBody = """
-    Drone Sky Check raccoglie, interpreta e presenta in modo più semplice dati provenienti da fonti ufficiali e da altri servizi utili alla pianificazione del volo.
-
-    L'app facilita la consultazione, ma non sostituisce le fonti aeronautiche ufficiali né gli strumenti messi a disposizione dagli enti competenti.
-
-    Prima del volo verifica sempre le informazioni applicabili attraverso le fonti ufficiali indicate.
-""".trimIndent()

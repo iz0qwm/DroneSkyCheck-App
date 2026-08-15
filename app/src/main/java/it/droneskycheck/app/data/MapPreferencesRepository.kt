@@ -13,6 +13,8 @@ interface MapPreferences {
     fun setTrafficAlertVibrationEnabled(enabled: Boolean)
     fun isHighAltitudeTrafficAlertEnabled(): Boolean
     fun setHighAltitudeTrafficAlertEnabled(enabled: Boolean)
+    fun isTrafficAwarenessPositionLocked(): Boolean
+    fun setTrafficAwarenessPositionLocked(locked: Boolean)
 }
 
 class MapPreferencesRepository(
@@ -65,6 +67,15 @@ class MapPreferencesRepository(
             .apply()
     }
 
+    override fun isTrafficAwarenessPositionLocked(): Boolean =
+        preferences.getBoolean(KeyTrafficAwarenessPositionLocked, false)
+
+    override fun setTrafficAwarenessPositionLocked(locked: Boolean) {
+        preferences.edit()
+            .putBoolean(KeyTrafficAwarenessPositionLocked, locked)
+            .apply()
+    }
+
     private companion object {
         const val PreferencesName = "dsc_map_preferences"
         const val KeyWeatherAnalysisEnabled = "weather_analysis_enabled"
@@ -72,6 +83,7 @@ class MapPreferencesRepository(
         const val KeyTrafficAlertSoundEnabled = "traffic_alert_sound_enabled"
         const val KeyTrafficAlertVibrationEnabled = "traffic_alert_vibration_enabled"
         const val KeyHighAltitudeTrafficAlertEnabled = "traffic_alert_high_altitude_enabled"
+        const val KeyTrafficAwarenessPositionLocked = "traffic_awareness_position_locked"
     }
 }
 
@@ -80,13 +92,15 @@ class InMemoryMapPreferences(
     initialLargeTextEnabled: Boolean = false,
     initialTrafficAlertSoundEnabled: Boolean = true,
     initialTrafficAlertVibrationEnabled: Boolean = true,
-    initialHighAltitudeTrafficAlertEnabled: Boolean = false
+    initialHighAltitudeTrafficAlertEnabled: Boolean = false,
+    initialTrafficAwarenessPositionLocked: Boolean = false
 ) : MapPreferences {
     private var weatherAnalysisEnabled = initialWeatherAnalysisEnabled
     private var largeTextEnabled = initialLargeTextEnabled
     private var trafficAlertSoundEnabled = initialTrafficAlertSoundEnabled
     private var trafficAlertVibrationEnabled = initialTrafficAlertVibrationEnabled
     private var highAltitudeTrafficAlertEnabled = initialHighAltitudeTrafficAlertEnabled
+    private var trafficAwarenessPositionLocked = initialTrafficAwarenessPositionLocked
 
     override fun isWeatherAnalysisEnabled(): Boolean = weatherAnalysisEnabled
 
@@ -116,5 +130,11 @@ class InMemoryMapPreferences(
 
     override fun setHighAltitudeTrafficAlertEnabled(enabled: Boolean) {
         highAltitudeTrafficAlertEnabled = enabled
+    }
+
+    override fun isTrafficAwarenessPositionLocked(): Boolean = trafficAwarenessPositionLocked
+
+    override fun setTrafficAwarenessPositionLocked(locked: Boolean) {
+        trafficAwarenessPositionLocked = locked
     }
 }

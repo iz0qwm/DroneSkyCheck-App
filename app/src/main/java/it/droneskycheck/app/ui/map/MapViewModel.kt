@@ -588,6 +588,10 @@ class MapViewModel(
         verdictJob?.cancel()
         legalTimelineJob?.cancel()
         weatherJob?.cancel()
+        val currentState = _uiState.value
+        val keepTrafficSnapshot = currentState.trafficAwareness.enabled &&
+            currentState.trafficAwarenessPositionLocked &&
+            currentState.trafficAwarenessCenter != null
 
         _uiState.value = _uiState.value.copy(
             selectedZone = selection.zone,
@@ -610,17 +614,25 @@ class MapViewModel(
             flightOpportunityResult = null,
             isOperationalReportExpanded = false,
             weatherError = null,
-            trafficAssessments = emptyMap(),
+            trafficAssessments = if (keepTrafficSnapshot) currentState.trafficAssessments else emptyMap(),
             selectedTrafficTarget = null
         )
 
         launchZoneVerdict(requestId, selection.point)
-        if (_uiState.value.trafficAwareness.enabled) {
-            DscLogger.debug(
-                TrafficAwarenessLogTag,
-                "selectedPoint changed pollRestart=true lat=${selection.point.lat.coarseTraffic()} lon=${selection.point.lon.coarseTraffic()}"
-            )
-            startTrafficAwarenessPolling(selection.point, clearSnapshot = true)
+        val stateAfterSelection = _uiState.value
+        if (stateAfterSelection.trafficAwareness.enabled) {
+            if (stateAfterSelection.trafficAwarenessPositionLocked && stateAfterSelection.trafficAwarenessCenter != null) {
+                DscLogger.debug(
+                    TrafficAwarenessLogTag,
+                    "selectedPoint changed pollRestart=false reason=position_locked"
+                )
+            } else {
+                DscLogger.debug(
+                    TrafficAwarenessLogTag,
+                    "selectedPoint changed pollRestart=true lat=${selection.point.lat.coarseTraffic()} lon=${selection.point.lon.coarseTraffic()}"
+                )
+                startTrafficAwarenessPolling(selection.point, clearSnapshot = true)
+            }
         }
     }
 
@@ -798,6 +810,7 @@ class MapViewModel(
         trafficAwarenessJob = null
         _uiState.value = _uiState.value.copy(
             trafficAwareness = TrafficAwarenessState(enabled = false),
+            trafficAwarenessCenter = null,
             trafficAssessments = emptyMap(),
             selectedTrafficTarget = null
         )
@@ -816,6 +829,7 @@ class MapViewModel(
                 response = if (clearSnapshot) null else currentTraffic.response,
                 error = null
             ),
+            trafficAwarenessCenter = point,
             trafficAssessments = if (clearSnapshot) emptyMap() else _uiState.value.trafficAssessments,
             selectedTrafficTarget = if (clearSnapshot) null else _uiState.value.selectedTrafficTarget
         )
@@ -827,7 +841,7 @@ class MapViewModel(
 
         trafficAwarenessJob = scope.launch {
             try {
-                while (_uiState.value.trafficAwareness.enabled && _uiState.value.selectedPoint == point) {
+                while (_uiState.value.trafficAwareness.enabled && _uiState.value.trafficAwarenessCenter == point) {
                     fetchTrafficAwareness(point)
                     delay(trafficAwarenessPollingIntervalMillis)
                 }
@@ -861,7 +875,7 @@ class MapViewModel(
             )
         }
 
-        if (!_uiState.value.trafficAwareness.enabled || _uiState.value.selectedPoint != point) {
+        if (!_uiState.value.trafficAwareness.enabled || _uiState.value.trafficAwarenessCenter != point) {
             return
         }
 
@@ -976,6 +990,12 @@ class MapViewModel(
         refreshTrafficAssessmentsForCurrentSnapshot()
     }
 
+    fun onTrafficAwarenessPositionLockedChanged(locked: Boolean) {
+        mapPreferences.setTrafficAwarenessPositionLocked(locked)
+        DscLogger.debug(TrafficAwarenessLogTag, "position locked=$locked")
+        _uiState.value = _uiState.value.copy(trafficAwarenessPositionLocked = locked)
+    }
+
     fun onLargeTextEnabledChanged(enabled: Boolean) {
         mapPreferences.setLargeTextEnabled(enabled)
         _uiState.value = _uiState.value.copy(isLargeTextEnabled = enabled)
@@ -984,7 +1004,7 @@ class MapViewModel(
     private fun trafficAwarenessStopReason(point: MapPoint): String =
         when {
             !_uiState.value.trafficAwareness.enabled -> "disabled"
-            _uiState.value.selectedPoint != point -> "center_changed"
+            _uiState.value.trafficAwarenessCenter != point -> "center_changed"
             else -> "cancelled"
         }
 
@@ -998,7 +1018,8 @@ class MapViewModel(
         _uiState.value = _uiState.value.copy(
             trafficAlertSoundEnabled = mapPreferences.isTrafficAlertSoundEnabled(),
             trafficAlertVibrationEnabled = mapPreferences.isTrafficAlertVibrationEnabled(),
-            highAltitudeTrafficAlertEnabled = mapPreferences.isHighAltitudeTrafficAlertEnabled()
+            highAltitudeTrafficAlertEnabled = mapPreferences.isHighAltitudeTrafficAlertEnabled(),
+            trafficAwarenessPositionLocked = mapPreferences.isTrafficAwarenessPositionLocked()
         )
     }
 
@@ -1024,7 +1045,7 @@ class MapViewModel(
 
     private fun refreshTrafficAssessmentsForCurrentSnapshot() {
         val state = _uiState.value
-        val point = state.selectedPoint ?: return
+        val point = state.trafficAwarenessCenter ?: state.selectedPoint ?: return
         val targets = state.trafficAwareness.response?.traffic?.targets.orEmpty()
         if (targets.isEmpty()) return
 
