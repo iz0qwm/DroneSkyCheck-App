@@ -681,8 +681,10 @@ fun MapScreen(
             TrafficAlertSettingsBottomSheet(
                 soundEnabled = uiState.trafficAlertSoundEnabled,
                 vibrationEnabled = uiState.trafficAlertVibrationEnabled,
+                highAltitudeAlertsEnabled = uiState.highAltitudeTrafficAlertEnabled,
                 onSoundEnabledChanged = viewModel::onTrafficAlertSoundEnabledChanged,
                 onVibrationEnabledChanged = viewModel::onTrafficAlertVibrationEnabledChanged,
+                onHighAltitudeAlertsEnabledChanged = viewModel::onHighAltitudeTrafficAlertEnabledChanged,
                 onDismiss = viewModel::onTrafficAlertSettingsDismissed
             )
         }
@@ -1089,6 +1091,7 @@ private fun HelpTourTarget.icon(): ImageVector =
 private fun TrafficTargetKind.icon(): ImageVector =
     when (this) {
         TrafficTargetKind.AIRCRAFT -> Icons.Default.Flight
+        TrafficTargetKind.HELICOPTER -> Icons.Default.Flight
         TrafficTargetKind.DRONE -> Icons.Default.Air
     }
 
@@ -1506,8 +1509,10 @@ private fun TrafficAwarenessButtonContent(state: TrafficAwarenessState) {
 private fun TrafficAlertSettingsBottomSheet(
     soundEnabled: Boolean,
     vibrationEnabled: Boolean,
+    highAltitudeAlertsEnabled: Boolean,
     onSoundEnabledChanged: (Boolean) -> Unit,
     onVibrationEnabledChanged: (Boolean) -> Unit,
+    onHighAltitudeAlertsEnabledChanged: (Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -1540,6 +1545,11 @@ private fun TrafficAlertSettingsBottomSheet(
                 title = "Vibrazione",
                 checked = vibrationEnabled,
                 onCheckedChange = onVibrationEnabledChanged
+            )
+            TrafficAlertPreferenceRow(
+                title = "Traffici sopra 1000 m AGL",
+                checked = highAltitudeAlertsEnabled,
+                onCheckedChange = onHighAltitudeAlertsEnabledChanged
             )
             Spacer(modifier = Modifier.height(12.dp))
         }

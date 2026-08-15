@@ -22,12 +22,15 @@ class MapPreferencesRepositoryTest {
 
         assertTrue(preferences.isTrafficAlertSoundEnabled())
         assertTrue(preferences.isTrafficAlertVibrationEnabled())
+        assertFalse(preferences.isHighAltitudeTrafficAlertEnabled())
 
         preferences.setTrafficAlertSoundEnabled(false)
         preferences.setTrafficAlertVibrationEnabled(false)
+        preferences.setHighAltitudeTrafficAlertEnabled(true)
 
         assertFalse(preferences.isTrafficAlertSoundEnabled())
         assertFalse(preferences.isTrafficAlertVibrationEnabled())
+        assertTrue(preferences.isHighAltitudeTrafficAlertEnabled())
     }
 
     @Test

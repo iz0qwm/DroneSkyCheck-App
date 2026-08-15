@@ -113,6 +113,26 @@ class TrafficRelevanceEngineTest {
     }
 
     @Test
+    fun nearbyAirSenseDroneTriggersAttentionEvenWithoutMotion() {
+        val assessment = assess(
+            target(
+                northM = 120.0,
+                eastM = 0.0,
+                speedMps = 0.0,
+                trackDeg = null,
+                provider = "AirSense",
+                source = "AirSense",
+                objectType = "drone"
+            )
+        )
+
+        assertEquals(TrafficRelevance.ATTENTION, assessment.relevance)
+        assertNull(assessment.cpaDistanceM)
+        assertTrue(assessment.reasons.contains(TrafficRelevanceReason.DRONE_WITHIN_ATTENTION_DISTANCE))
+        assertTrue(assessment.reasons.contains(TrafficRelevanceReason.INSUFFICIENT_MOTION_DATA))
+    }
+
+    @Test
     fun altitudeDoesNotInfluenceRelevance() {
         val low = assess(target(northM = 4_000.0, eastM = 1_000.0, speedMps = 40.0, trackDeg = 180.0, geoM = 100.0))
         val high = assess(target(northM = 4_000.0, eastM = 1_000.0, speedMps = 40.0, trackDeg = 180.0, geoM = 11_000.0))
@@ -161,7 +181,11 @@ class TrafficRelevanceEngineTest {
         trackDeg: Double?,
         headingDeg: Double? = null,
         ageSec: Double? = 2.0,
-        geoM: Double? = null
+        geoM: Double? = null,
+        aglM: Double? = null,
+        provider: String = "fixture",
+        source: String = "fixture",
+        objectType: String? = null
     ): TrafficTarget {
         val lat = center.lat + metersToLatDegrees(northM)
         val lon = center.lon + metersToLonDegrees(eastM, center.lat)
@@ -180,7 +204,7 @@ class TrafficRelevanceEngineTest {
                 baroM = null,
                 geoM = geoM,
                 mslM = null,
-                aglM = null,
+                aglM = aglM,
                 sourceM = null,
                 sourceReference = null
             ),
@@ -199,11 +223,12 @@ class TrafficRelevanceEngineTest {
                 distanceM = distanceM,
                 bearingDeg = bearingDeg
             ),
-            provider = "fixture",
-            source = "fixture",
+            provider = provider,
+            source = source,
             quality = null,
             sources = emptyList(),
-            provenance = null
+            provenance = null,
+            objectType = objectType
         )
     }
 }

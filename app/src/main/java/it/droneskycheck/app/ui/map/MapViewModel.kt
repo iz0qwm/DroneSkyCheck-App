@@ -60,7 +60,9 @@ import it.droneskycheck.app.data.traffic.TrafficAwarenessState
 import it.droneskycheck.app.data.traffic.TrafficOperationCenter
 import it.droneskycheck.app.data.traffic.TrafficAlertController
 import it.droneskycheck.app.data.traffic.TrafficAlertEvent
+import it.droneskycheck.app.data.traffic.TrafficAssessment
 import it.droneskycheck.app.data.traffic.TrafficAwarenessResponse
+import it.droneskycheck.app.data.traffic.TrafficRelevance
 import it.droneskycheck.app.data.traffic.TrafficRelevanceEngine
 import it.droneskycheck.app.data.traffic.TrafficTarget
 import it.droneskycheck.app.data.traffic.TrafficTargetKind
@@ -875,10 +877,14 @@ class MapViewModel(
                 previousLastUpdatedAt = previousTraffic.lastUpdatedAt,
                 nowMillis = nowMillis
             )
-            val assessments = trafficRelevanceEngine.assessTrafficBatch(
+            val rawAssessments = trafficRelevanceEngine.assessTrafficBatch(
                 targets = visibleResponse.traffic.targets,
                 operationCenter = TrafficOperationCenter(point.lat, point.lon),
                 nowMillis = nowMillis
+            )
+            val assessments = rawAssessments.withHighAltitudeAircraftFilter(
+                targets = visibleResponse.traffic.targets,
+                enabled = _uiState.value.highAltitudeTrafficAlertEnabled
             )
             assessments.forEach { (id, assessment) ->
                 DscLogger.trace(
@@ -963,6 +969,13 @@ class MapViewModel(
         _uiState.value = _uiState.value.copy(trafficAlertVibrationEnabled = enabled)
     }
 
+    fun onHighAltitudeTrafficAlertEnabledChanged(enabled: Boolean) {
+        mapPreferences.setHighAltitudeTrafficAlertEnabled(enabled)
+        DscLogger.debug(TrafficAwarenessLogTag, "alert highAltitude enabled=$enabled")
+        _uiState.value = _uiState.value.copy(highAltitudeTrafficAlertEnabled = enabled)
+        refreshTrafficAssessmentsForCurrentSnapshot()
+    }
+
     fun onLargeTextEnabledChanged(enabled: Boolean) {
         mapPreferences.setLargeTextEnabled(enabled)
         _uiState.value = _uiState.value.copy(isLargeTextEnabled = enabled)
@@ -984,7 +997,48 @@ class MapViewModel(
     private fun loadTrafficAlertPreferences() {
         _uiState.value = _uiState.value.copy(
             trafficAlertSoundEnabled = mapPreferences.isTrafficAlertSoundEnabled(),
-            trafficAlertVibrationEnabled = mapPreferences.isTrafficAlertVibrationEnabled()
+            trafficAlertVibrationEnabled = mapPreferences.isTrafficAlertVibrationEnabled(),
+            highAltitudeTrafficAlertEnabled = mapPreferences.isHighAltitudeTrafficAlertEnabled()
+        )
+    }
+
+    private fun Map<String, TrafficAssessment>.withHighAltitudeAircraftFilter(
+        targets: List<TrafficTarget>,
+        enabled: Boolean
+    ): Map<String, TrafficAssessment> {
+        if (enabled) return this
+        val targetsById = targets.associateBy { it.id }
+        return mapValues { (targetId, assessment) ->
+            val target = targetsById[targetId] ?: return@mapValues assessment
+            if (
+                assessment.relevance == TrafficRelevance.ATTENTION &&
+                target.trafficTargetKind() in HighAltitudeTrafficTargetKinds &&
+                target.altitude.aglM?.let { it.isFinite() && it >= HighAltitudeTrafficAlertThresholdM } == true
+            ) {
+                assessment.copy(relevance = TrafficRelevance.MONITOR)
+            } else {
+                assessment
+            }
+        }
+    }
+
+    private fun refreshTrafficAssessmentsForCurrentSnapshot() {
+        val state = _uiState.value
+        val point = state.selectedPoint ?: return
+        val targets = state.trafficAwareness.response?.traffic?.targets.orEmpty()
+        if (targets.isEmpty()) return
+
+        val nowMillis = clock.millis()
+        val rawAssessments = trafficRelevanceEngine.assessTrafficBatch(
+            targets = targets,
+            operationCenter = TrafficOperationCenter(point.lat, point.lon),
+            nowMillis = nowMillis
+        )
+        _uiState.value = _uiState.value.copy(
+            trafficAssessments = rawAssessments.withHighAltitudeAircraftFilter(
+                targets = targets,
+                enabled = _uiState.value.highAltitudeTrafficAlertEnabled
+            )
         )
     }
 
@@ -1737,3 +1791,6 @@ private fun WeatherForecast.closestHour(now: Instant) =
     hours.minByOrNull { hour ->
         kotlin.math.abs(Duration.between(now, hour.instant).toMillis())
     }
+
+private const val HighAltitudeTrafficAlertThresholdM = 1_000.0
+private val HighAltitudeTrafficTargetKinds = setOf(TrafficTargetKind.AIRCRAFT, TrafficTargetKind.HELICOPTER)

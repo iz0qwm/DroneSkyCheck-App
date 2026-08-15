@@ -37,6 +37,7 @@ enum class TrafficCalculationConfidence {
 
 enum class TrafficRelevanceReason {
     WITHIN_MONITOR_DISTANCE,
+    DRONE_WITHIN_ATTENTION_DISTANCE,
     CONVERGING,
     CPA_WITHIN_ATTENTION_DISTANCE,
     CPA_WITHIN_ATTENTION_TIME,
@@ -50,6 +51,7 @@ enum class TrafficRelevanceReason {
 
 object TrafficRelevanceThresholds {
     const val MonitorDistanceM = 10_000.0
+    const val DroneAttentionDistanceM = 500.0
     const val AttentionCpaDistanceM = 3_000.0
     const val AttentionTimeToCpaSec = 180.0
     const val CpaLookaheadSec = 300.0
@@ -84,6 +86,11 @@ class TrafficRelevanceEngine(
         if (currentDistanceM <= thresholds.MonitorDistanceM) {
             reasons += TrafficRelevanceReason.WITHIN_MONITOR_DISTANCE
         }
+        val droneProximityAttention = target.trafficTargetKind() == TrafficTargetKind.DRONE &&
+            currentDistanceM <= thresholds.DroneAttentionDistanceM
+        if (droneProximityAttention) {
+            reasons += TrafficRelevanceReason.DRONE_WITHIN_ATTENTION_DISTANCE
+        }
 
         val ageSec = target.motionAgeSec(nowMillis)
         val stale = ageSec != null && ageSec > thresholds.FreshMotionMaxAgeSec
@@ -94,10 +101,10 @@ class TrafficRelevanceEngine(
         if (motion == null || stale) {
             if (motion == null) reasons += TrafficRelevanceReason.INSUFFICIENT_MOTION_DATA
             return TrafficAssessment(
-                relevance = if (currentDistanceM <= thresholds.MonitorDistanceM) {
-                    TrafficRelevance.MONITOR
-                } else {
-                    TrafficRelevance.INFORMATION
+                relevance = when {
+                    droneProximityAttention -> TrafficRelevance.ATTENTION
+                    currentDistanceM <= thresholds.MonitorDistanceM -> TrafficRelevance.MONITOR
+                    else -> TrafficRelevance.INFORMATION
                 },
                 currentDistanceM = currentDistanceM,
                 converging = null,
@@ -144,7 +151,7 @@ class TrafficRelevanceEngine(
             reasons += TrafficRelevanceReason.CPA_WITHIN_ATTENTION_TIME
         }
 
-        val attention = cpaDistanceM?.let { cpa ->
+        val attention = droneProximityAttention || cpaDistanceM?.let { cpa ->
             timeToCpaSec?.let { time ->
                 cpa <= thresholds.AttentionCpaDistanceM &&
                     time <= thresholds.AttentionTimeToCpaSec

@@ -1132,11 +1132,61 @@ class MapViewModelTest {
     }
 
     @Test
+    fun highAltitudeAircraftAttentionIsFilteredUnlessUserEnablesIt() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val highAircraft = trafficTarget(
+            id = "traffic:high-aircraft",
+            lat = 41.9 + metersToLatDegreesForTest(2_000.0),
+            lon = 12.5,
+            callsign = "HIGH",
+            speedMps = 40.0,
+            trackDeg = 180.0,
+            ageSec = 2.0,
+            aglM = 1_200.0
+        )
+        val traffic = FakeTrafficAwarenessClient(
+            results = ArrayDeque(
+                listOf(
+                    Result.success(trafficResponse(center = MapPoint(41.9, 12.5), targets = listOf(highAircraft))),
+                    Result.success(trafficResponse(center = MapPoint(41.9, 12.5), targets = listOf(highAircraft)))
+                )
+            )
+        )
+        val viewModel = viewModel(
+            scope = scope,
+            traffic = traffic,
+            preferences = InMemoryMapPreferences(),
+            trafficPollingIntervalMillis = 20
+        )
+
+        viewModel.onMapTapped(selection(41.9, 12.5))
+        waitUntil { viewModel.uiState.value.selectedPoint != null }
+        viewModel.enableTrafficAwareness()
+        waitUntil { viewModel.uiState.value.trafficAssessments["traffic:high-aircraft"] != null }
+
+        assertEquals(
+            it.droneskycheck.app.data.traffic.TrafficRelevance.MONITOR,
+            viewModel.uiState.value.trafficAssessments["traffic:high-aircraft"]?.relevance
+        )
+
+        viewModel.onHighAltitudeTrafficAlertEnabledChanged(true)
+        waitUntil {
+            traffic.calls >= 2 &&
+                viewModel.uiState.value.trafficAssessments["traffic:high-aircraft"]?.relevance ==
+                it.droneskycheck.app.data.traffic.TrafficRelevance.ATTENTION
+        }
+
+        assertTrue(viewModel.uiState.value.highAltitudeTrafficAlertEnabled)
+        scope.cancel()
+    }
+
+    @Test
     fun trafficAlertPreferencesLoadAndPersistWithoutChangingTrafficAwareness() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val preferences = InMemoryMapPreferences(
             initialTrafficAlertSoundEnabled = false,
-            initialTrafficAlertVibrationEnabled = true
+            initialTrafficAlertVibrationEnabled = true,
+            initialHighAltitudeTrafficAlertEnabled = false
         )
         val viewModel = viewModel(
             scope = scope,
@@ -1146,16 +1196,20 @@ class MapViewModelTest {
 
         assertFalse(viewModel.uiState.value.trafficAlertSoundEnabled)
         assertTrue(viewModel.uiState.value.trafficAlertVibrationEnabled)
+        assertFalse(viewModel.uiState.value.highAltitudeTrafficAlertEnabled)
 
         viewModel.onTrafficAlertSettingsRequested()
         viewModel.onTrafficAlertSoundEnabledChanged(true)
         viewModel.onTrafficAlertVibrationEnabledChanged(false)
+        viewModel.onHighAltitudeTrafficAlertEnabledChanged(true)
         viewModel.onTrafficAlertSettingsDismissed()
 
         assertTrue(preferences.isTrafficAlertSoundEnabled())
         assertFalse(preferences.isTrafficAlertVibrationEnabled())
+        assertTrue(preferences.isHighAltitudeTrafficAlertEnabled())
         assertTrue(viewModel.uiState.value.trafficAlertSoundEnabled)
         assertFalse(viewModel.uiState.value.trafficAlertVibrationEnabled)
+        assertTrue(viewModel.uiState.value.highAltitudeTrafficAlertEnabled)
         assertFalse(viewModel.uiState.value.isTrafficAlertSettingsSheetVisible)
         assertFalse(viewModel.uiState.value.trafficAwareness.enabled)
         scope.cancel()
@@ -1641,6 +1695,7 @@ private fun trafficTarget(
     trackDeg: Double? = null,
     headingDeg: Double? = null,
     ageSec: Double? = null,
+    aglM: Double? = null,
     provider: String = "opensky",
     source: String = "OpenSky",
     objectType: String? = null
@@ -1658,7 +1713,7 @@ private fun trafficTarget(
             baroM = null,
             geoM = null,
             mslM = null,
-            aglM = null,
+            aglM = aglM,
             sourceM = null,
             sourceReference = null
         ),

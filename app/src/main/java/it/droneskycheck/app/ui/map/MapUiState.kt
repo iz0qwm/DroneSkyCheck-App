@@ -47,6 +47,7 @@ data class MapUiState(
     val selectedTrafficTarget: TrafficTarget? = null,
     val trafficAlertSoundEnabled: Boolean = true,
     val trafficAlertVibrationEnabled: Boolean = true,
+    val highAltitudeTrafficAlertEnabled: Boolean = false,
     val isTrafficAlertSettingsSheetVisible: Boolean = false,
     val droneFleet: List<LocalDrone> = emptyList(),
     val selectedDrone: LocalDrone? = null,
