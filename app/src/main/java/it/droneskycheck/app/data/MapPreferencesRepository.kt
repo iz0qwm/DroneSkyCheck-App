@@ -7,6 +7,8 @@ interface MapPreferences {
     fun setWeatherAnalysisEnabled(enabled: Boolean)
     fun isLargeTextEnabled(): Boolean
     fun setLargeTextEnabled(enabled: Boolean)
+    fun getAppThemeMode(): AppThemeMode
+    fun setAppThemeMode(mode: AppThemeMode)
     fun isTrafficAlertSoundEnabled(): Boolean
     fun setTrafficAlertSoundEnabled(enabled: Boolean)
     fun isTrafficAlertVibrationEnabled(): Boolean
@@ -37,6 +39,15 @@ class MapPreferencesRepository(
     override fun setLargeTextEnabled(enabled: Boolean) {
         preferences.edit()
             .putBoolean(KeyLargeTextEnabled, enabled)
+            .apply()
+    }
+
+    override fun getAppThemeMode(): AppThemeMode =
+        AppThemeMode.fromPreferenceValue(preferences.getString(KeyAppThemeMode, null))
+
+    override fun setAppThemeMode(mode: AppThemeMode) {
+        preferences.edit()
+            .putString(KeyAppThemeMode, mode.preferenceValue)
             .apply()
     }
 
@@ -80,6 +91,7 @@ class MapPreferencesRepository(
         const val PreferencesName = "dsc_map_preferences"
         const val KeyWeatherAnalysisEnabled = "weather_analysis_enabled"
         const val KeyLargeTextEnabled = "large_text_enabled"
+        const val KeyAppThemeMode = "app_theme_mode"
         const val KeyTrafficAlertSoundEnabled = "traffic_alert_sound_enabled"
         const val KeyTrafficAlertVibrationEnabled = "traffic_alert_vibration_enabled"
         const val KeyHighAltitudeTrafficAlertEnabled = "traffic_alert_high_altitude_enabled"
@@ -90,6 +102,7 @@ class MapPreferencesRepository(
 class InMemoryMapPreferences(
     initialWeatherAnalysisEnabled: Boolean = false,
     initialLargeTextEnabled: Boolean = false,
+    initialAppThemeMode: AppThemeMode = AppThemeMode.System,
     initialTrafficAlertSoundEnabled: Boolean = true,
     initialTrafficAlertVibrationEnabled: Boolean = true,
     initialHighAltitudeTrafficAlertEnabled: Boolean = false,
@@ -97,6 +110,7 @@ class InMemoryMapPreferences(
 ) : MapPreferences {
     private var weatherAnalysisEnabled = initialWeatherAnalysisEnabled
     private var largeTextEnabled = initialLargeTextEnabled
+    private var appThemeMode = initialAppThemeMode
     private var trafficAlertSoundEnabled = initialTrafficAlertSoundEnabled
     private var trafficAlertVibrationEnabled = initialTrafficAlertVibrationEnabled
     private var highAltitudeTrafficAlertEnabled = initialHighAltitudeTrafficAlertEnabled
@@ -112,6 +126,12 @@ class InMemoryMapPreferences(
 
     override fun setLargeTextEnabled(enabled: Boolean) {
         largeTextEnabled = enabled
+    }
+
+    override fun getAppThemeMode(): AppThemeMode = appThemeMode
+
+    override fun setAppThemeMode(mode: AppThemeMode) {
+        appThemeMode = mode
     }
 
     override fun isTrafficAlertSoundEnabled(): Boolean = trafficAlertSoundEnabled
@@ -136,5 +156,32 @@ class InMemoryMapPreferences(
 
     override fun setTrafficAwarenessPositionLocked(locked: Boolean) {
         trafficAwarenessPositionLocked = locked
+    }
+}
+
+enum class AppThemeMode(
+    val preferenceValue: String,
+    val label: String,
+    val description: String
+) {
+    System(
+        preferenceValue = "system",
+        label = "Sistema",
+        description = "Segue il tema chiaro o scuro del dispositivo."
+    ),
+    Light(
+        preferenceValue = "light",
+        label = "Chiaro",
+        description = "Usa sempre il tema chiaro."
+    ),
+    Dark(
+        preferenceValue = "dark",
+        label = "Scuro",
+        description = "Usa sempre il tema scuro."
+    );
+
+    companion object {
+        fun fromPreferenceValue(value: String?): AppThemeMode =
+            entries.firstOrNull { it.preferenceValue == value } ?: System
     }
 }

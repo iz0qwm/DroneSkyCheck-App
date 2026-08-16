@@ -61,6 +61,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Flight
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LocationOff
@@ -147,6 +149,7 @@ import it.droneskycheck.app.data.AuthorizationWorkflowSteps
 import it.droneskycheck.app.data.AuthorizationZoneReference
 import it.droneskycheck.app.data.AppExternalLinks
 import it.droneskycheck.app.data.AppLegalContent
+import it.droneskycheck.app.data.AppThemeMode
 import it.droneskycheck.app.data.AuthorityInfo
 import it.droneskycheck.app.data.CreateAuthorizationDraftResult
 import it.droneskycheck.app.data.DscLogger
@@ -258,7 +261,9 @@ import java.util.Locale
 
 @Composable
 fun MapScreen(
-    providedViewModel: MapViewModel? = null
+    providedViewModel: MapViewModel? = null,
+    appThemeMode: AppThemeMode = AppThemeMode.System,
+    onAppThemeModeChanged: (AppThemeMode) -> Unit = {}
 ) {
     val context = LocalContext.current
     val viewModel: MapViewModel = providedViewModel ?: viewModel(
@@ -738,6 +743,8 @@ fun MapScreen(
                 helpRefreshMessage = uiState.helpManifestRefreshMessage,
                 largeTextEnabled = uiState.isLargeTextEnabled,
                 onLargeTextEnabledChanged = viewModel::onLargeTextEnabledChanged,
+                appThemeMode = appThemeMode,
+                onAppThemeModeChanged = onAppThemeModeChanged,
                 onRefreshHelp = viewModel::refreshHelpManifestNow,
                 onRepeatTour = {
                     isSettingsSheetVisible = false
@@ -2411,6 +2418,7 @@ private fun AppInfoBottomSheet(
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var whatsNewExpanded by remember { mutableStateOf(false) }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState
@@ -2450,6 +2458,25 @@ private fun AppInfoBottomSheet(
                 AppInfoRow("Versione", "${info.build.versionName} (${info.build.versionCode})")
                 AppInfoRow("Piattaforma", info.build.platform)
                 AppInfoRow("Tipo", "App Android nativa")
+            }
+
+            AppInfoExpandableSection(
+                title = "Cosa c'e di nuovo",
+                subtitle = "Versione ${info.releaseNotes.versionName} (${info.releaseNotes.versionCode})",
+                expanded = whatsNewExpanded,
+                onExpandedChange = { whatsNewExpanded = it }
+            ) {
+                Text(
+                    text = info.releaseNotes.title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = info.releaseNotes.intro,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                AppInfoBulletList(items = info.releaseNotes.highlights)
             }
 
             info.textScale?.let { textScale ->
@@ -2576,6 +2603,60 @@ private fun AppInfoSection(
 }
 
 @Composable
+private fun AppInfoExpandableSection(
+    title: String,
+    subtitle: String,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Surface(
+            onClick = { onExpandedChange(!expanded) },
+            color = MaterialTheme.colorScheme.surface,
+            shape = MaterialTheme.shapes.medium
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 56.dp)
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Icon(
+                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (expanded) "Chiudi $title" else "Apri $title",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        AnimatedVisibility(visible = expanded) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                content()
+            }
+        }
+        HorizontalDivider()
+    }
+}
+
+@Composable
 private fun AppInfoRow(
     label: String,
     value: String
@@ -2630,6 +2711,30 @@ private fun AppInfoNote(text: String) {
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
         )
+    }
+}
+
+@Composable
+private fun AppInfoBulletList(items: List<String>) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        items.forEach { item ->
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.Top
+            ) {
+                Text(
+                    text = "-",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = item,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
     }
 }
 

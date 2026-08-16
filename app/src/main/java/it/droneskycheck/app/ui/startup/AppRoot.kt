@@ -10,6 +10,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import it.droneskycheck.app.data.AppThemeMode
 import it.droneskycheck.app.data.LocalAuthorizationRepository
 import it.droneskycheck.app.ui.map.MapScreen
 import kotlinx.coroutines.Dispatchers
@@ -26,7 +27,10 @@ sealed interface StartupState {
 }
 
 @Composable
-fun AppRoot() {
+fun AppRoot(
+    appThemeMode: AppThemeMode,
+    onAppThemeModeChanged: (AppThemeMode) -> Unit
+) {
     val context = LocalContext.current.applicationContext
     var startupState by remember { mutableStateOf<StartupState>(StartupState.Initializing) }
     var retryToken by remember { mutableIntStateOf(0) }
@@ -45,7 +49,10 @@ fun AppRoot() {
     }
 
     when (val state = startupState) {
-        StartupState.Ready -> MapScreen()
+        StartupState.Ready -> MapScreen(
+            appThemeMode = appThemeMode,
+            onAppThemeModeChanged = onAppThemeModeChanged
+        )
         else -> StartupScreen(
             state = state,
             onRetry = { retryToken++ }

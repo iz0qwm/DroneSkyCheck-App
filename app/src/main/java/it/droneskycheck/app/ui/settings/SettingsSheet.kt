@@ -5,25 +5,36 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.ListAlt
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FormatSize
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.NewReleases
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.SettingsBrightness
 import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material3.Button
+import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -32,7 +43,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -51,18 +62,26 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import it.droneskycheck.app.data.AppExternalLinks
 import it.droneskycheck.app.data.AppLegalContent
+import it.droneskycheck.app.data.AppReleaseNotes
+import it.droneskycheck.app.data.AppThemeMode
+import it.droneskycheck.app.data.ExternalLink
+import it.droneskycheck.app.data.ExternalLinkIcon
+import it.droneskycheck.app.data.ReleaseNotes
 import it.droneskycheck.app.data.help.HelpManifest
 import it.droneskycheck.app.ui.help.HelpBottomSheet
 
 private enum class SettingsPage {
     Home,
-    Accessibility,
+    Display,
     Legal,
+    WhatsNew,
+    LegalInfo,
     Terms,
     Disclaimer,
     OperationalRestrictions,
     Privacy,
     Licenses,
+    CommunityLinks,
     Contributions
 }
 
@@ -79,6 +98,8 @@ fun SettingsSheet(
     helpRefreshMessage: String?,
     largeTextEnabled: Boolean,
     onLargeTextEnabledChanged: (Boolean) -> Unit,
+    appThemeMode: AppThemeMode,
+    onAppThemeModeChanged: (AppThemeMode) -> Unit,
     onRefreshHelp: () -> Unit,
     onRepeatTour: () -> Unit,
     onOpenUrl: (String) -> Unit,
@@ -94,7 +115,11 @@ fun SettingsSheet(
                 onDismiss()
                 SettingsPage.Home
             }
-            page.isLegalDetail() -> SettingsPage.Legal
+            page.isLegalDocument() -> SettingsPage.LegalInfo
+            page == SettingsPage.WhatsNew ||
+                page == SettingsPage.LegalInfo ||
+                page == SettingsPage.CommunityLinks ||
+                page == SettingsPage.Contributions -> SettingsPage.Legal
             else -> SettingsPage.Home
         }
     }
@@ -120,45 +145,44 @@ fun SettingsSheet(
             )
             when (page) {
                 SettingsPage.Home -> SettingsHome(
-                    onOpenAccessibility = { page = SettingsPage.Accessibility },
-                    onOpenManual = { isHelpSheetVisible = true },
-                    onRepeatTour = onRepeatTour,
-                    onOpenWebsite = { onOpenUrl(AppExternalLinks.OfficialWebsiteUrl) },
-                    onOpenWebMap = { onOpenUrl(AppExternalLinks.WebMapUrl) },
-                    onOpenLegal = { page = SettingsPage.Legal },
-                    onOpenYoutube = { onOpenUrl(AppExternalLinks.YouTubeChannelUrl) }
+                    onOpenDisplay = { page = SettingsPage.Display },
+                    onOpenLegal = { page = SettingsPage.Legal }
                 )
 
-                SettingsPage.Accessibility -> AccessibilitySettingsPage(
+                SettingsPage.Display -> DisplaySettingsPage(
                     largeTextEnabled = largeTextEnabled,
-                    onLargeTextEnabledChanged = onLargeTextEnabledChanged
+                    onLargeTextEnabledChanged = onLargeTextEnabledChanged,
+                    appThemeMode = appThemeMode,
+                    onAppThemeModeChanged = onAppThemeModeChanged
                 )
 
                 SettingsPage.Legal -> LegalHomePage(
+                    onOpenManual = { isHelpSheetVisible = true },
+                    onRepeatTour = onRepeatTour,
+                    onOpenWhatsNew = { page = SettingsPage.WhatsNew },
+                    onOpenLegalInfo = { page = SettingsPage.LegalInfo },
+                    onOpenCommunityLinks = { page = SettingsPage.CommunityLinks },
+                    onOpenContributions = { page = SettingsPage.Contributions }
+                )
+
+                SettingsPage.WhatsNew -> WhatsNewPage(notes = AppReleaseNotes.Current)
+
+                SettingsPage.LegalInfo -> LegalInfoPage(
                     onOpenTerms = { page = SettingsPage.Terms },
                     onOpenDisclaimer = { page = SettingsPage.Disclaimer },
                     onOpenRestrictions = { page = SettingsPage.OperationalRestrictions },
                     onOpenPrivacy = { page = SettingsPage.Privacy },
-                    onOpenLicenses = { page = SettingsPage.Licenses },
-                    onOpenContributions = { page = SettingsPage.Contributions }
+                    onOpenLicenses = { page = SettingsPage.Licenses }
                 )
 
-                SettingsPage.Terms -> TextInfoPage(
-                    body = "Il testo delle condizioni d'uso non risulta incluso nel progetto Android. Questa pagina e predisposta per visualizzarlo quando sara disponibile."
-                )
-
+                SettingsPage.Terms -> TextInfoPage(body = AppLegalContent.TermsOfUseText)
                 SettingsPage.Disclaimer -> TextInfoPage(body = AppLegalContent.DisclaimerText)
-
                 SettingsPage.OperationalRestrictions -> TextInfoPage(
                     body = AppLegalContent.OperationalRestrictionsText
                 )
-
-                SettingsPage.Privacy -> TextInfoPage(
-                    body = "Nel progetto Android non risulta configurato un URL o testo ufficiale di Privacy Policy. I dati del profilo FREE restano memorizzati localmente sul dispositivo e questa modifica non introduce upload, sincronizzazione cloud o telemetria."
-                )
-
+                SettingsPage.Privacy -> TextInfoPage(body = AppLegalContent.PrivacyText)
                 SettingsPage.Licenses -> LicensesPage()
-
+                SettingsPage.CommunityLinks -> CommunityLinksPage(onOpenUrl = onOpenUrl)
                 SettingsPage.Contributions -> ContributionsPage()
             }
         }
@@ -190,14 +214,14 @@ private fun SettingsTopBar(
         IconButton(onClick = if (isRoot) onClose else onBack) {
             Icon(
                 imageVector = if (isRoot) Icons.Default.Close else Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = if (isRoot) "Chiudi impostazioni" else "Torna alle impostazioni"
+                contentDescription = if (isRoot) "Chiudi impostazioni" else "Torna indietro"
             )
         }
         Text(
             text = title,
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
+            maxLines = 2,
             overflow = TextOverflow.Ellipsis
         )
     }
@@ -205,84 +229,222 @@ private fun SettingsTopBar(
 
 @Composable
 private fun SettingsHome(
-    onOpenAccessibility: () -> Unit,
-    onOpenManual: () -> Unit,
-    onRepeatTour: () -> Unit,
-    onOpenWebsite: () -> Unit,
-    onOpenWebMap: () -> Unit,
-    onOpenLegal: () -> Unit,
-    onOpenYoutube: () -> Unit
+    onOpenDisplay: () -> Unit,
+    onOpenLegal: () -> Unit
 ) {
     SettingsSection {
-        SettingsRow(Icons.Default.Visibility, "Accessibilita", "Testo piu grande e preferenze di leggibilita", onOpenAccessibility)
-        SettingsRow(Icons.Default.Description, "Manuale Drone Sky Check", "Guida e spiegazioni operative", onOpenManual)
-        SettingsRow(Icons.Default.PlayArrow, "Tour guidato", "Rilancia il tour iniziale", onRepeatTour)
-        SettingsRow(Icons.Default.Public, "Sito web", AppExternalLinks.OfficialWebsiteUrl, onOpenWebsite)
-        SettingsRow(Icons.Default.Public, "Mappa web", AppExternalLinks.WebMapUrl, onOpenWebMap)
-    }
-    SettingsSection(title = "Legale e informazioni") {
-        SettingsRow(Icons.Default.Info, "Legale e informazioni", "Condizioni, disclaimer, privacy, licenze e contributi", onOpenLegal)
+        SettingsRow(
+            icon = Icons.Default.PhoneAndroid,
+            title = "Schermo",
+            subtitle = "Testo, tema e visualizzazione",
+            onClick = onOpenDisplay
+        )
     }
     SettingsSection {
-        SettingsRow(Icons.Default.PlayArrow, "Canale YouTube", "@RaffaelloKWOS", onOpenYoutube)
+        SettingsRow(
+            icon = Icons.Default.Info,
+            title = "Legale e informazioni",
+            subtitle = "Manuale, informazioni e community",
+            onClick = onOpenLegal
+        )
     }
 }
 
 @Composable
-private fun AccessibilitySettingsPage(
+private fun DisplaySettingsPage(
     largeTextEnabled: Boolean,
-    onLargeTextEnabledChanged: (Boolean) -> Unit
+    onLargeTextEnabledChanged: (Boolean) -> Unit,
+    appThemeMode: AppThemeMode,
+    onAppThemeModeChanged: (AppThemeMode) -> Unit
 ) {
-    SettingsSection {
+    SettingsSection(title = "Dimensione testo") {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .heightIn(min = 72.dp)
                 .padding(16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            SettingsIcon(Icons.Default.Visibility)
+            SettingsIcon(Icons.Default.FormatSize)
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Testo piu grande", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "Testo piu grande",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
                 Text(
                     "Aumenta la leggibilita dei testi nell'app Drone Sky Check.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Switch(checked = largeTextEnabled, onCheckedChange = onLargeTextEnabledChanged)
+            Switch(
+                checked = largeTextEnabled,
+                onCheckedChange = onLargeTextEnabledChanged
+            )
+        }
+    }
+
+    SettingsSection(title = "Tema") {
+        AppThemeMode.entries.forEachIndexed { index, mode ->
+            ThemeModeRow(
+                mode = mode,
+                selected = mode == appThemeMode,
+                onClick = { onAppThemeModeChanged(mode) }
+            )
+            if (index < AppThemeMode.entries.lastIndex) HorizontalDivider()
+        }
+    }
+}
+
+@Composable
+private fun ThemeModeRow(
+    mode: AppThemeMode,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        color = MaterialTheme.colorScheme.surfaceContainerLow
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 64.dp)
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            SettingsIcon(mode.themeIcon())
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(mode.label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text(
+                    mode.description,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            RadioButton(
+                selected = selected,
+                onClick = onClick
+            )
         }
     }
 }
 
 @Composable
 private fun LegalHomePage(
+    onOpenManual: () -> Unit,
+    onRepeatTour: () -> Unit,
+    onOpenWhatsNew: () -> Unit,
+    onOpenLegalInfo: () -> Unit,
+    onOpenCommunityLinks: () -> Unit,
+    onOpenContributions: () -> Unit
+) {
+    SettingsSection {
+        SettingsRow(Icons.Default.Description, "Manuale Drone Sky Check", "Guida e spiegazioni operative", onOpenManual)
+        HorizontalDivider()
+        SettingsRow(Icons.Default.PlayArrow, "Tour guidato", "Rilancia il tour iniziale", onRepeatTour)
+        HorizontalDivider()
+        SettingsRow(Icons.Default.NewReleases, "Cosa c'e di nuovo", "Novita della versione ${AppReleaseNotes.Current.versionName}", onOpenWhatsNew)
+    }
+    SettingsSection {
+        SettingsRow(Icons.Default.Info, "Informazioni legali", "Condizioni, disclaimer, privacy e licenze", onOpenLegalInfo)
+        HorizontalDivider()
+        SettingsRow(Icons.Default.Link, "Link e Community", "Sito, mappa web e canali ufficiali", onOpenCommunityLinks)
+        HorizontalDivider()
+        SettingsRow(Icons.Default.Groups, "Contribuzioni", "Community, tester e segnalazioni", onOpenContributions)
+    }
+}
+
+@Composable
+private fun WhatsNewPage(notes: ReleaseNotes) {
+    SettingsSection {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "Versione ${notes.versionName} (${notes.versionCode})",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = notes.title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = notes.intro,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        HorizontalDivider()
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            notes.highlights.forEach { item ->
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Text(
+                        text = "-",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = item,
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LegalInfoPage(
     onOpenTerms: () -> Unit,
     onOpenDisclaimer: () -> Unit,
     onOpenRestrictions: () -> Unit,
     onOpenPrivacy: () -> Unit,
-    onOpenLicenses: () -> Unit,
-    onOpenContributions: () -> Unit
+    onOpenLicenses: () -> Unit
 ) {
     SettingsSection {
-        SettingsRow(Icons.Default.Description, "Condizioni d'uso", "Pagina predisposta", onOpenTerms)
+        SettingsRow(Icons.Default.Description, "Condizioni d'uso", "Uso dell'app e responsabilita operative", onOpenTerms)
+        HorizontalDivider()
         SettingsRow(Icons.Default.Info, "Disclaimer", "Fonti ufficiali e responsabilita del pilota", onOpenDisclaimer)
-        SettingsRow(Icons.Default.Info, "Restrizioni operative", "Limiti di utilizzo dell'app", onOpenRestrictions)
-        SettingsRow(Icons.Default.Description, "Privacy", "Dati FREE locali sul dispositivo", onOpenPrivacy)
-        SettingsRow(Icons.Default.Description, "Licenze di terze parti", "Dipendenze open source principali", onOpenLicenses)
-        SettingsRow(Icons.Default.Info, "Contribuzioni", "Community e contributor", onOpenContributions)
+        HorizontalDivider()
+        SettingsRow(Icons.Default.Visibility, "Restrizioni operative", "Limiti di utilizzo dell'app", onOpenRestrictions)
+        HorizontalDivider()
+        SettingsRow(Icons.Default.PrivacyTip, "Privacy", "Dati locali, posizione e servizi Internet", onOpenPrivacy)
+        HorizontalDivider()
+        SettingsRow(Icons.AutoMirrored.Filled.ListAlt, "Licenze di terze parti", "Dipendenze open source principali", onOpenLicenses)
     }
 }
 
 @Composable
 private fun TextInfoPage(body: String) {
     SettingsSection {
-        Text(
-            text = body,
-            modifier = Modifier.padding(16.dp),
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurface
-        )
+        SelectionContainer {
+            Text(
+                text = body,
+                modifier = Modifier.padding(16.dp),
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
     }
 }
 
@@ -296,7 +458,7 @@ private fun LicensesPage() {
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         HorizontalDivider()
-        AppLegalContent.DirectOpenSourceDependencies.forEach { dependency ->
+        AppLegalContent.DirectOpenSourceDependencies.forEachIndexed { index, dependency ->
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -311,9 +473,35 @@ private fun LicensesPage() {
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            HorizontalDivider()
+            if (index < AppLegalContent.DirectOpenSourceDependencies.lastIndex) HorizontalDivider()
         }
     }
+}
+
+@Composable
+private fun CommunityLinksPage(onOpenUrl: (String) -> Unit) {
+    SettingsSection {
+        AppExternalLinks.CommunityLinks.forEachIndexed { index, link ->
+            ExternalLinkRow(
+                link = link,
+                onClick = { onOpenUrl(link.url) }
+            )
+            if (index < AppExternalLinks.CommunityLinks.lastIndex) HorizontalDivider()
+        }
+    }
+}
+
+@Composable
+private fun ExternalLinkRow(
+    link: ExternalLink,
+    onClick: () -> Unit
+) {
+    SettingsRow(
+        icon = link.icon.toImageVector(),
+        title = link.title,
+        subtitle = link.subtitle,
+        onClick = onClick
+    )
 }
 
 @Composable
@@ -322,8 +510,28 @@ private fun ContributionsPage() {
         Text(
             text = AppLegalContent.ContributionsIntro,
             modifier = Modifier.padding(16.dp),
-            style = MaterialTheme.typography.bodyLarge
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurface
         )
+        HorizontalDivider()
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                "Drone Pilots Team",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                "Supporto e confronto con la community",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
         AppLegalContent.ContributorGroups.forEach { group ->
             HorizontalDivider()
             Column(
@@ -332,12 +540,24 @@ private fun ContributionsPage() {
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(group.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text(
+                    group.title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary
+                )
                 group.names.forEach { name ->
                     Text(name, style = MaterialTheme.typography.bodyLarge)
                 }
             }
         }
+        HorizontalDivider()
+        Text(
+            text = AppLegalContent.ContributionsFooter,
+            modifier = Modifier.padding(16.dp),
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurface
+        )
     }
 }
 
@@ -379,19 +599,22 @@ private fun SettingsRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .heightIn(min = 64.dp)
                 .padding(16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             SettingsIcon(icon)
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
                 Text(
                     subtitle,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             Icon(
@@ -423,22 +646,41 @@ private fun SettingsIcon(icon: ImageVector) {
 private fun SettingsPage.titleText(): String =
     when (this) {
         SettingsPage.Home -> "Impostazioni"
-        SettingsPage.Accessibility -> "Accessibilita"
+        SettingsPage.Display -> "Schermo"
         SettingsPage.Legal -> "Legale e informazioni"
+        SettingsPage.WhatsNew -> "Cosa c'e di nuovo"
+        SettingsPage.LegalInfo -> "Informazioni legali"
         SettingsPage.Terms -> "Condizioni d'uso"
         SettingsPage.Disclaimer -> "Disclaimer"
         SettingsPage.OperationalRestrictions -> "Restrizioni operative"
         SettingsPage.Privacy -> "Privacy"
         SettingsPage.Licenses -> "Licenze di terze parti"
+        SettingsPage.CommunityLinks -> "Link e Community"
         SettingsPage.Contributions -> "Contribuzioni"
     }
 
-private fun SettingsPage.isLegalDetail(): Boolean =
+private fun SettingsPage.isLegalDocument(): Boolean =
     this in setOf(
         SettingsPage.Terms,
         SettingsPage.Disclaimer,
         SettingsPage.OperationalRestrictions,
         SettingsPage.Privacy,
-        SettingsPage.Licenses,
-        SettingsPage.Contributions
+        SettingsPage.Licenses
     )
+
+private fun AppThemeMode.themeIcon(): ImageVector =
+    when (this) {
+        AppThemeMode.System -> Icons.Default.SettingsBrightness
+        AppThemeMode.Light -> Icons.Default.LightMode
+        AppThemeMode.Dark -> Icons.Default.DarkMode
+    }
+
+private fun ExternalLinkIcon.toImageVector(): ImageVector =
+    when (this) {
+        ExternalLinkIcon.Website -> Icons.Default.Public
+        ExternalLinkIcon.Map -> Icons.Default.Map
+        ExternalLinkIcon.Video -> Icons.Default.VideoLibrary
+        ExternalLinkIcon.Social -> Icons.Default.Link
+        ExternalLinkIcon.Community -> Icons.Default.Groups
+        ExternalLinkIcon.Support -> Icons.Default.Favorite
+    }

@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.os.Build
+import it.droneskycheck.app.data.AppReleaseNotes
+import it.droneskycheck.app.data.ReleaseNotes
 import it.droneskycheck.app.data.UasDatasetUpdates
 import java.time.Instant
 import java.time.ZoneId
@@ -29,7 +31,8 @@ data class UasDatasetInfoPresentation(
 data class AppInfoPresentation(
     val build: AppBuildInfoPresentation,
     val dataset: UasDatasetInfoPresentation,
-    val textScale: TextScaleInfoPresentation? = null
+    val textScale: TextScaleInfoPresentation? = null,
+    val releaseNotes: ReleaseNotes = AppReleaseNotes.Current
 )
 
 data class TextScaleInfoPresentation(
@@ -119,6 +122,10 @@ fun appInfoDiagnosticText(info: AppInfoPresentation): String =
             appendLine("Scala testo Android: ${textScale.systemFontScaleLabel}")
             appendLine("Testo piu grande DSC: ${textScale.largeTextEnabledLabel}")
             appendLine("Scala testo effettiva DSC: ${textScale.effectiveFontScaleLabel}")
+        }
+        appendLine("Cosa c'e di nuovo: ${info.releaseNotes.title}")
+        info.releaseNotes.highlights.forEach { highlight ->
+            appendLine("- $highlight")
         }
         appendLine("Dati Zone UAS: ${info.dataset.availabilityLabel}")
         info.dataset.cacheLabel?.let { appendLine("Cache Zone UAS: $it") }

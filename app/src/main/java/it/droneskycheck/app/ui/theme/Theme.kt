@@ -1,6 +1,5 @@
 package it.droneskycheck.app.ui.theme
 
-import android.app.Activity
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
@@ -10,6 +9,7 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
+import it.droneskycheck.app.data.AppThemeMode
 
 private val DarkColorScheme = darkColorScheme(
     primary = Purple80,
@@ -35,11 +35,17 @@ private val LightColorScheme = lightColorScheme(
 
 @Composable
 fun DroneSkyCheckTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    appThemeMode: AppThemeMode = AppThemeMode.System,
     // Dynamic color is available on Android 12+
     dynamicColor: Boolean = true,
     content: @Composable () -> Unit
 ) {
+    val systemDarkTheme = isSystemInDarkTheme()
+    val darkTheme = when (appThemeMode) {
+        AppThemeMode.System -> systemDarkTheme
+        AppThemeMode.Light -> false
+        AppThemeMode.Dark -> true
+    }
     val colorScheme = when {
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             val context = LocalContext.current

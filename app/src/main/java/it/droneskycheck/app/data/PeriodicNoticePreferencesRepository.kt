@@ -52,5 +52,5 @@ object PeriodicNoticePolicy {
 }
 
 object PeriodicNoticeLinks {
-    const val BuyMeACoffeeUrl = "https://buymeacoffee.com/tuttosuidroni"
+    const val BuyMeACoffeeUrl = AppExternalLinks.SupportUrl
 }
