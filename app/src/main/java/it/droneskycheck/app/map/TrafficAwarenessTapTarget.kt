@@ -8,7 +8,7 @@ internal data class TrafficTapHitBox(
 )
 
 internal object TrafficTapTargetStyle {
-    const val HitSlopDp = 16.0f
+    const val HitSlopDp = 28.0f
 }
 
 internal fun trafficTapHitBoxForScreenPoint(centerX: Float, centerY: Float, density: Float): TrafficTapHitBox {

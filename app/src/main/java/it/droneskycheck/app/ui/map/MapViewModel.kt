@@ -15,6 +15,7 @@ import it.droneskycheck.app.data.MapPreferences
 import it.droneskycheck.app.data.UasDatasetUpdatesRepository
 import it.droneskycheck.app.data.ZoneCheckV3Client
 import it.droneskycheck.app.data.ZoneCheckV3Repository
+import it.droneskycheck.app.data.filterableTypes
 import it.droneskycheck.app.data.drone.DroneOperationalAssessmentEngine
 import it.droneskycheck.app.data.drone.DroneOperationalLevel
 import it.droneskycheck.app.data.drone.DroneTechnicalCatalogClient
@@ -51,6 +52,8 @@ import it.droneskycheck.app.data.weather.WeatherAssessmentEngine
 import it.droneskycheck.app.data.weather.WeatherForecast
 import it.droneskycheck.app.data.weather.WeatherForecastClient
 import it.droneskycheck.app.data.weather.WeatherForecastRepository
+import it.droneskycheck.app.data.weather.NearbyMetarClient
+import it.droneskycheck.app.data.weather.NearbyMetarRepository
 import it.droneskycheck.app.data.weather.toWeatherMetrics
 import it.droneskycheck.app.data.traffic.TrafficAwarenessClient
 import it.droneskycheck.app.data.traffic.TrafficAwarenessDefaults
@@ -62,6 +65,7 @@ import it.droneskycheck.app.data.traffic.TrafficAlertController
 import it.droneskycheck.app.data.traffic.TrafficAlertEvent
 import it.droneskycheck.app.data.traffic.TrafficAssessment
 import it.droneskycheck.app.data.traffic.TrafficAwarenessResponse
+import it.droneskycheck.app.data.traffic.TrafficFeedType
 import it.droneskycheck.app.data.traffic.TrafficRelevance
 import it.droneskycheck.app.data.traffic.TrafficRelevanceEngine
 import it.droneskycheck.app.data.traffic.TrafficTarget
@@ -69,6 +73,7 @@ import it.droneskycheck.app.data.traffic.TrafficTargetKind
 import it.droneskycheck.app.data.traffic.TrafficTime
 import it.droneskycheck.app.data.traffic.coarseTraffic
 import it.droneskycheck.app.data.traffic.toTrafficAwarenessDiagnosticReason
+import it.droneskycheck.app.data.traffic.trafficFeedType
 import it.droneskycheck.app.data.traffic.trafficTargetKind
 import it.droneskycheck.app.map.DscLayerCategory
 import java.time.Clock
@@ -93,6 +98,7 @@ class MapViewModel(
     private val zoneCheckRepository: ZoneCheckV3Client = ZoneCheckV3Repository(),
     private val legalTimelineRepository: LegalTimelineClient = LegalTimelineRepository(),
     private val weatherForecastRepository: WeatherForecastClient = WeatherForecastRepository(),
+    private val nearbyMetarRepository: NearbyMetarClient = NearbyMetarRepository(),
     private val trafficAwarenessRepository: TrafficAwarenessClient = TrafficAwarenessRepository(),
     private val weatherAssessmentEngine: WeatherAssessmentEngine = WeatherAssessmentEngine(),
     private val droneAssessmentEngine: DroneOperationalAssessmentEngine = DroneOperationalAssessmentEngine(),
@@ -132,6 +138,8 @@ class MapViewModel(
     private var legalTimelineJob: Job? = null
     private var weatherJob: Job? = null
     private var trafficAwarenessJob: Job? = null
+    private var mapStatusMessageJob: Job? = null
+    private var latestUnfilteredTrafficAwarenessResponse: TrafficAwarenessResponse? = null
     private var lastLegalTimelineRequest: LegalTimelineRequestKey? = null
     private var catalogResolver: DroneTechnicalCatalogResolver = DroneTechnicalCatalogResolver.empty()
     private val trafficRelevanceEngine = TrafficRelevanceEngine()
@@ -494,7 +502,11 @@ class MapViewModel(
     }
 
     fun onOperationalContextRequested() {
-        val point = _uiState.value.selectedPoint ?: return
+        val point = _uiState.value.selectedPoint ?: run {
+            showTransientMapStatus(SelectPointMessage)
+            return
+        }
+        mapStatusMessageJob?.cancel()
         val requestId = selectionRequestId
         val windowStart = clock.instant()
         val windowEnd = legalTimelineEndIncludingWeekend(windowStart, timelineZoneId)
@@ -516,12 +528,14 @@ class MapViewModel(
             isWeatherAnalysisLoading = true,
             weatherForecast = null,
             weatherAssessment = null,
+            nearbyMetar = null,
             droneOperationalAssessment = null,
             flightOpportunityMode = FlightOpportunityMode.OPEN,
             flightOpportunityStatus = FlightOpportunityStatus.LOADING,
             flightOpportunityResult = null,
             isOperationalReportExpanded = false,
-            weatherError = null
+            weatherError = null,
+            mapStatusMessage = null
         )
         DscLogger.debug(
             LogTag,
@@ -549,6 +563,7 @@ class MapViewModel(
                 isWeatherAnalysisLoading = false,
                 weatherForecast = null,
                 weatherAssessment = null,
+                nearbyMetar = null,
                 droneOperationalAssessment = null,
                 flightOpportunityMode = FlightOpportunityMode.OPEN,
                 flightOpportunityStatus = FlightOpportunityStatus.IDLE,
@@ -608,6 +623,7 @@ class MapViewModel(
             isWeatherAnalysisLoading = false,
             weatherForecast = null,
             weatherAssessment = null,
+            nearbyMetar = null,
             droneOperationalAssessment = null,
             flightOpportunityMode = FlightOpportunityMode.OPEN,
             flightOpportunityStatus = FlightOpportunityStatus.IDLE,
@@ -718,6 +734,7 @@ class MapViewModel(
             isWeatherAnalysisLoading = true,
             weatherForecast = null,
             weatherAssessment = null,
+            nearbyMetar = null,
             droneOperationalAssessment = null,
             flightOpportunityStatus = FlightOpportunityStatus.LOADING,
             flightOpportunityResult = null,
@@ -730,17 +747,22 @@ class MapViewModel(
                     LogTag,
                     "Weather analysis request lat=${point.lat} lon=${point.lon}"
                 )
-                weatherForecastRepository.getForecast(
+                val forecast = weatherForecastRepository.getForecast(
                     latitude = point.lat,
                     longitude = point.lon
                 )
+                val metar = nearbyMetarRepository.getNearbyMetar(
+                    latitude = point.lat,
+                    longitude = point.lon
+                ).getOrNull()
+                forecast.map { it to metar }
             }
 
             if (!isCurrentSelection(requestId, point) || !_uiState.value.isOperationalContextRequested) {
                 return@launch
             }
 
-            result.onSuccess { forecast ->
+            result.onSuccess { (forecast, metar) ->
                 val assessment = forecast.closestHour(clock.instant())
                     ?.toWeatherMetrics()
                     ?.let(weatherAssessmentEngine::assess)
@@ -753,6 +775,7 @@ class MapViewModel(
                     isWeatherAnalysisLoading = false,
                     weatherForecast = forecast,
                     weatherAssessment = assessment,
+                    nearbyMetar = metar,
                     droneOperationalAssessment = currentDroneAssessment(forecast, assessment),
                     weatherError = null
                 )
@@ -772,6 +795,7 @@ class MapViewModel(
                     isWeatherAnalysisLoading = false,
                     weatherForecast = null,
                     weatherAssessment = null,
+                    nearbyMetar = null,
                     droneOperationalAssessment = null,
                     flightOpportunityStatus = FlightOpportunityStatus.ERROR,
                     flightOpportunityResult = null,
@@ -788,10 +812,10 @@ class MapViewModel(
                 trafficAwareness = _uiState.value.trafficAwareness.copy(
                     enabled = false,
                     loading = false,
-                    error = "Seleziona un punto sulla mappa"
-                ),
-                mapStatusMessage = "Seleziona un punto sulla mappa"
+                    error = SelectPointMessage
+                )
             )
+            showTransientMapStatus(SelectPointMessage)
             return
         }
         if (_uiState.value.selectedPoint == null) {
@@ -808,6 +832,7 @@ class MapViewModel(
     fun disableTrafficAwareness() {
         trafficAwarenessJob?.cancel()
         trafficAwarenessJob = null
+        latestUnfilteredTrafficAwarenessResponse = null
         _uiState.value = _uiState.value.copy(
             trafficAwareness = TrafficAwarenessState(enabled = false),
             trafficAwarenessCenter = null,
@@ -821,6 +846,9 @@ class MapViewModel(
         clearSnapshot: Boolean = false
     ) {
         trafficAwarenessJob?.cancel()
+        if (clearSnapshot) {
+            latestUnfilteredTrafficAwarenessResponse = null
+        }
         val currentTraffic = _uiState.value.trafficAwareness
         _uiState.value = _uiState.value.copy(
             trafficAwareness = currentTraffic.copy(
@@ -886,11 +914,13 @@ class MapViewModel(
             )
             val nowMillis = clock.millis()
             val previousTraffic = _uiState.value.trafficAwareness
-            val visibleResponse = response.withPersistentDroneTargets(
+            val unfilteredResponse = response.withPersistentDroneTargets(
                 previousResponse = previousTraffic.response,
                 previousLastUpdatedAt = previousTraffic.lastUpdatedAt,
                 nowMillis = nowMillis
             )
+            latestUnfilteredTrafficAwarenessResponse = unfilteredResponse
+            val visibleResponse = unfilteredResponse.filteredByTrafficFeed(_uiState.value.trafficFeedFilters)
             val rawAssessments = trafficRelevanceEngine.assessTrafficBatch(
                 targets = visibleResponse.traffic.targets,
                 operationCenter = TrafficOperationCenter(point.lat, point.lon),
@@ -907,6 +937,9 @@ class MapViewModel(
                         "distance=${assessment.currentDistanceM?.toInt()} " +
                         "cpa=${assessment.cpaDistanceM?.toInt()} tcpa=${assessment.timeToCpaSec?.toInt()}"
                 )
+            }
+            if (!_uiState.value.trafficAwareness.enabled || _uiState.value.trafficAwarenessCenter != point) {
+                return@onSuccess
             }
             trafficAlertController.update(assessments, nowMillis)?.let { event ->
                 DscLogger.debug(
@@ -996,6 +1029,21 @@ class MapViewModel(
         _uiState.value = _uiState.value.copy(trafficAwarenessPositionLocked = locked)
     }
 
+    fun onTrafficFeedEnabledChanged(type: TrafficFeedType, enabled: Boolean) {
+        if (type !in TrafficFeedType.filterableTypes) return
+        mapPreferences.setTrafficFeedEnabled(type, enabled)
+        DscLogger.debug(TrafficAwarenessLogTag, "feed filter type=${type.name} enabled=$enabled")
+        val filters = _uiState.value.trafficFeedFilters + (type to enabled)
+        val currentResponse = latestUnfilteredTrafficAwarenessResponse ?: _uiState.value.trafficAwareness.response
+        _uiState.value = _uiState.value.copy(
+            trafficFeedFilters = filters,
+            trafficAwareness = _uiState.value.trafficAwareness.copy(
+                response = currentResponse?.filteredByTrafficFeed(filters)
+            )
+        )
+        refreshTrafficAssessmentsForCurrentSnapshot()
+    }
+
     fun onLargeTextEnabledChanged(enabled: Boolean) {
         mapPreferences.setLargeTextEnabled(enabled)
         _uiState.value = _uiState.value.copy(isLargeTextEnabled = enabled)
@@ -1019,7 +1067,8 @@ class MapViewModel(
             trafficAlertSoundEnabled = mapPreferences.isTrafficAlertSoundEnabled(),
             trafficAlertVibrationEnabled = mapPreferences.isTrafficAlertVibrationEnabled(),
             highAltitudeTrafficAlertEnabled = mapPreferences.isHighAltitudeTrafficAlertEnabled(),
-            trafficAwarenessPositionLocked = mapPreferences.isTrafficAwarenessPositionLocked()
+            trafficAwarenessPositionLocked = mapPreferences.isTrafficAwarenessPositionLocked(),
+            trafficFeedFilters = TrafficFeedType.filterableTypes.associateWith { mapPreferences.isTrafficFeedEnabled(it) }
         )
     }
 
@@ -1120,6 +1169,21 @@ class MapViewModel(
                 ageSec = ((nowMillis - lastSeenMillis).coerceAtLeast(0L)) / 1_000.0
             )
         )
+
+    private fun TrafficAwarenessResponse.filteredByTrafficFeed(
+        filters: Map<TrafficFeedType, Boolean>
+    ): TrafficAwarenessResponse {
+        val targets = traffic.targets.filter { target ->
+            val type = target.trafficFeedType()
+            type == TrafficFeedType.UNKNOWN || filters[type] != false
+        }
+        return copy(
+            traffic = traffic.copy(
+                count = targets.size,
+                targets = targets
+            )
+        )
+    }
 
     fun onDroneSelected(droneId: String) {
         scope.launch {
@@ -1574,12 +1638,17 @@ class MapViewModel(
         selectionRequestId == requestId && _uiState.value.selectedPoint == point
 
     fun onMapDataDegraded() {
+        showTransientMapStatus(CachedMapDataMessage)
+    }
+
+    private fun showTransientMapStatus(message: String) {
+        mapStatusMessageJob?.cancel()
         _uiState.value = _uiState.value.copy(
-            mapStatusMessage = CachedMapDataMessage
+            mapStatusMessage = message
         )
-        scope.launch {
+        mapStatusMessageJob = scope.launch {
             delay(StatusMessageMillis)
-            if (_uiState.value.mapStatusMessage == CachedMapDataMessage) {
+            if (_uiState.value.mapStatusMessage == message) {
                 _uiState.value = _uiState.value.copy(mapStatusMessage = null)
             }
         }
@@ -1592,7 +1661,7 @@ class MapViewModel(
         val trafficEnabled = _uiState.value.trafficAwareness.enabled
         _uiState.value = _uiState.value.copy(
             selectedZone = null,
-            selectedPoint = if (trafficEnabled) _uiState.value.selectedPoint else null,
+            selectedPoint = _uiState.value.selectedPoint,
             isZoneSheetVisible = false,
             isVerdictLoading = false,
             verdict = null,
@@ -1604,6 +1673,7 @@ class MapViewModel(
             isWeatherAnalysisLoading = false,
             weatherForecast = null,
             weatherAssessment = null,
+            nearbyMetar = null,
             droneOperationalAssessment = null,
             flightOpportunityMode = FlightOpportunityMode.OPEN,
             flightOpportunityStatus = FlightOpportunityStatus.IDLE,
@@ -1738,12 +1808,14 @@ class MapViewModel(
     private companion object {
         const val LogTag = "DscMapViewModel"
         const val CachedMapDataMessage = "Dati mappa salvati"
+        const val SelectPointMessage = "Seleziona un punto sulla mappa"
         const val StatusMessageMillis = 8_000L
         const val MaxHelpTourSteps = 7
     }
 
     override fun onCleared() {
         trafficAwarenessJob?.cancel()
+        mapStatusMessageJob?.cancel()
         super.onCleared()
     }
 }

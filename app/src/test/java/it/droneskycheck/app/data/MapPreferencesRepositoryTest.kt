@@ -3,6 +3,7 @@ package it.droneskycheck.app.data
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import it.droneskycheck.app.data.traffic.TrafficFeedType
 
 class MapPreferencesRepositoryTest {
     @Test
@@ -31,6 +32,20 @@ class MapPreferencesRepositoryTest {
         assertFalse(preferences.isTrafficAlertSoundEnabled())
         assertFalse(preferences.isTrafficAlertVibrationEnabled())
         assertTrue(preferences.isHighAltitudeTrafficAlertEnabled())
+    }
+
+    @Test
+    fun trafficFeedFiltersDefaultToOnAndPersistLocally() {
+        val preferences = InMemoryMapPreferences()
+
+        TrafficFeedType.filterableTypes.forEach { type ->
+            assertTrue(preferences.isTrafficFeedEnabled(type))
+        }
+
+        preferences.setTrafficFeedEnabled(TrafficFeedType.FLARM, false)
+
+        assertFalse(preferences.isTrafficFeedEnabled(TrafficFeedType.FLARM))
+        assertTrue(preferences.isTrafficFeedEnabled(TrafficFeedType.ADSB))
     }
 
     @Test

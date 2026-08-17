@@ -1,6 +1,7 @@
 package it.droneskycheck.app.data
 
 import android.content.Context
+import it.droneskycheck.app.data.traffic.TrafficFeedType
 
 interface MapPreferences {
     fun isWeatherAnalysisEnabled(): Boolean
@@ -17,6 +18,8 @@ interface MapPreferences {
     fun setHighAltitudeTrafficAlertEnabled(enabled: Boolean)
     fun isTrafficAwarenessPositionLocked(): Boolean
     fun setTrafficAwarenessPositionLocked(locked: Boolean)
+    fun isTrafficFeedEnabled(type: TrafficFeedType): Boolean
+    fun setTrafficFeedEnabled(type: TrafficFeedType, enabled: Boolean)
 }
 
 class MapPreferencesRepository(
@@ -87,6 +90,15 @@ class MapPreferencesRepository(
             .apply()
     }
 
+    override fun isTrafficFeedEnabled(type: TrafficFeedType): Boolean =
+        preferences.getBoolean(type.preferenceKey(), true)
+
+    override fun setTrafficFeedEnabled(type: TrafficFeedType, enabled: Boolean) {
+        preferences.edit()
+            .putBoolean(type.preferenceKey(), enabled)
+            .apply()
+    }
+
     private companion object {
         const val PreferencesName = "dsc_map_preferences"
         const val KeyWeatherAnalysisEnabled = "weather_analysis_enabled"
@@ -106,7 +118,8 @@ class InMemoryMapPreferences(
     initialTrafficAlertSoundEnabled: Boolean = true,
     initialTrafficAlertVibrationEnabled: Boolean = true,
     initialHighAltitudeTrafficAlertEnabled: Boolean = false,
-    initialTrafficAwarenessPositionLocked: Boolean = false
+    initialTrafficAwarenessPositionLocked: Boolean = false,
+    initialTrafficFeedEnabled: Map<TrafficFeedType, Boolean> = TrafficFeedType.filterableTypes.associateWith { true }
 ) : MapPreferences {
     private var weatherAnalysisEnabled = initialWeatherAnalysisEnabled
     private var largeTextEnabled = initialLargeTextEnabled
@@ -115,6 +128,7 @@ class InMemoryMapPreferences(
     private var trafficAlertVibrationEnabled = initialTrafficAlertVibrationEnabled
     private var highAltitudeTrafficAlertEnabled = initialHighAltitudeTrafficAlertEnabled
     private var trafficAwarenessPositionLocked = initialTrafficAwarenessPositionLocked
+    private var trafficFeedEnabled = initialTrafficFeedEnabled.toMutableMap()
 
     override fun isWeatherAnalysisEnabled(): Boolean = weatherAnalysisEnabled
 
@@ -157,7 +171,25 @@ class InMemoryMapPreferences(
     override fun setTrafficAwarenessPositionLocked(locked: Boolean) {
         trafficAwarenessPositionLocked = locked
     }
+
+    override fun isTrafficFeedEnabled(type: TrafficFeedType): Boolean =
+        trafficFeedEnabled[type] ?: true
+
+    override fun setTrafficFeedEnabled(type: TrafficFeedType, enabled: Boolean) {
+        trafficFeedEnabled[type] = enabled
+    }
 }
+
+val TrafficFeedType.Companion.filterableTypes: List<TrafficFeedType>
+    get() = listOf(
+        TrafficFeedType.ADSB,
+        TrafficFeedType.FANET,
+        TrafficFeedType.FLARM,
+        TrafficFeedType.FREEFLIGHT
+    )
+
+private fun TrafficFeedType.preferenceKey(): String =
+    "traffic_feed_${name.lowercase()}_enabled"
 
 enum class AppThemeMode(
     val preferenceValue: String,

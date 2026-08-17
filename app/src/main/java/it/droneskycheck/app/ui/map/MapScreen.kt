@@ -150,6 +150,7 @@ import it.droneskycheck.app.data.AuthorizationZoneReference
 import it.droneskycheck.app.data.AppExternalLinks
 import it.droneskycheck.app.data.AppLegalContent
 import it.droneskycheck.app.data.AppThemeMode
+import it.droneskycheck.app.data.filterableTypes
 import it.droneskycheck.app.data.AuthorityInfo
 import it.droneskycheck.app.data.CreateAuthorizationDraftResult
 import it.droneskycheck.app.data.DscLogger
@@ -182,6 +183,7 @@ import it.droneskycheck.app.data.traffic.TrafficAwarenessLogTag
 import it.droneskycheck.app.data.traffic.TrafficAwarenessRepository
 import it.droneskycheck.app.data.traffic.TrafficAwarenessState
 import it.droneskycheck.app.data.traffic.TrafficAssessment
+import it.droneskycheck.app.data.traffic.TrafficFeedType
 import it.droneskycheck.app.data.traffic.TrafficTarget
 import it.droneskycheck.app.data.traffic.TrafficTargetKind
 import it.droneskycheck.app.ui.map.TrafficAttentionPresentation
@@ -225,6 +227,7 @@ import it.droneskycheck.app.data.weather.WeatherCodeCategory
 import it.droneskycheck.app.data.weather.WeatherConfidenceLevel
 import it.droneskycheck.app.data.weather.WeatherForecast
 import it.droneskycheck.app.data.weather.WeatherForecastHour
+import it.droneskycheck.app.data.weather.NearbyMetar
 import it.droneskycheck.app.data.weather.WeatherForecastRepository
 import it.droneskycheck.app.data.weather.WeatherReasonCode
 import it.droneskycheck.app.data.weather.WeatherState
@@ -292,6 +295,7 @@ fun MapScreen(
     val permissionState = currentLocationPermissionState(context)
     var isPilotProfileSheetVisible by remember { mutableStateOf(false) }
     var isSettingsSheetVisible by remember { mutableStateOf(false) }
+    var isMapWeatherSheetVisible by remember { mutableStateOf(false) }
     var isLocationSearchSheetVisible by remember { mutableStateOf(false) }
     var pendingCameraFocusPoint by remember { mutableStateOf<MapPoint?>(null) }
     var currentDraft by remember { mutableStateOf<AuthorizationDraft?>(null) }
@@ -587,7 +591,15 @@ fun MapScreen(
             isLocationEnabled = uiState.isUserLocationEnabled,
             hasUserLocation = uiState.userLocation != null,
             trafficAwareness = uiState.trafficAwareness,
+            weatherActive = uiState.isOperationalContextRequested,
+            weatherLoading = uiState.isWeatherAnalysisLoading,
             onLayersClick = viewModel::onLayerPanelRequested,
+            onWeatherClick = {
+                if (uiState.selectedPoint != null) {
+                    isMapWeatherSheetVisible = true
+                }
+                viewModel.onOperationalContextRequested()
+            },
             onTrafficClick = {
                 if (uiState.trafficAwareness.enabled) {
                     DscLogger.debug(TrafficAwarenessLogTag, "Traffic Awareness OFF")
@@ -694,16 +706,31 @@ fun MapScreen(
             )
         }
 
+        if (isMapWeatherSheetVisible) {
+            MapWeatherBottomSheet(
+                point = uiState.selectedPoint,
+                isLoading = uiState.isWeatherAnalysisLoading,
+                forecast = uiState.weatherForecast,
+                assessment = uiState.weatherAssessment,
+                nearbyMetar = uiState.nearbyMetar,
+                error = uiState.weatherError,
+                onRefresh = viewModel::onOperationalContextRequested,
+                onDismiss = { isMapWeatherSheetVisible = false }
+            )
+        }
+
         if (uiState.isTrafficAlertSettingsSheetVisible) {
             TrafficAlertSettingsBottomSheet(
                 soundEnabled = uiState.trafficAlertSoundEnabled,
                 vibrationEnabled = uiState.trafficAlertVibrationEnabled,
                 highAltitudeAlertsEnabled = uiState.highAltitudeTrafficAlertEnabled,
                 positionLocked = uiState.trafficAwarenessPositionLocked,
+                trafficFeedFilters = uiState.trafficFeedFilters,
                 onSoundEnabledChanged = viewModel::onTrafficAlertSoundEnabledChanged,
                 onVibrationEnabledChanged = viewModel::onTrafficAlertVibrationEnabledChanged,
                 onHighAltitudeAlertsEnabledChanged = viewModel::onHighAltitudeTrafficAlertEnabledChanged,
                 onPositionLockedChanged = viewModel::onTrafficAwarenessPositionLockedChanged,
+                onTrafficFeedEnabledChanged = viewModel::onTrafficFeedEnabledChanged,
                 onDismiss = viewModel::onTrafficAlertSettingsDismissed
             )
         }
@@ -1184,7 +1211,10 @@ private fun MapControlsToolbar(
     isLocationEnabled: Boolean,
     hasUserLocation: Boolean,
     trafficAwareness: TrafficAwarenessState,
+    weatherActive: Boolean,
+    weatherLoading: Boolean,
     onLayersClick: () -> Unit,
+    onWeatherClick: () -> Unit,
     onTrafficClick: () -> Unit,
     onTrafficSettingsClick: () -> Unit,
     onSettingsClick: () -> Unit,
@@ -1198,7 +1228,7 @@ private fun MapControlsToolbar(
     val actionExit = fadeOut() + scaleOut(transformOrigin = TransformOrigin(1f, 1f))
 
     Box(
-        modifier = modifier.size(width = 336.dp, height = 336.dp),
+        modifier = modifier.size(width = 336.dp, height = 400.dp),
         contentAlignment = Alignment.BottomEnd
     ) {
         AnimatedVisibility(
@@ -1271,6 +1301,42 @@ private fun MapControlsToolbar(
                             shape = CircleShape,
                             color = MaterialTheme.colorScheme.tertiary
                         ) {}
+                    }
+                }
+            }
+        }
+
+        AnimatedVisibility(
+            visible = expanded,
+            enter = actionEnter,
+            exit = actionExit,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .offset(y = (-264).dp)
+        ) {
+            MapActionFab(
+                label = "Meteo",
+                direction = MapActionDirection.Up,
+                contentDescription = "Meteo sul punto selezionato",
+                containerColor = mapToggleContainerColor(active = weatherActive),
+                contentColor = mapToggleContentColor(active = weatherActive),
+                onClick = {
+                    expanded = false
+                    onWeatherClick()
+                }
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Default.Cloud,
+                        contentDescription = null,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    if (weatherLoading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(36.dp),
+                            strokeWidth = 2.dp,
+                            color = LocalContentColor.current
+                        )
                     }
                 }
             }
@@ -1549,15 +1615,143 @@ private fun TrafficAwarenessButtonContent(state: TrafficAwarenessState) {
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
+private fun MapWeatherBottomSheet(
+    point: MapPoint?,
+    isLoading: Boolean,
+    forecast: WeatherForecast?,
+    assessment: WeatherAssessment?,
+    nearbyMetar: NearbyMetar?,
+    error: String?,
+    onRefresh: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = ZoneSheetMaxHeight)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text(
+                        text = "Meteo",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = point?.let { "Punto ${it.lat.formatCoordinate()}, ${it.lon.formatCoordinate()}" }
+                            ?: "Seleziona un punto sulla mappa",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                IconButton(onClick = onRefresh, enabled = point != null && !isLoading) {
+                    Icon(Icons.Default.Refresh, contentDescription = "Aggiorna meteo")
+                }
+            }
+            when {
+                isLoading -> Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    Text("Aggiornamento meteo in corso.", style = MaterialTheme.typography.bodyMedium)
+                }
+                assessment != null && forecast != null -> {
+                    WeatherAnalysisContent(assessment = assessment, forecast = forecast)
+                    NearbyMetarSection(nearbyMetar)
+                }
+                error != null -> Text(
+                    text = error,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error
+                )
+                else -> Text(
+                    text = "Apri il meteo dopo aver selezionato un punto sulla mappa.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+    }
+}
+
+@Composable
+private fun NearbyMetarSection(metar: NearbyMetar?) {
+    HorizontalDivider()
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = "METAR vicino",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary
+        )
+        if (metar == null) {
+            Text(
+                text = "Nessuna stazione METAR entro circa 20 km.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            return
+        }
+        WeatherFactRow(WeatherFact(Icons.Default.Flight, "Stazione", "${metar.icao} · ${metar.distanceKm.formatOneDecimal()} km"))
+        metar.windSummary()?.let { WeatherFactRow(WeatherFact(Icons.Default.Air, "Vento METAR", it)) }
+        metar.temperatureC?.let { WeatherFactRow(WeatherFact(Icons.Default.Thermostat, "Temperatura METAR", "${it.roundToInt()} °C")) }
+        metar.visibilityMeters?.let { WeatherFactRow(WeatherFact(Icons.Default.Visibility, "Visibilita METAR", "${(it / 1_000.0).formatOneDecimal()} km")) }
+        metar.flightCategory?.let { WeatherFactRow(WeatherFact(Icons.Default.Info, "Categoria", it)) }
+        metar.rawText?.let {
+            SelectionContainer {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+private fun NearbyMetar.windSummary(): String? {
+    if (windDirectionDeg == null && windSpeedKt == null && windGustKt == null) return null
+    return buildString {
+        windDirectionDeg?.let { append("$it°") }
+        windSpeedKt?.let {
+            if (isNotEmpty()) append(" · ")
+            append("$it kt")
+        }
+        windGustKt?.let {
+            if (isNotEmpty()) append(" · ")
+            append("raffiche $it kt")
+        }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
 private fun TrafficAlertSettingsBottomSheet(
     soundEnabled: Boolean,
     vibrationEnabled: Boolean,
     highAltitudeAlertsEnabled: Boolean,
     positionLocked: Boolean,
+    trafficFeedFilters: Map<TrafficFeedType, Boolean>,
     onSoundEnabledChanged: (Boolean) -> Unit,
     onVibrationEnabledChanged: (Boolean) -> Unit,
     onHighAltitudeAlertsEnabledChanged: (Boolean) -> Unit,
     onPositionLockedChanged: (Boolean) -> Unit,
+    onTrafficFeedEnabledChanged: (TrafficFeedType, Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -1581,6 +1775,20 @@ private fun TrafficAlertSettingsBottomSheet(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            Text(
+                text = "Tipi visualizzati",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            TrafficFeedType.filterableTypes.forEach { type ->
+                TrafficAlertPreferenceRow(
+                    title = type.label,
+                    checked = trafficFeedFilters[type] != false,
+                    onCheckedChange = { enabled -> onTrafficFeedEnabledChanged(type, enabled) }
+                )
+            }
+            HorizontalDivider()
             TrafficAlertPreferenceRow(
                 title = "Blocca posizione traffico",
                 checked = positionLocked,
@@ -2380,7 +2588,7 @@ private fun MapTitlePill(
                 overflow = TextOverflow.Ellipsis
             )
             Text(
-                text = if (degraded) "Ultima copia disponibile" else "Mappa UAS",
+                text = if (degraded) "Avviso mappa" else "Mappa UAS",
                 style = MaterialTheme.typography.bodySmall,
                 color = if (degraded) {
                     MaterialTheme.colorScheme.onTertiaryContainer
@@ -7365,6 +7573,9 @@ private class MapViewModelFactory(
                 zoneCheckRepository = ZoneCheckV3Repository(),
                 legalTimelineRepository = LegalTimelineRepository(),
                 weatherForecastRepository = WeatherForecastRepository(),
+                nearbyMetarRepository = it.droneskycheck.app.data.weather.NearbyMetarRepository(
+                    airportRepository = it.droneskycheck.app.data.AirportRepository(context)
+                ),
                 trafficAwarenessRepository = TrafficAwarenessRepository(),
                 weatherAssessmentEngine = WeatherAssessmentEngine(),
                 mapPreferences = MapPreferencesRepository(context),

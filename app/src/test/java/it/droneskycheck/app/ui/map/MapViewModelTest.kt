@@ -58,6 +58,8 @@ import it.droneskycheck.app.data.weather.WeatherForecastLocation
 import it.droneskycheck.app.data.weather.WeatherForecastMetadata
 import it.droneskycheck.app.data.weather.WeatherForecastUnitsDto
 import it.droneskycheck.app.data.weather.WeatherMetrics
+import it.droneskycheck.app.data.weather.NearbyMetar
+import it.droneskycheck.app.data.weather.NearbyMetarClient
 import java.time.LocalDate
 import java.io.File
 import java.time.Clock
@@ -1036,6 +1038,24 @@ class MapViewModelTest {
     }
 
     @Test
+    fun closingZoneSheetKeepsSelectedPointAvailableForWeatherWhenTrafficIsOff() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val viewModel = viewModel(
+            scope = scope,
+            preferences = InMemoryMapPreferences()
+        )
+
+        viewModel.onMapTapped(selection(41.9, 12.5))
+        waitUntil { viewModel.uiState.value.selectedPoint != null }
+        viewModel.onZoneSheetDismissed()
+
+        assertFalse(viewModel.uiState.value.isZoneSheetVisible)
+        assertFalse(viewModel.uiState.value.trafficAwareness.enabled)
+        assertEquals(MapPoint(41.9, 12.5), viewModel.uiState.value.selectedPoint)
+        scope.cancel()
+    }
+
+    @Test
     fun changingSelectedPointWhileTrafficAwarenessIsOnFetchesNewPointAndClearsOldSnapshot() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val traffic = FakeTrafficAwarenessClient(
@@ -1429,6 +1449,7 @@ class MapViewModelTest {
         scope: CoroutineScope,
         legal: FakeLegalTimelineClient = FakeLegalTimelineClient(),
         weather: FakeWeatherClient = FakeWeatherClient(),
+        metar: NearbyMetarClient = FakeNearbyMetarClient(),
         traffic: TrafficAwarenessClient = FakeTrafficAwarenessClient(),
         preferences: InMemoryMapPreferences,
         pilotStore: LocalPilotStore = FakePilotStore(),
@@ -1441,6 +1462,7 @@ class MapViewModelTest {
             zoneCheckRepository = FakeZoneCheckClient(),
             legalTimelineRepository = legal,
             weatherForecastRepository = weather,
+            nearbyMetarRepository = metar,
             trafficAwarenessRepository = traffic,
             mapPreferences = preferences,
             helpRepository = helpRepository,
@@ -1666,6 +1688,21 @@ private class FakeWeatherClient(
         delay(delaysByLatitude[latitude] ?: 0L)
         return forecast?.let { Result.success(it) }
             ?: Result.failure(IllegalStateException("weather fixture"))
+    }
+}
+
+private class FakeNearbyMetarClient(
+    private val metar: NearbyMetar? = null
+) : NearbyMetarClient {
+    var calls: Int = 0
+        private set
+    var lastPoint: MapPoint? = null
+        private set
+
+    override suspend fun getNearbyMetar(latitude: Double, longitude: Double, radiusKm: Double): Result<NearbyMetar?> {
+        calls += 1
+        lastPoint = MapPoint(latitude, longitude)
+        return Result.success(metar)
     }
 }
 

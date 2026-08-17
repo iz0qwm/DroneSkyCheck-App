@@ -49,6 +49,18 @@ data class TrafficTarget(
     val objectType: String? = null
 )
 
+enum class TrafficFeedType(
+    val label: String
+) {
+    ADSB("ADS-B"),
+    FANET("FANET"),
+    FLARM("FLARM"),
+    FREEFLIGHT("FreeFlight"),
+    UNKNOWN("Non classificato");
+
+    companion object
+}
+
 enum class TrafficTargetKind {
     AIRCRAFT,
     HELICOPTER,
@@ -222,6 +234,60 @@ fun TrafficTarget.trafficTargetKind(): TrafficTargetKind =
         else -> TrafficTargetKind.AIRCRAFT
     }
 
+fun TrafficTarget.trafficFeedType(): TrafficFeedType {
+    val tokens = trafficClassificationTokens()
+    return when {
+        tokens.any { it.isFreeFlightToken() } -> TrafficFeedType.FREEFLIGHT
+        tokens.any { it.isFanetToken() } -> TrafficFeedType.FANET
+        tokens.any { it.isFlarmToken() } -> TrafficFeedType.FLARM
+        tokens.any { it.isAdsbToken() } -> TrafficFeedType.ADSB
+        else -> TrafficFeedType.UNKNOWN
+    }
+}
+
+private fun TrafficTarget.trafficClassificationTokens(): List<String> =
+    buildList {
+        add(id)
+        listOfNotNull(
+            provider,
+            source,
+            objectType,
+            identifiers.icao24,
+            identifiers.sourceId
+        ).forEach(::add)
+        sources.forEach { trafficSource ->
+            listOfNotNull(trafficSource.provider, trafficSource.source).forEach(::add)
+        }
+        provenance?.sources?.forEach { trafficSource ->
+            listOfNotNull(trafficSource.provider, trafficSource.source).forEach(::add)
+        }
+        provenance?.contributions?.forEach { contribution ->
+            listOfNotNull(
+                contribution.id,
+                contribution.provider,
+                contribution.source,
+                contribution.sourceId
+            ).forEach(::add)
+        }
+    }.map { it.normalizedTrafficToken() }
+
+private fun String.isFreeFlightToken(): Boolean =
+    normalizedTrafficToken() in setOf("freeflight", "free flight")
+
+private fun String.isFanetToken(): Boolean =
+    normalizedTrafficToken() == "fanet"
+
+private fun String.isFlarmToken(): Boolean {
+    val normalized = normalizedTrafficToken()
+    return normalized == "flarm" || normalized.startsWith("flr")
+}
+
+private fun String.isAdsbToken(): Boolean {
+    val normalized = normalizedTrafficToken()
+    return normalized in setOf("adsb", "ads b", "opensky", "open sky", "airplaneslive", "airplanes live", "adsblol", "adsb lol") ||
+        startsWith("icao:")
+}
+
 private fun TrafficTarget.isDroneTrafficTarget(): Boolean =
     aircraft.category.isAdsbUavCategory() ||
         droneTrafficHints().any { it.hasDroneTrafficHint() }
@@ -263,9 +329,7 @@ private fun TrafficTarget.droneTrafficHints(): List<String> =
     }
 
 private fun String.hasDroneTrafficHint(): Boolean {
-    val normalized = lowercase(Locale.US)
-        .replace("_", " ")
-        .replace("-", " ")
+    val normalized = normalizedTrafficToken()
     return DroneTrafficKeywords.any { keyword -> normalized.contains(keyword) }
 }
 
@@ -282,6 +346,13 @@ private fun String?.hasHelicopterTrafficHint(): Boolean {
         ?: return false
     return HelicopterTrafficKeywords.any { keyword -> normalized.contains(keyword) }
 }
+
+private fun String.normalizedTrafficToken(): String =
+    trim()
+        .lowercase(Locale.US)
+        .replace("_", " ")
+        .replace("-", " ")
+        .replace(Regex("\\s+"), " ")
 
 private fun String?.normalizedTrafficCode(): String? =
     this

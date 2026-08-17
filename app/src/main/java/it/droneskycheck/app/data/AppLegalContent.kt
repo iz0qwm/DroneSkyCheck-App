@@ -49,26 +49,19 @@ object AppExternalLinks {
 }
 
 object AppReleaseNotes {
-    // Update this section whenever app/build.gradle.kts versionCode changes.
+    // When versionName changes, reset this section for the new version and collect only that version's changes.
     val Current = ReleaseNotes(
-        versionName = "3.0",
-        versionCode = 20,
-        title = "Prima versione pubblica di Drone Sky Check 3.0",
-        intro = "Questa versione raccoglie il lavoro fatto per preparare Drone Sky Check alla prima distribuzione piu ampia.",
+        versionName = "3.1",
+        versionCode = 21,
+        title = "Sviluppo Drone Sky Check 3.1",
+        intro = "Questa sezione raccoglie le modifiche introdotte durante lo sviluppo della versione 3.1.",
         highlights = listOf(
-            "Nuova schermata Impostazioni piu semplice, con sezioni Schermo e Legale e informazioni.",
-            "Preferenza tema: Sistema, Chiaro e Scuro, salvata localmente e applicata a tutta l'app.",
-            "Impostazione Testo piu grande mantenuta e integrata nella nuova sezione Schermo.",
-            "Nuove finestre informative coerenti per Informazioni legali, Link e Community, Contribuzioni e Cosa c'e di nuovo.",
-            "Condizioni d'uso, Privacy, Disclaimer, Restrizioni operative e Licenze di terze parti raccolte in un unico punto.",
-            "Nuova lista Link e Community con sito web, mappa web, YouTube, TikTok, Drone Pilots Team e supporto al progetto.",
-            "Nuova sezione Contribuzioni con ringraziamenti a Drone Pilots Team, tester e utenti che inviano feedback.",
-            "Manuale Drone Sky Check e Tour guidato accessibili dalla sezione Legale e informazioni.",
-            "Finestra Informazioni app della Mappa UAS aggiornata con stato app, dati Zone UAS, accessibilita e novita di versione.",
-            "Miglioramenti alla leggibilita, agli spazi, ai touch target e allo scrolling con testo grande.",
-            "Audit privacy del codice Android: nessun Firebase Analytics, Crashlytics, SDK pubblicitario o account Drone Sky Check rilevato nelle dipendenze dirette.",
-            "Gestione centralizzata dei link esterni, aperti tramite browser o app compatibile del dispositivo.",
-            "Mantenimento delle preferenze e dei dati locali esistenti, inclusi profilo, droni, attestati, operatore UAS e bozze autorizzazioni."
+            "Traffico sulla mappa distinto per ADS-B, FANET, FLARM e FreeFlight quando la sorgente normalizzata lo permette.",
+            "Nuovi filtri locali Traffic Awareness per attivare o nascondere ADS-B, FANET, FLARM e FreeFlight.",
+            "Nuovo pulsante Meteo sulla mappa, basato sul punto selezionato e non sulla posizione GPS.",
+            "Pannello meteo compatto con vento, direzione, raffiche, temperatura, stato meteo e METAR vicino quando disponibile entro circa 20 km.",
+            "Vettore di movimento davanti ai target, calcolato da heading/traccia e ground speed con proiezione temporale limitata.",
+            "Quota AGL in metri sotto le icone traffico quando il dato normalizzato e' disponibile."
         )
     )
 }

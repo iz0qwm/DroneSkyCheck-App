@@ -98,7 +98,7 @@ fun uasDatasetInfoPresentation(
             "Dati Zone UAS disponibili"
         },
         cacheLabel = when {
-            degraded -> "Ultima copia disponibile"
+            degraded -> "Dati caricati dalla cache locale"
             updates?.degraded == true -> "Metadata dataset caricati dalla cache locale"
             else -> null
         },

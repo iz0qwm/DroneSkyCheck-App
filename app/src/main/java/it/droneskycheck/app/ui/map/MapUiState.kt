@@ -10,13 +10,16 @@ import it.droneskycheck.app.data.flight.FlightLightPreference
 import it.droneskycheck.app.data.flight.FlightOpportunityMode
 import it.droneskycheck.app.data.flight.FlightOpportunityResult
 import it.droneskycheck.app.data.flight.FlightOpportunityStatus
+import it.droneskycheck.app.data.filterableTypes
 import it.droneskycheck.app.data.help.ActiveHelpOnboarding
 import it.droneskycheck.app.data.help.HelpManifest
 import it.droneskycheck.app.data.traffic.TrafficAwarenessState
 import it.droneskycheck.app.data.traffic.TrafficAssessment
+import it.droneskycheck.app.data.traffic.TrafficFeedType
 import it.droneskycheck.app.data.traffic.TrafficTarget
 import it.droneskycheck.app.data.weather.WeatherAssessment
 import it.droneskycheck.app.data.weather.WeatherForecast
+import it.droneskycheck.app.data.weather.NearbyMetar
 import it.droneskycheck.app.map.DscLayerCategory
 
 data class MapUiState(
@@ -41,6 +44,7 @@ data class MapUiState(
     val isWeatherAnalysisLoading: Boolean = false,
     val weatherForecast: WeatherForecast? = null,
     val weatherAssessment: WeatherAssessment? = null,
+    val nearbyMetar: NearbyMetar? = null,
     val weatherError: String? = null,
     val trafficAwareness: TrafficAwarenessState = TrafficAwarenessState(),
     val trafficAwarenessCenter: MapPoint? = null,
@@ -50,6 +54,7 @@ data class MapUiState(
     val trafficAlertSoundEnabled: Boolean = true,
     val trafficAlertVibrationEnabled: Boolean = true,
     val highAltitudeTrafficAlertEnabled: Boolean = false,
+    val trafficFeedFilters: Map<TrafficFeedType, Boolean> = TrafficFeedType.filterableTypes.associateWith { true },
     val isTrafficAlertSettingsSheetVisible: Boolean = false,
     val droneFleet: List<LocalDrone> = emptyList(),
     val selectedDrone: LocalDrone? = null,

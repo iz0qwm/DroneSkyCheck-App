@@ -4,6 +4,7 @@ import it.droneskycheck.app.data.traffic.TrafficAircraft
 import it.droneskycheck.app.data.traffic.TrafficAltitude
 import it.droneskycheck.app.data.traffic.TrafficAssessment
 import it.droneskycheck.app.data.traffic.TrafficCalculationConfidence
+import it.droneskycheck.app.data.traffic.TrafficFeedType
 import it.droneskycheck.app.data.traffic.TrafficIdentifiers
 import it.droneskycheck.app.data.traffic.TrafficMotion
 import it.droneskycheck.app.data.traffic.TrafficPosition
@@ -81,6 +82,9 @@ class TrafficAwarenessMapFeaturesTest {
     @Test
     fun layerIdsAreConsistentWithInstallAndUpdateNames() {
         assertEquals("traffic-awareness-source", MapLayerIds.TRAFFIC_AWARENESS_SOURCE_ID)
+        assertEquals("traffic-awareness-marker-layer", MapLayerIds.TRAFFIC_AWARENESS_MARKER_LAYER_ID)
+        assertEquals("traffic-awareness-glyph-source", MapLayerIds.TRAFFIC_AWARENESS_GLYPH_SOURCE_ID)
+        assertEquals("traffic-awareness-glyph-layer", MapLayerIds.TRAFFIC_AWARENESS_GLYPH_LAYER_ID)
         assertEquals("traffic-awareness-symbol-layer", MapLayerIds.TRAFFIC_AWARENESS_SYMBOL_LAYER_ID)
         assertEquals("traffic-awareness-attention-halo-layer", MapLayerIds.TRAFFIC_AWARENESS_ATTENTION_HALO_LAYER_ID)
         assertEquals("traffic-awareness-radius-source", MapLayerIds.TRAFFIC_AWARENESS_RADIUS_SOURCE_ID)
@@ -284,6 +288,71 @@ class TrafficAwarenessMapFeaturesTest {
     }
 
     @Test
+    fun geoJsonClassifiesReliableTrafficFeedTypes() {
+        val collection = trafficTargetsFeatureCollection(
+            listOf(
+                trafficTarget(id = "icao:3009bc", provider = "opensky", source = "OpenSky"),
+                trafficTarget(id = "ogn:fanet", provider = "OGN", source = "FANET"),
+                trafficTarget(id = "ogn:flarm", provider = "OGN", source = "FLARM"),
+                trafficTarget(id = "ogn:freeflight", provider = "OGN", source = "FREEFLIGHT")
+            )
+        )
+        val types = collection.features().orEmpty()
+            .map { it.properties()?.get(TrafficAwarenessMapProperties.FeedType)?.asString }
+
+        assertEquals(
+            listOf(
+                TrafficFeedType.ADSB.name,
+                TrafficFeedType.FANET.name,
+                TrafficFeedType.FLARM.name,
+                TrafficFeedType.FREEFLIGHT.name
+            ),
+            types
+        )
+    }
+
+    @Test
+    fun altitudeLabelUsesAglMetersOnly() {
+        val labeled = trafficTargetsFeatureCollection(
+            listOf(trafficTarget(id = "traffic:agl", aglM = 849.6))
+        ).features().orEmpty().single()
+        val unlabeled = trafficTargetsFeatureCollection(
+            listOf(trafficTarget(id = "traffic:no-agl", geoM = 1_000.0, aglM = null))
+        ).features().orEmpty().single()
+
+        assertEquals("850 m", labeled.properties()?.get(TrafficAwarenessMapProperties.AltitudeLabel)?.asString)
+        assertFalse(unlabeled.properties()?.has(TrafficAwarenessMapProperties.AltitudeLabel) == true)
+    }
+
+    @Test
+    fun futureVectorUsesSpeedAndTrackAndSkipsMissingMotion() {
+        val collection = trafficDirectionVectorFeatureCollection(
+            listOf(
+                trafficTarget(id = "moving", speedMps = 20.0, trackDeg = 90.0),
+                trafficTarget(id = "missing-speed", speedMps = null, trackDeg = 90.0),
+                trafficTarget(id = "missing-heading", speedMps = 20.0, trackDeg = null, headingDeg = null)
+            ),
+            projectionSeconds = 45.0
+        )
+
+        val features = collection.features().orEmpty()
+        assertEquals(1, features.size)
+        assertEquals("moving", features.single().properties()?.get(TrafficAwarenessMapProperties.TargetId)?.asString)
+    }
+
+    @Test
+    fun aircraftGlyphUsesLineSegmentsForVisibleFallback() {
+        val features = trafficAircraftGlyphFeatureCollection(
+            listOf(trafficTarget(id = "moving", trackDeg = 90.0))
+        ).features().orEmpty()
+
+        assertEquals(3, features.size)
+        assertTrue(features.all {
+            it.properties()?.get(TrafficAwarenessMapProperties.TargetId)?.asString == "moving"
+        })
+    }
+
+    @Test
     fun highAltitudeTargetIsNotFiltered() {
         val collection = trafficTargetsFeatureCollection(
             targets = listOf(
@@ -320,6 +389,7 @@ private fun trafficTarget(
     source: String? = "OpenSky",
     trackDeg: Double? = 0.0,
     headingDeg: Double? = null,
+    speedMps: Double? = null,
     category: String? = null,
     aircraftType: String? = null,
     geoM: Double? = null,
@@ -344,7 +414,7 @@ private fun trafficTarget(
             sourceReference = null
         ),
         motion = TrafficMotion(
-            groundSpeedMps = null,
+            groundSpeedMps = speedMps,
             verticalRateMps = null,
             trackDeg = trackDeg,
             headingDeg = headingDeg
