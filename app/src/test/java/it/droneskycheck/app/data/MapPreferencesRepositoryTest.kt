@@ -58,4 +58,15 @@ class MapPreferencesRepositoryTest {
 
         assertTrue(preferences.isLargeTextEnabled())
     }
+
+    @Test
+    fun mapDarkeningToggleDefaultsToOffAndPersistsLocally() {
+        val preferences = InMemoryMapPreferences()
+
+        assertFalse(preferences.isMapDarkeningEnabled())
+
+        preferences.setMapDarkeningEnabled(true)
+
+        assertTrue(preferences.isMapDarkeningEnabled())
+    }
 }

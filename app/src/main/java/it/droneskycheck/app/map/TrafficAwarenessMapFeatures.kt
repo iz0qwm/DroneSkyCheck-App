@@ -1,6 +1,7 @@
 package it.droneskycheck.app.map
 
 import it.droneskycheck.app.data.DscLogger
+import it.droneskycheck.app.data.traffic.TrafficAltitude
 import it.droneskycheck.app.data.traffic.TrafficAwarenessDefaults
 import it.droneskycheck.app.data.traffic.TrafficAwarenessLogTag
 import it.droneskycheck.app.data.traffic.TrafficAssessment
@@ -38,7 +39,6 @@ object TrafficAwarenessMapProperties {
     const val AltitudeBand = "altitudeBand"
     const val TargetKind = "targetKind"
     const val FeedType = "feedType"
-    const val IconImage = "iconImage"
     const val AltitudeLabel = "altitudeLabel"
 }
 
@@ -74,7 +74,6 @@ fun trafficTargetsFeatureCollection(
             addStringProperty(TrafficAwarenessMapProperties.AltitudeBand, target.trafficAltitudeBand().name)
             addStringProperty(TrafficAwarenessMapProperties.TargetKind, target.trafficTargetKind().name)
             addStringProperty(TrafficAwarenessMapProperties.FeedType, target.trafficFeedType().name)
-            addStringProperty(TrafficAwarenessMapProperties.IconImage, target.trafficIconImageId())
             target.mapAltitudeLabel()?.let {
                 addStringProperty(TrafficAwarenessMapProperties.AltitudeLabel, it)
             }
@@ -99,12 +98,12 @@ fun trafficDirectionVectorFeatureCollection(
     projectionSeconds: Double = TRAFFIC_VECTOR_PROJECTION_SECONDS
 ): FeatureCollection {
     val features = targets.mapNotNull { target ->
-        val futurePosition = target.projectedFuturePosition(projectionSeconds) ?: return@mapNotNull null
+        val vector = target.projectedVectorFromGlyphNose(projectionSeconds) ?: return@mapNotNull null
         Feature.fromGeometry(
             org.maplibre.geojson.LineString.fromLngLats(
                 listOf(
-                    Point.fromLngLat(target.position.lon, target.position.lat),
-                    Point.fromLngLat(futurePosition.lon, futurePosition.lat)
+                    vector.start,
+                    vector.end
                 )
             )
         ).apply {
@@ -117,18 +116,16 @@ fun trafficDirectionVectorFeatureCollection(
     return FeatureCollection.fromFeatures(features)
 }
 
-fun trafficAircraftGlyphFeatureCollection(targets: List<TrafficTarget>): FeatureCollection {
+fun trafficAircraftGlyphFeatureCollection(
+    targets: List<TrafficTarget>,
+    assessments: Map<String, TrafficAssessment> = emptyMap()
+): FeatureCollection {
     val features = targets.flatMap { target ->
         if (!target.position.lat.isFinite() || !target.position.lon.isFinite()) {
             return@flatMap emptyList()
         }
         val bearingDeg = target.mapRotationDeg()
-        val segments = listOf(
-            TrafficGlyphSegment(TrafficGlyphPoint(0.0, 220.0), TrafficGlyphPoint(0.0, -150.0)),
-            TrafficGlyphSegment(TrafficGlyphPoint(-165.0, 20.0), TrafficGlyphPoint(165.0, 20.0)),
-            TrafficGlyphSegment(TrafficGlyphPoint(-88.0, -125.0), TrafficGlyphPoint(88.0, -125.0))
-        )
-        segments.map { segment ->
+        target.trafficGlyphShape().segments.map { segment ->
             Feature.fromGeometry(
                 LineString.fromLngLats(
                     listOf(
@@ -138,10 +135,35 @@ fun trafficAircraftGlyphFeatureCollection(targets: List<TrafficTarget>): Feature
                 )
             ).apply {
                 addStringProperty(TrafficAwarenessMapProperties.TargetId, target.id)
+                addStringProperty(
+                    TrafficAwarenessMapProperties.Relevance,
+                    (assessments[target.id]?.relevance ?: TrafficRelevance.INFORMATION).name
+                )
                 addStringProperty(TrafficAwarenessMapProperties.AltitudeBand, target.trafficAltitudeBand().name)
                 addStringProperty(TrafficAwarenessMapProperties.FeedType, target.trafficFeedType().name)
-                addStringProperty(TrafficAwarenessMapProperties.IconImage, target.trafficIconImageId())
             }
+        }
+    }
+    return FeatureCollection.fromFeatures(features)
+}
+
+fun trafficAltitudeLabelFeatureCollection(
+    targets: List<TrafficTarget>
+): FeatureCollection {
+    val features = targets.mapNotNull { target ->
+        if (!target.position.lat.isFinite() || !target.position.lon.isFinite()) {
+            return@mapNotNull null
+        }
+        val label = target.mapAltitudeLabel() ?: return@mapNotNull null
+        val labelPoint = target.position.offsetByGlyphPoint(
+            TrafficGlyphPoint(0.0, -target.trafficGlyphShape().labelBehindMeters),
+            target.mapRotationDeg()
+        )
+        Feature.fromGeometry(labelPoint).apply {
+            addStringProperty(TrafficAwarenessMapProperties.TargetId, target.id)
+            addStringProperty(TrafficAwarenessMapProperties.AltitudeLabel, label)
+            addStringProperty(TrafficAwarenessMapProperties.AltitudeBand, target.trafficAltitudeBand().name)
+            addStringProperty(TrafficAwarenessMapProperties.FeedType, target.trafficFeedType().name)
         }
     }
     return FeatureCollection.fromFeatures(features)
@@ -199,58 +221,13 @@ fun TrafficTarget.trafficAltitudeBand(): TrafficAltitudeBand =
     trafficAltitudeBandForAgl(altitude.aglM)
 
 fun TrafficTarget.mapAltitudeLabel(): String? =
-    altitude.aglM
-        ?.takeIf { it.isFinite() }
+    altitude.mapDisplayAltitudeM()
         ?.roundToInt()
         ?.let { "$it m" }
 
-fun TrafficTarget.trafficIconImageId(): String {
-    val band = trafficAltitudeBand()
-    return when (trafficFeedType()) {
-        TrafficFeedType.ADSB -> when (trafficTargetKind()) {
-            TrafficTargetKind.DRONE -> TrafficMapIconIds.Drone
-            TrafficTargetKind.HELICOPTER -> TrafficMapIconIds.helicopter(band)
-            TrafficTargetKind.AIRCRAFT -> TrafficMapIconIds.aircraft(band)
-        }
-        TrafficFeedType.FANET -> TrafficMapIconIds.feed(TrafficFeedType.FANET, band)
-        TrafficFeedType.FLARM -> TrafficMapIconIds.feed(TrafficFeedType.FLARM, band)
-        TrafficFeedType.FREEFLIGHT -> TrafficMapIconIds.feed(TrafficFeedType.FREEFLIGHT, band)
-        TrafficFeedType.UNKNOWN -> when (trafficTargetKind()) {
-            TrafficTargetKind.DRONE -> TrafficMapIconIds.Drone
-            TrafficTargetKind.HELICOPTER -> TrafficMapIconIds.helicopter(band)
-            TrafficTargetKind.AIRCRAFT -> TrafficMapIconIds.aircraft(band)
-        }
-    }
-}
-
-fun TrafficTarget.projectedFuturePosition(projectionSeconds: Double): MapPoint? {
-    val speedMps = motion.groundSpeedMps?.takeIf { it.isFinite() && it >= MIN_TRAFFIC_VECTOR_SPEED_MPS }
-        ?: return null
-    val bearingDeg = motion.trackDeg?.takeIf { it.isFinite() }
-        ?: motion.headingDeg?.takeIf { it.isFinite() }
-        ?: return null
-    if (!position.lat.isFinite() || !position.lon.isFinite()) return null
-
-    val distanceM = (speedMps * projectionSeconds)
-        .coerceIn(MIN_TRAFFIC_VECTOR_DISTANCE_M, MAX_TRAFFIC_VECTOR_DISTANCE_M)
-    val angularDistance = distanceM / (EARTH_RADIUS_KM * 1_000.0)
-    val bearing = bearingDeg.toRadians()
-    val lat1 = position.lat.toRadians()
-    val lon1 = position.lon.toRadians()
-    val lat2 = asin(
-        sin(lat1) * cos(angularDistance) +
-            cos(lat1) * sin(angularDistance) * cos(bearing)
-    )
-    val lon2 = lon1 + atan2(
-        sin(bearing) * sin(angularDistance) * cos(lat1),
-        cos(angularDistance) - sin(lat1) * sin(lat2)
-    )
-
-    return MapPoint(
-        lat = lat2.toDegrees().coerceIn(-90.0, 90.0),
-        lon = normalizeLongitude(lon2.toDegrees())
-    )
-}
+private fun TrafficAltitude.mapDisplayAltitudeM(): Double? =
+    listOf(aglM, sourceM, geoM, mslM, baroM)
+        .firstOrNull { it?.isFinite() == true }
 
 fun trafficAltitudeBandForAgl(aglM: Double?): TrafficAltitudeBand =
     when {
@@ -277,6 +254,122 @@ private data class TrafficGlyphSegment(
     val end: TrafficGlyphPoint
 )
 
+private data class TrafficGlyphShape(
+    val segments: List<TrafficGlyphSegment>,
+    val vectorStartForwardMeters: Double,
+    val labelBehindMeters: Double
+)
+
+private data class TrafficVectorPoints(
+    val start: Point,
+    val end: Point
+)
+
+private fun TrafficTarget.projectedVectorFromGlyphNose(projectionSeconds: Double): TrafficVectorPoints? {
+    val speedMps = motion.groundSpeedMps?.takeIf { it.isFinite() && it >= MIN_TRAFFIC_VECTOR_SPEED_MPS }
+        ?: return null
+    val bearingDeg = motion.trackDeg?.takeIf { it.isFinite() }
+        ?: motion.headingDeg?.takeIf { it.isFinite() }
+        ?: return null
+    if (!position.lat.isFinite() || !position.lon.isFinite()) return null
+
+    val shape = trafficGlyphShape()
+    val distanceM = (speedMps * projectionSeconds)
+        .coerceIn(MIN_TRAFFIC_VECTOR_DISTANCE_M, MAX_TRAFFIC_VECTOR_DISTANCE_M)
+    val startForward = shape.vectorStartForwardMeters
+    val endForward = max(distanceM, startForward + MIN_TRAFFIC_VECTOR_VISIBLE_LENGTH_M)
+    return TrafficVectorPoints(
+        start = position.offsetByGlyphPoint(TrafficGlyphPoint(0.0, startForward), bearingDeg),
+        end = position.offsetByGlyphPoint(TrafficGlyphPoint(0.0, endForward), bearingDeg)
+    )
+}
+
+private fun TrafficTarget.trafficGlyphShape(): TrafficGlyphShape =
+    when (trafficFeedType()) {
+        TrafficFeedType.FANET -> freeFlightGlyphShape()
+        TrafficFeedType.FLARM -> gliderGlyphShape()
+        TrafficFeedType.FREEFLIGHT -> freeFlightGlyphShape()
+        TrafficFeedType.ADSB,
+        TrafficFeedType.UNKNOWN -> when (trafficTargetKind()) {
+            TrafficTargetKind.DRONE -> droneGlyphShape()
+            TrafficTargetKind.HELICOPTER -> helicopterGlyphShape()
+            TrafficTargetKind.AIRCRAFT -> aircraftGlyphShape()
+        }
+    }
+
+private fun aircraftGlyphShape(): TrafficGlyphShape =
+    TrafficGlyphShape(
+        vectorStartForwardMeters = 290.0,
+        labelBehindMeters = 405.0,
+        segments = listOf(
+            TrafficGlyphSegment(TrafficGlyphPoint(0.0, 285.0), TrafficGlyphPoint(0.0, -220.0)),
+            TrafficGlyphSegment(TrafficGlyphPoint(-245.0, 35.0), TrafficGlyphPoint(245.0, 35.0)),
+            TrafficGlyphSegment(TrafficGlyphPoint(-122.0, -172.0), TrafficGlyphPoint(122.0, -172.0)),
+            TrafficGlyphSegment(TrafficGlyphPoint(-46.0, 206.0), TrafficGlyphPoint(0.0, 285.0)),
+            TrafficGlyphSegment(TrafficGlyphPoint(46.0, 206.0), TrafficGlyphPoint(0.0, 285.0))
+        )
+    )
+
+private fun helicopterGlyphShape(): TrafficGlyphShape =
+    TrafficGlyphShape(
+        vectorStartForwardMeters = 235.0,
+        labelBehindMeters = 385.0,
+        segments = listOf(
+            TrafficGlyphSegment(TrafficGlyphPoint(0.0, 225.0), TrafficGlyphPoint(0.0, -150.0)),
+            TrafficGlyphSegment(TrafficGlyphPoint(-245.0, 82.0), TrafficGlyphPoint(245.0, 82.0)),
+            TrafficGlyphSegment(TrafficGlyphPoint(-170.0, 128.0), TrafficGlyphPoint(170.0, 36.0)),
+            TrafficGlyphSegment(TrafficGlyphPoint(0.0, -130.0), TrafficGlyphPoint(0.0, -278.0)),
+            TrafficGlyphSegment(TrafficGlyphPoint(-58.0, -278.0), TrafficGlyphPoint(58.0, -278.0))
+        )
+    )
+
+private fun droneGlyphShape(): TrafficGlyphShape =
+    TrafficGlyphShape(
+        vectorStartForwardMeters = 195.0,
+        labelBehindMeters = 350.0,
+        segments = listOf(
+            TrafficGlyphSegment(TrafficGlyphPoint(-165.0, 165.0), TrafficGlyphPoint(165.0, -165.0)),
+            TrafficGlyphSegment(TrafficGlyphPoint(165.0, 165.0), TrafficGlyphPoint(-165.0, -165.0)),
+            TrafficGlyphSegment(TrafficGlyphPoint(-210.0, 165.0), TrafficGlyphPoint(-120.0, 165.0)),
+            TrafficGlyphSegment(TrafficGlyphPoint(-165.0, 210.0), TrafficGlyphPoint(-165.0, 120.0)),
+            TrafficGlyphSegment(TrafficGlyphPoint(210.0, 165.0), TrafficGlyphPoint(120.0, 165.0)),
+            TrafficGlyphSegment(TrafficGlyphPoint(165.0, 210.0), TrafficGlyphPoint(165.0, 120.0)),
+            TrafficGlyphSegment(TrafficGlyphPoint(-210.0, -165.0), TrafficGlyphPoint(-120.0, -165.0)),
+            TrafficGlyphSegment(TrafficGlyphPoint(-165.0, -210.0), TrafficGlyphPoint(-165.0, -120.0)),
+            TrafficGlyphSegment(TrafficGlyphPoint(210.0, -165.0), TrafficGlyphPoint(120.0, -165.0)),
+            TrafficGlyphSegment(TrafficGlyphPoint(165.0, -210.0), TrafficGlyphPoint(165.0, -120.0))
+        )
+    )
+
+private fun gliderGlyphShape(): TrafficGlyphShape =
+    TrafficGlyphShape(
+        vectorStartForwardMeters = 245.0,
+        labelBehindMeters = 390.0,
+        segments = listOf(
+            TrafficGlyphSegment(TrafficGlyphPoint(-315.0, 24.0), TrafficGlyphPoint(315.0, 24.0)),
+            TrafficGlyphSegment(TrafficGlyphPoint(0.0, 240.0), TrafficGlyphPoint(0.0, -190.0)),
+            TrafficGlyphSegment(TrafficGlyphPoint(-105.0, -144.0), TrafficGlyphPoint(105.0, -144.0)),
+            TrafficGlyphSegment(TrafficGlyphPoint(-315.0, 24.0), TrafficGlyphPoint(-180.0, -18.0)),
+            TrafficGlyphSegment(TrafficGlyphPoint(315.0, 24.0), TrafficGlyphPoint(180.0, -18.0))
+        )
+    )
+
+private fun freeFlightGlyphShape(): TrafficGlyphShape =
+    TrafficGlyphShape(
+        vectorStartForwardMeters = 230.0,
+        labelBehindMeters = 370.0,
+        segments = listOf(
+            TrafficGlyphSegment(TrafficGlyphPoint(-285.0, 92.0), TrafficGlyphPoint(-148.0, 168.0)),
+            TrafficGlyphSegment(TrafficGlyphPoint(-148.0, 168.0), TrafficGlyphPoint(0.0, 218.0)),
+            TrafficGlyphSegment(TrafficGlyphPoint(0.0, 218.0), TrafficGlyphPoint(148.0, 168.0)),
+            TrafficGlyphSegment(TrafficGlyphPoint(148.0, 168.0), TrafficGlyphPoint(285.0, 92.0)),
+            TrafficGlyphSegment(TrafficGlyphPoint(-150.0, 86.0), TrafficGlyphPoint(0.0, -150.0)),
+            TrafficGlyphSegment(TrafficGlyphPoint(150.0, 86.0), TrafficGlyphPoint(0.0, -150.0)),
+            TrafficGlyphSegment(TrafficGlyphPoint(0.0, 25.0), TrafficGlyphPoint(0.0, -190.0)),
+            TrafficGlyphSegment(TrafficGlyphPoint(-42.0, -82.0), TrafficGlyphPoint(42.0, -82.0))
+        )
+    )
+
 private fun TrafficPosition.offsetByGlyphPoint(point: TrafficGlyphPoint, bearingDeg: Double): Point {
     val bearing = bearingDeg.toRadians()
     val eastMeters = point.rightMeters * cos(bearing) + point.forwardMeters * sin(bearing)
@@ -286,29 +379,9 @@ private fun TrafficPosition.offsetByGlyphPoint(point: TrafficGlyphPoint, bearing
     return Point.fromLngLat(normalizeLongitude(lon), lat.coerceIn(-90.0, 90.0))
 }
 
-object TrafficMapIconIds {
-    const val Drone = "dsc-traffic-awareness-drone"
-
-    fun aircraft(band: TrafficAltitudeBand): String =
-        "dsc-traffic-awareness-aircraft-${band.iconSuffix()}"
-
-    fun helicopter(band: TrafficAltitudeBand): String =
-        "dsc-traffic-awareness-helicopter-${band.iconSuffix()}"
-
-    fun feed(type: TrafficFeedType, band: TrafficAltitudeBand): String =
-        "dsc-traffic-awareness-${type.name.lowercase()}-${band.iconSuffix()}"
-}
-
-private fun TrafficAltitudeBand.iconSuffix(): String =
-    when (this) {
-        TrafficAltitudeBand.VERY_LOW -> "very-low"
-        TrafficAltitudeBand.LOW -> "low"
-        TrafficAltitudeBand.HIGH -> "high"
-        TrafficAltitudeBand.UNKNOWN -> "unknown"
-    }
-
 private const val EARTH_RADIUS_KM = 6371.0
 private const val TRAFFIC_VECTOR_PROJECTION_SECONDS = 45.0
 private const val MIN_TRAFFIC_VECTOR_SPEED_MPS = 1.0
 private const val MIN_TRAFFIC_VECTOR_DISTANCE_M = 25.0
+private const val MIN_TRAFFIC_VECTOR_VISIBLE_LENGTH_M = 150.0
 private const val MAX_TRAFFIC_VECTOR_DISTANCE_M = 3_000.0

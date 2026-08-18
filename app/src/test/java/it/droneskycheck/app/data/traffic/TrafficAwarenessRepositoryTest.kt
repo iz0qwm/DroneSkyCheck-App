@@ -245,6 +245,7 @@ class TrafficAwarenessRepositoryTest {
         assertTrue(client.lastUrl.contains("lat=41.9"))
         assertTrue(client.lastUrl.contains("lon=12.5"))
         assertTrue(client.lastUrl.contains("radius=20.0"))
+        assertTrue(client.lastUrl.contains("disabledProviders=airplanes.lol%2Cadsb.lol"))
     }
 
     private fun repositoryWith(client: FakeTrafficClient): TrafficAwarenessRepository =

@@ -485,7 +485,8 @@ fun MapScreen(
             authorizationAreaPoints = currentDraft?.operationData?.areaPoints.orEmpty().map { MapPoint(it.lat, it.lon) },
             authorizationAreaClosed = currentDraft?.operationData?.areaClosed == true,
             trafficAwareness = uiState.trafficAwareness,
-            trafficAssessments = uiState.trafficAssessments,
+            trafficAssessments = uiState.trafficVisualAssessments,
+            mapDarkeningEnabled = uiState.isMapDarkeningEnabled,
             userLocation = uiState.userLocation,
             shouldCenterOnUserLocation = uiState.shouldCenterOnUserLocation,
             cameraFocusPoint = pendingCameraFocusPoint,
@@ -770,6 +771,8 @@ fun MapScreen(
                 helpRefreshMessage = uiState.helpManifestRefreshMessage,
                 largeTextEnabled = uiState.isLargeTextEnabled,
                 onLargeTextEnabledChanged = viewModel::onLargeTextEnabledChanged,
+                mapDarkeningEnabled = uiState.isMapDarkeningEnabled,
+                onMapDarkeningEnabledChanged = viewModel::onMapDarkeningEnabledChanged,
                 appThemeMode = appThemeMode,
                 onAppThemeModeChanged = onAppThemeModeChanged,
                 onRefreshHelp = viewModel::refreshHelpManifestNow,
@@ -1762,6 +1765,8 @@ private fun TrafficAlertSettingsBottomSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .heightIn(max = ZoneSheetMaxHeight)
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {

@@ -31,12 +31,15 @@ class TrafficAwarenessRepository(
         runCatching {
             validateQuery(lat, lon, radiusKm)
 
-            val url = "$endpointUrl?lat=${encode(lat)}&lon=${encode(lon)}&radius=${encode(radiusKm)}"
+            val disabledProviders = TemporarilyDisabledProviders.joinToString(",")
+            val url = "$endpointUrl?lat=${encode(lat)}&lon=${encode(lon)}&radius=${encode(radiusKm)}" +
+                "&disabledProviders=${encode(disabledProviders)}"
             DscLogger.trace(
                 TrafficAwarenessLogTag,
                 "HTTP request start method=GET endpoint=appTrafficAwareness " +
                     "lat=${lat.coarseTraffic()} lon=${lon.coarseTraffic()} " +
-                    "radiusKm=${radiusKm.coarseTraffic(0)} timeoutMillis=$TimeoutMillis"
+                    "radiusKm=${radiusKm.coarseTraffic(0)} disabledProviders=$disabledProviders " +
+                    "timeoutMillis=$TimeoutMillis"
             )
             val startedAt = System.currentTimeMillis()
             val response = httpClient.get(
@@ -102,9 +105,13 @@ class TrafficAwarenessRepository(
     private fun encode(value: Double): String =
         URLEncoder.encode(value.toString(), Charsets.UTF_8.name())
 
+    private fun encode(value: String): String =
+        URLEncoder.encode(value, Charsets.UTF_8.name())
+
     private companion object {
         const val TimeoutMillis = 10_000
         const val MaxRadiusKm = 100.0
+        val TemporarilyDisabledProviders = listOf("airplanes.lol", "adsb.lol")
     }
 }
 

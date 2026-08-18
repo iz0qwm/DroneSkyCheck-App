@@ -631,6 +631,7 @@ class MapViewModel(
             isOperationalReportExpanded = false,
             weatherError = null,
             trafficAssessments = if (keepTrafficSnapshot) currentState.trafficAssessments else emptyMap(),
+            trafficVisualAssessments = if (keepTrafficSnapshot) currentState.trafficVisualAssessments else emptyMap(),
             selectedTrafficTarget = null
         )
 
@@ -837,6 +838,7 @@ class MapViewModel(
             trafficAwareness = TrafficAwarenessState(enabled = false),
             trafficAwarenessCenter = null,
             trafficAssessments = emptyMap(),
+            trafficVisualAssessments = emptyMap(),
             selectedTrafficTarget = null
         )
     }
@@ -859,6 +861,7 @@ class MapViewModel(
             ),
             trafficAwarenessCenter = point,
             trafficAssessments = if (clearSnapshot) emptyMap() else _uiState.value.trafficAssessments,
+            trafficVisualAssessments = if (clearSnapshot) emptyMap() else _uiState.value.trafficVisualAssessments,
             selectedTrafficTarget = if (clearSnapshot) null else _uiState.value.selectedTrafficTarget
         )
         DscLogger.debug(
@@ -930,12 +933,21 @@ class MapViewModel(
                 targets = visibleResponse.traffic.targets,
                 enabled = _uiState.value.highAltitudeTrafficAlertEnabled
             )
+            val rawAttentionCount = rawAssessments.values.count { it.relevance == TrafficRelevance.ATTENTION }
+            val alertAttentionCount = assessments.values.count { it.relevance == TrafficRelevance.ATTENTION }
             assessments.forEach { (id, assessment) ->
                 DscLogger.trace(
                     TrafficAwarenessLogTag,
                     "assessment id=$id relevance=${assessment.relevance} " +
                         "distance=${assessment.currentDistanceM?.toInt()} " +
                         "cpa=${assessment.cpaDistanceM?.toInt()} tcpa=${assessment.timeToCpaSec?.toInt()}"
+                )
+            }
+            if (rawAttentionCount > 0 || alertAttentionCount > 0) {
+                DscLogger.debug(
+                    TrafficAwarenessLogTag,
+                    "attention visual=$rawAttentionCount alert=$alertAttentionCount " +
+                        "highAltitudeEnabled=${_uiState.value.highAltitudeTrafficAlertEnabled}"
                 )
             }
             if (!_uiState.value.trafficAwareness.enabled || _uiState.value.trafficAwarenessCenter != point) {
@@ -959,6 +971,7 @@ class MapViewModel(
                     lastUpdatedAt = nowMillis
                 ),
                 trafficAssessments = assessments,
+                trafficVisualAssessments = rawAssessments,
                 selectedTrafficTarget = _uiState.value.selectedTrafficTarget?.let { selected ->
                     visibleResponse.traffic.targets.firstOrNull { it.id == selected.id }
                 }
@@ -1049,6 +1062,11 @@ class MapViewModel(
         _uiState.value = _uiState.value.copy(isLargeTextEnabled = enabled)
     }
 
+    fun onMapDarkeningEnabledChanged(enabled: Boolean) {
+        mapPreferences.setMapDarkeningEnabled(enabled)
+        _uiState.value = _uiState.value.copy(isMapDarkeningEnabled = enabled)
+    }
+
     private fun trafficAwarenessStopReason(point: MapPoint): String =
         when {
             !_uiState.value.trafficAwareness.enabled -> "disabled"
@@ -1058,7 +1076,8 @@ class MapViewModel(
 
     private fun loadAccessibilityPreferences() {
         _uiState.value = _uiState.value.copy(
-            isLargeTextEnabled = mapPreferences.isLargeTextEnabled()
+            isLargeTextEnabled = mapPreferences.isLargeTextEnabled(),
+            isMapDarkeningEnabled = mapPreferences.isMapDarkeningEnabled()
         )
     }
 
@@ -1108,7 +1127,8 @@ class MapViewModel(
             trafficAssessments = rawAssessments.withHighAltitudeAircraftFilter(
                 targets = targets,
                 enabled = _uiState.value.highAltitudeTrafficAlertEnabled
-            )
+            ),
+            trafficVisualAssessments = rawAssessments
         )
     }
 
@@ -1680,6 +1700,7 @@ class MapViewModel(
             flightOpportunityResult = null,
             weatherError = null,
             trafficAssessments = if (trafficEnabled) _uiState.value.trafficAssessments else emptyMap(),
+            trafficVisualAssessments = if (trafficEnabled) _uiState.value.trafficVisualAssessments else emptyMap(),
             selectedTrafficTarget = _uiState.value.selectedTrafficTarget
         )
     }

@@ -98,6 +98,8 @@ fun SettingsSheet(
     helpRefreshMessage: String?,
     largeTextEnabled: Boolean,
     onLargeTextEnabledChanged: (Boolean) -> Unit,
+    mapDarkeningEnabled: Boolean,
+    onMapDarkeningEnabledChanged: (Boolean) -> Unit,
     appThemeMode: AppThemeMode,
     onAppThemeModeChanged: (AppThemeMode) -> Unit,
     onRefreshHelp: () -> Unit,
@@ -152,6 +154,8 @@ fun SettingsSheet(
                 SettingsPage.Display -> DisplaySettingsPage(
                     largeTextEnabled = largeTextEnabled,
                     onLargeTextEnabledChanged = onLargeTextEnabledChanged,
+                    mapDarkeningEnabled = mapDarkeningEnabled,
+                    onMapDarkeningEnabledChanged = onMapDarkeningEnabledChanged,
                     appThemeMode = appThemeMode,
                     onAppThemeModeChanged = onAppThemeModeChanged
                 )
@@ -254,6 +258,8 @@ private fun SettingsHome(
 private fun DisplaySettingsPage(
     largeTextEnabled: Boolean,
     onLargeTextEnabledChanged: (Boolean) -> Unit,
+    mapDarkeningEnabled: Boolean,
+    onMapDarkeningEnabledChanged: (Boolean) -> Unit,
     appThemeMode: AppThemeMode,
     onAppThemeModeChanged: (AppThemeMode) -> Unit
 ) {
@@ -282,6 +288,35 @@ private fun DisplaySettingsPage(
             Switch(
                 checked = largeTextEnabled,
                 onCheckedChange = onLargeTextEnabledChanged
+            )
+        }
+    }
+
+    SettingsSection(title = "Mappa") {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 72.dp)
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            SettingsIcon(Icons.Default.Map)
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    "Mappa piu scura",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    "Riduce la luminosita della base cartografica per far risaltare traffico e quote.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(
+                checked = mapDarkeningEnabled,
+                onCheckedChange = onMapDarkeningEnabledChanged
             )
         }
     }

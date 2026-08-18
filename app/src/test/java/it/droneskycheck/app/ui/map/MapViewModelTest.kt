@@ -1243,6 +1243,10 @@ class MapViewModelTest {
             it.droneskycheck.app.data.traffic.TrafficRelevance.MONITOR,
             viewModel.uiState.value.trafficAssessments["traffic:high-aircraft"]?.relevance
         )
+        assertEquals(
+            it.droneskycheck.app.data.traffic.TrafficRelevance.ATTENTION,
+            viewModel.uiState.value.trafficVisualAssessments["traffic:high-aircraft"]?.relevance
+        )
 
         viewModel.onHighAltitudeTrafficAlertEnabledChanged(true)
         waitUntil {
@@ -1252,6 +1256,10 @@ class MapViewModelTest {
         }
 
         assertTrue(viewModel.uiState.value.highAltitudeTrafficAlertEnabled)
+        assertEquals(
+            it.droneskycheck.app.data.traffic.TrafficRelevance.ATTENTION,
+            viewModel.uiState.value.trafficVisualAssessments["traffic:high-aircraft"]?.relevance
+        )
         scope.cancel()
     }
 

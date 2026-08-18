@@ -8,6 +8,8 @@ interface MapPreferences {
     fun setWeatherAnalysisEnabled(enabled: Boolean)
     fun isLargeTextEnabled(): Boolean
     fun setLargeTextEnabled(enabled: Boolean)
+    fun isMapDarkeningEnabled(): Boolean
+    fun setMapDarkeningEnabled(enabled: Boolean)
     fun getAppThemeMode(): AppThemeMode
     fun setAppThemeMode(mode: AppThemeMode)
     fun isTrafficAlertSoundEnabled(): Boolean
@@ -42,6 +44,15 @@ class MapPreferencesRepository(
     override fun setLargeTextEnabled(enabled: Boolean) {
         preferences.edit()
             .putBoolean(KeyLargeTextEnabled, enabled)
+            .apply()
+    }
+
+    override fun isMapDarkeningEnabled(): Boolean =
+        preferences.getBoolean(KeyMapDarkeningEnabled, false)
+
+    override fun setMapDarkeningEnabled(enabled: Boolean) {
+        preferences.edit()
+            .putBoolean(KeyMapDarkeningEnabled, enabled)
             .apply()
     }
 
@@ -103,6 +114,7 @@ class MapPreferencesRepository(
         const val PreferencesName = "dsc_map_preferences"
         const val KeyWeatherAnalysisEnabled = "weather_analysis_enabled"
         const val KeyLargeTextEnabled = "large_text_enabled"
+        const val KeyMapDarkeningEnabled = "map_darkening_enabled"
         const val KeyAppThemeMode = "app_theme_mode"
         const val KeyTrafficAlertSoundEnabled = "traffic_alert_sound_enabled"
         const val KeyTrafficAlertVibrationEnabled = "traffic_alert_vibration_enabled"
@@ -114,6 +126,7 @@ class MapPreferencesRepository(
 class InMemoryMapPreferences(
     initialWeatherAnalysisEnabled: Boolean = false,
     initialLargeTextEnabled: Boolean = false,
+    initialMapDarkeningEnabled: Boolean = false,
     initialAppThemeMode: AppThemeMode = AppThemeMode.System,
     initialTrafficAlertSoundEnabled: Boolean = true,
     initialTrafficAlertVibrationEnabled: Boolean = true,
@@ -123,6 +136,7 @@ class InMemoryMapPreferences(
 ) : MapPreferences {
     private var weatherAnalysisEnabled = initialWeatherAnalysisEnabled
     private var largeTextEnabled = initialLargeTextEnabled
+    private var mapDarkeningEnabled = initialMapDarkeningEnabled
     private var appThemeMode = initialAppThemeMode
     private var trafficAlertSoundEnabled = initialTrafficAlertSoundEnabled
     private var trafficAlertVibrationEnabled = initialTrafficAlertVibrationEnabled
@@ -140,6 +154,12 @@ class InMemoryMapPreferences(
 
     override fun setLargeTextEnabled(enabled: Boolean) {
         largeTextEnabled = enabled
+    }
+
+    override fun isMapDarkeningEnabled(): Boolean = mapDarkeningEnabled
+
+    override fun setMapDarkeningEnabled(enabled: Boolean) {
+        mapDarkeningEnabled = enabled
     }
 
     override fun getAppThemeMode(): AppThemeMode = appThemeMode

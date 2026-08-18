@@ -20,6 +20,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.maplibre.geojson.LineString
 import org.maplibre.geojson.Point
 import org.maplibre.geojson.Polygon
 
@@ -82,10 +83,11 @@ class TrafficAwarenessMapFeaturesTest {
     @Test
     fun layerIdsAreConsistentWithInstallAndUpdateNames() {
         assertEquals("traffic-awareness-source", MapLayerIds.TRAFFIC_AWARENESS_SOURCE_ID)
+        assertEquals("traffic-awareness-altitude-label-source", MapLayerIds.TRAFFIC_AWARENESS_ALTITUDE_LABEL_SOURCE_ID)
         assertEquals("traffic-awareness-marker-layer", MapLayerIds.TRAFFIC_AWARENESS_MARKER_LAYER_ID)
         assertEquals("traffic-awareness-glyph-source", MapLayerIds.TRAFFIC_AWARENESS_GLYPH_SOURCE_ID)
+        assertEquals("traffic-awareness-attention-glyph-layer", MapLayerIds.TRAFFIC_AWARENESS_ATTENTION_GLYPH_LAYER_ID)
         assertEquals("traffic-awareness-glyph-layer", MapLayerIds.TRAFFIC_AWARENESS_GLYPH_LAYER_ID)
-        assertEquals("traffic-awareness-symbol-layer", MapLayerIds.TRAFFIC_AWARENESS_SYMBOL_LAYER_ID)
         assertEquals("traffic-awareness-attention-halo-layer", MapLayerIds.TRAFFIC_AWARENESS_ATTENTION_HALO_LAYER_ID)
         assertEquals("traffic-awareness-radius-source", MapLayerIds.TRAFFIC_AWARENESS_RADIUS_SOURCE_ID)
         assertEquals("traffic-awareness-radius-fill-layer", MapLayerIds.TRAFFIC_AWARENESS_RADIUS_FILL_LAYER_ID)
@@ -312,16 +314,34 @@ class TrafficAwarenessMapFeaturesTest {
     }
 
     @Test
-    fun altitudeLabelUsesAglMetersOnly() {
-        val labeled = trafficTargetsFeatureCollection(
+    fun altitudeLabelUsesAglAndFallsBackToAvailableAltitude() {
+        val agl = trafficTargetsFeatureCollection(
             listOf(trafficTarget(id = "traffic:agl", aglM = 849.6))
         ).features().orEmpty().single()
-        val unlabeled = trafficTargetsFeatureCollection(
+        val geo = trafficTargetsFeatureCollection(
             listOf(trafficTarget(id = "traffic:no-agl", geoM = 1_000.0, aglM = null))
         ).features().orEmpty().single()
 
-        assertEquals("850 m", labeled.properties()?.get(TrafficAwarenessMapProperties.AltitudeLabel)?.asString)
-        assertFalse(unlabeled.properties()?.has(TrafficAwarenessMapProperties.AltitudeLabel) == true)
+        assertEquals("850 m", agl.properties()?.get(TrafficAwarenessMapProperties.AltitudeLabel)?.asString)
+        assertEquals("1000 m", geo.properties()?.get(TrafficAwarenessMapProperties.AltitudeLabel)?.asString)
+    }
+
+    @Test
+    fun altitudeLabelsUseDedicatedFeaturesAwayFromAircraftCenter() {
+        val target = trafficTarget(
+            id = "traffic:label",
+            lat = 41.9,
+            lon = 12.5,
+            aglM = 120.0,
+            trackDeg = 0.0
+        )
+
+        val feature = trafficAltitudeLabelFeatureCollection(listOf(target)).features().orEmpty().single()
+        val point = feature.geometry() as Point
+
+        assertEquals("traffic:label", feature.properties()?.get(TrafficAwarenessMapProperties.TargetId)?.asString)
+        assertEquals("120 m", feature.properties()?.get(TrafficAwarenessMapProperties.AltitudeLabel)?.asString)
+        assertTrue(point.latitude() < target.position.lat)
     }
 
     @Test
@@ -338,18 +358,32 @@ class TrafficAwarenessMapFeaturesTest {
         val features = collection.features().orEmpty()
         assertEquals(1, features.size)
         assertEquals("moving", features.single().properties()?.get(TrafficAwarenessMapProperties.TargetId)?.asString)
+        val line = features.single().geometry() as LineString
+        val points = line.coordinates()
+        assertTrue(points.first().longitude() > 12.5)
+        assertTrue(points.last().longitude() > points.first().longitude())
     }
 
     @Test
-    fun aircraftGlyphUsesLineSegmentsForVisibleFallback() {
+    fun trafficGlyphUsesLineSegmentsForVisibleMapIcons() {
         val features = trafficAircraftGlyphFeatureCollection(
-            listOf(trafficTarget(id = "moving", trackDeg = 90.0))
+            listOf(
+                trafficTarget(id = "aircraft", trackDeg = 90.0),
+                trafficTarget(id = "helicopter", category = "A7", trackDeg = 90.0),
+                trafficTarget(id = "drone", category = "B6", trackDeg = 90.0),
+                trafficTarget(id = "flarm", source = "FLARM", provider = "OGN", trackDeg = 90.0),
+                trafficTarget(id = "freeflight", source = "FREEFLIGHT", provider = "OGN", trackDeg = 90.0)
+            )
         ).features().orEmpty()
 
-        assertEquals(3, features.size)
-        assertTrue(features.all {
-            it.properties()?.get(TrafficAwarenessMapProperties.TargetId)?.asString == "moving"
-        })
+        val countByTarget = features.groupingBy {
+            it.properties()?.get(TrafficAwarenessMapProperties.TargetId)?.asString
+        }.eachCount()
+        assertEquals(5, countByTarget["aircraft"])
+        assertEquals(5, countByTarget["helicopter"])
+        assertEquals(10, countByTarget["drone"])
+        assertEquals(5, countByTarget["flarm"])
+        assertEquals(8, countByTarget["freeflight"])
     }
 
     @Test
