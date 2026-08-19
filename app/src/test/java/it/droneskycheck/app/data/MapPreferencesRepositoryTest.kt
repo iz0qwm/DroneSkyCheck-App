@@ -69,4 +69,15 @@ class MapPreferencesRepositoryTest {
 
         assertTrue(preferences.isMapDarkeningEnabled())
     }
+
+    @Test
+    fun enhancedZoneOutlinesToggleDefaultsToOffAndPersistsLocally() {
+        val preferences = InMemoryMapPreferences()
+
+        assertFalse(preferences.isEnhancedZoneOutlinesEnabled())
+
+        preferences.setEnhancedZoneOutlinesEnabled(true)
+
+        assertTrue(preferences.isEnhancedZoneOutlinesEnabled())
+    }
 }

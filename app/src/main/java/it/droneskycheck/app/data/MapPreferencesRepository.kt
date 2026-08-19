@@ -10,6 +10,8 @@ interface MapPreferences {
     fun setLargeTextEnabled(enabled: Boolean)
     fun isMapDarkeningEnabled(): Boolean
     fun setMapDarkeningEnabled(enabled: Boolean)
+    fun isEnhancedZoneOutlinesEnabled(): Boolean
+    fun setEnhancedZoneOutlinesEnabled(enabled: Boolean)
     fun getAppThemeMode(): AppThemeMode
     fun setAppThemeMode(mode: AppThemeMode)
     fun isTrafficAlertSoundEnabled(): Boolean
@@ -53,6 +55,15 @@ class MapPreferencesRepository(
     override fun setMapDarkeningEnabled(enabled: Boolean) {
         preferences.edit()
             .putBoolean(KeyMapDarkeningEnabled, enabled)
+            .apply()
+    }
+
+    override fun isEnhancedZoneOutlinesEnabled(): Boolean =
+        preferences.getBoolean(KeyEnhancedZoneOutlinesEnabled, false)
+
+    override fun setEnhancedZoneOutlinesEnabled(enabled: Boolean) {
+        preferences.edit()
+            .putBoolean(KeyEnhancedZoneOutlinesEnabled, enabled)
             .apply()
     }
 
@@ -115,6 +126,7 @@ class MapPreferencesRepository(
         const val KeyWeatherAnalysisEnabled = "weather_analysis_enabled"
         const val KeyLargeTextEnabled = "large_text_enabled"
         const val KeyMapDarkeningEnabled = "map_darkening_enabled"
+        const val KeyEnhancedZoneOutlinesEnabled = "enhanced_zone_outlines_enabled"
         const val KeyAppThemeMode = "app_theme_mode"
         const val KeyTrafficAlertSoundEnabled = "traffic_alert_sound_enabled"
         const val KeyTrafficAlertVibrationEnabled = "traffic_alert_vibration_enabled"
@@ -127,6 +139,7 @@ class InMemoryMapPreferences(
     initialWeatherAnalysisEnabled: Boolean = false,
     initialLargeTextEnabled: Boolean = false,
     initialMapDarkeningEnabled: Boolean = false,
+    initialEnhancedZoneOutlinesEnabled: Boolean = false,
     initialAppThemeMode: AppThemeMode = AppThemeMode.System,
     initialTrafficAlertSoundEnabled: Boolean = true,
     initialTrafficAlertVibrationEnabled: Boolean = true,
@@ -137,6 +150,7 @@ class InMemoryMapPreferences(
     private var weatherAnalysisEnabled = initialWeatherAnalysisEnabled
     private var largeTextEnabled = initialLargeTextEnabled
     private var mapDarkeningEnabled = initialMapDarkeningEnabled
+    private var enhancedZoneOutlinesEnabled = initialEnhancedZoneOutlinesEnabled
     private var appThemeMode = initialAppThemeMode
     private var trafficAlertSoundEnabled = initialTrafficAlertSoundEnabled
     private var trafficAlertVibrationEnabled = initialTrafficAlertVibrationEnabled
@@ -160,6 +174,12 @@ class InMemoryMapPreferences(
 
     override fun setMapDarkeningEnabled(enabled: Boolean) {
         mapDarkeningEnabled = enabled
+    }
+
+    override fun isEnhancedZoneOutlinesEnabled(): Boolean = enhancedZoneOutlinesEnabled
+
+    override fun setEnhancedZoneOutlinesEnabled(enabled: Boolean) {
+        enhancedZoneOutlinesEnabled = enabled
     }
 
     override fun getAppThemeMode(): AppThemeMode = appThemeMode

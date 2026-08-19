@@ -19,6 +19,17 @@ object MapLayerIds {
     const val TRAFFIC_AWARENESS_RADIUS_LINE_LAYER_ID = "traffic-awareness-radius-line-layer"
 
     val STATIC_LAYERS = listOf(
+        DscMapLayer(
+            "parks-env",
+            "layer_parchi.geojson",
+            DscLayerCategory.EnvironmentalProtectedAreas,
+            "Aree protette ambientali",
+            minZoom = 6.0f,
+            zeroLimitOpacity = 0.28f,
+            lineWidth = 1.2f,
+            cacheTtlMillis = 180L * 24L * 60L * 60L * 1000L,
+            featureTypeAliases = setOf("PARKS_ENV", "layer_parchi")
+        ),
         DscMapLayer("p-parks-enr", "split/P_PARKS_ENR_561.geojson", DscLayerCategory.Parks, "Parks ENR 5.6.1", minZoom = 5.0f, zeroLimitOpacity = 0.05f),
         DscMapLayer("p-parks", "split/P_PARKS.geojson", DscLayerCategory.Parks, "Parks NFZ", minZoom = 5.0f, zeroLimitOpacity = 0.08f),
         DscMapLayer("atm09-parks", "split/ATM09_PARKS.geojson", DscLayerCategory.Parks, "ATM09 parks", minZoom = 6.0f, zeroLimitOpacity = 0.05f),
@@ -76,6 +87,12 @@ enum class DscLayerCategory(
         subtitle = "Zone temporanee NFZ",
         webappLabel = "NOTAM (NFZ)",
         swatchHex = DscZoneMapColors.noFly0m.webHex
+    ),
+    EnvironmentalProtectedAreas(
+        title = "Aree protette ambientali",
+        subtitle = "Informazione ambientale",
+        webappLabel = "Aree protette ambientali",
+        swatchHex = DscZoneMapColors.environmentalProtectedAreaFill.webHex
     ),
     Parks(
         title = "Parchi",
@@ -164,7 +181,7 @@ enum class DscLayerCategory(
 
     companion object {
         val defaultVisibility: Map<DscLayerCategory, Boolean> =
-            entries.associateWith { true }
+            entries.associateWith { it != EnvironmentalProtectedAreas }
     }
 }
 
@@ -197,6 +214,7 @@ data class DscMapLayer(
     val minZoom: Float,
     val zeroLimitOpacity: Float = 0.19f,
     val lineWidth: Float = 0.9f,
+    val cacheTtlMillis: Long? = null,
     val featureTypeAliases: Set<String> = emptySet()
 ) {
     val sourceId: String = "dsc-$key-source"
@@ -205,6 +223,7 @@ data class DscMapLayer(
     val lineLayerId: String = "dsc-$key-line"
     val usesZebraPattern: Boolean = key.startsWith("p-notam")
     val url: String = "${MapLayerIds.KWOS_DATA_BASE_URL}/$relativePath"
+    val isEnvironmentalProtectedArea: Boolean = category == DscLayerCategory.EnvironmentalProtectedAreas
     private val fileStem: String = relativePath.substringAfterLast('/').substringBeforeLast('.')
 
     fun matchesFeatureType(type: String): Boolean =

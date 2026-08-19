@@ -11,7 +11,6 @@ class MapLayerIdsTest {
         assertTrue(MapLayerIds.STATIC_LAYERS.isNotEmpty())
         MapLayerIds.STATIC_LAYERS.forEach { layer ->
             assertTrue(layer.url.startsWith(MapLayerIds.KWOS_DATA_BASE_URL))
-            assertTrue(layer.url.contains("/split/"))
             assertFalse(layer.url.contains("/zones"))
         }
     }
@@ -50,7 +49,8 @@ class MapLayerIdsTest {
             "split/P_PARKS.geojson",
             "split/P_PARKS_ENR_561.geojson",
             "split/P_SECURITY.geojson",
-            "split/P_SUP.geojson"
+            "split/P_SUP.geojson",
+            "layer_parchi.geojson"
         )
 
         assertEquals(expected, MapLayerIds.STATIC_LAYERS.map { it.relativePath }.toSet())
@@ -80,10 +80,26 @@ class MapLayerIdsTest {
     }
 
     @Test
-    fun everyStaticLayerHasAVisualCategoryVisibleByDefault() {
+    fun everyStaticLayerHasAVisualCategoryAndOnlyEnvironmentalAreasAreHiddenByDefault() {
         MapLayerIds.STATIC_LAYERS.forEach { layer ->
-            assertTrue(DscLayerCategory.defaultVisibility[layer.category] == true)
+            val expectedVisible = layer.category != DscLayerCategory.EnvironmentalProtectedAreas
+
+            assertEquals(expectedVisible, DscLayerCategory.defaultVisibility[layer.category])
         }
+    }
+
+    @Test
+    fun environmentalProtectedAreasUseDedicatedStaticLayerAndCategory() {
+        val layer = MapLayerIds.STATIC_LAYERS.single { it.key == "parks-env" }
+
+        assertEquals("layer_parchi.geojson", layer.relativePath)
+        assertEquals(DscLayerCategory.EnvironmentalProtectedAreas, layer.category)
+        assertEquals("dsc-parks-env-source", layer.sourceId)
+        assertEquals("dsc-parks-env-fill", layer.fillLayerId)
+        assertEquals("dsc-parks-env-line", layer.lineLayerId)
+        assertTrue(layer.isEnvironmentalProtectedArea)
+        assertEquals(DscLayerCategory.EnvironmentalProtectedAreas, MapLayerIds.categoryForFeatureType("PARKS_ENV"))
+        assertFalse(DscLayerCategory.defaultVisibility.getValue(DscLayerCategory.EnvironmentalProtectedAreas))
     }
 
     @Test

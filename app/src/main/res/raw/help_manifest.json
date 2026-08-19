@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "contentVersion": 6,
-  "updatedAt": "2026-08-13",
+  "contentVersion": 7,
+  "updatedAt": "2026-08-19",
   "onboardingVersion": 5,
   "onboarding": {
     "steps": [
@@ -146,7 +146,7 @@
       "title": "Autorizzazioni",
       "summary": "Procedure e dati utili quando una zona richiede autorizzazione.",
       "introduction": "Quando una zona richiede un'autorizzazione, Drone Sky Check puo indicare la procedura applicabile.",
-      "order": 6,
+      "order": 8,
       "blocks": [
         {
           "type": "paragraph",
@@ -155,10 +155,73 @@
       ]
     },
     {
+      "id": "enr_aip",
+      "title": "AIP ed ENR",
+      "summary": "Riferimenti AIP, sezioni ENR e sigle P, R, D.",
+      "introduction": "L'AIP raccoglie le informazioni aeronautiche ufficiali pubblicate per la navigazione aerea. Le sezioni ENR descrivono regole, rotte e aree rilevanti per lo spazio aereo.",
+      "order": 6,
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "Nel pannello zona, ENR indica informazioni derivate dalle sezioni en-route dell'AIP quando sono disponibili per l'area selezionata."
+        },
+        {
+          "type": "bullet_list",
+          "items": [
+            "P indica aree proibite.",
+            "R indica aree regolamentate.",
+            "D indica aree pericolose."
+          ]
+        },
+        {
+          "type": "note",
+          "text": "Le sigle aiutano a leggere la natura della zona, ma la valutazione operativa dipende sempre dal dettaglio ufficiale, dai limiti verticali, dagli orari e dalle eventuali autorizzazioni richieste."
+        }
+      ]
+    },
+    {
+      "id": "environmental_protected_areas",
+      "title": "Aree protette ambientali",
+      "summary": "Layer informativo sui territori soggetti a tutela ambientale.",
+      "introduction": "Il layer Aree protette ambientali mostra territori soggetti a tutela ambientale senza trasformarli automaticamente in divieti aeronautici.",
+      "order": 7,
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "La presenza di un'area protetta sulla mappa non significa automaticamente che l'intero territorio costituisca una zona aeronautica proibita o una zona UAS nella quale il volo sia sempre vietato."
+        },
+        {
+          "type": "paragraph",
+          "text": "La normativa sulle aree protette, compresa la Legge quadro n. 394/1991, puo prevedere tutele anche in relazione al sorvolo. Specifiche restrizioni possono essere richieste dall'Ente gestore e pubblicate nelle fonti aeronautiche ufficiali."
+        },
+        {
+          "type": "note",
+          "text": "Prima del volo verifica sia le eventuali restrizioni aeronautiche ufficiali sia le disposizioni e autorizzazioni richieste dall'Ente gestore del parco o dell'area protetta."
+        }
+      ]
+    },
+    {
+      "id": "map_display_settings",
+      "title": "Impostazioni mappa",
+      "summary": "Tema, testo e preferenze visuali della mappa.",
+      "introduction": "Nella sezione Schermo puoi adattare la leggibilita dell'app e della mappa.",
+      "order": 9,
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "Contorni zone piu visibili aumenta il contrasto dei confini delle zone sulla mappa senza cambiare il significato dei colori."
+        },
+        {
+          "type": "note",
+          "text": "Questa impostazione e alternativa alla modalita Mappa piu scura: entrambe possono essere disattivate, ma non restano attive insieme."
+        }
+      ]
+    },
+    {
       "id": "pilot_profile",
       "title": "Profilo pilota e droni",
       "summary": "Pilota, operatore, attestati e flotta drone salvati sul dispositivo.",
-      "order": 7,
+      "order": 10,
       "blocks": [
         {
           "type": "paragraph",

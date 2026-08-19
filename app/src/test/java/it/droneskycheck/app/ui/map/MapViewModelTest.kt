@@ -1207,7 +1207,7 @@ class MapViewModelTest {
     }
 
     @Test
-    fun highAltitudeAircraftAttentionIsFilteredUnlessUserEnablesIt() = runBlocking {
+    fun highAltitudeAircraftIsHiddenUnlessUserEnablesIt() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val highAircraft = trafficTarget(
             id = "traffic:high-aircraft",
@@ -1237,29 +1237,81 @@ class MapViewModelTest {
         viewModel.onMapTapped(selection(41.9, 12.5))
         waitUntil { viewModel.uiState.value.selectedPoint != null }
         viewModel.enableTrafficAwareness()
-        waitUntil { viewModel.uiState.value.trafficAssessments["traffic:high-aircraft"] != null }
+        waitUntil { viewModel.uiState.value.trafficAwareness.response != null }
 
-        assertEquals(
-            it.droneskycheck.app.data.traffic.TrafficRelevance.MONITOR,
-            viewModel.uiState.value.trafficAssessments["traffic:high-aircraft"]?.relevance
-        )
-        assertEquals(
-            it.droneskycheck.app.data.traffic.TrafficRelevance.ATTENTION,
-            viewModel.uiState.value.trafficVisualAssessments["traffic:high-aircraft"]?.relevance
-        )
+        assertTrue(viewModel.uiState.value.trafficAwareness.response?.traffic?.targets.orEmpty().isEmpty())
+        assertNull(viewModel.uiState.value.trafficAssessments["traffic:high-aircraft"])
+        assertNull(viewModel.uiState.value.trafficVisualAssessments["traffic:high-aircraft"])
 
         viewModel.onHighAltitudeTrafficAlertEnabledChanged(true)
         waitUntil {
-            traffic.calls >= 2 &&
-                viewModel.uiState.value.trafficAssessments["traffic:high-aircraft"]?.relevance ==
+            viewModel.uiState.value.trafficAssessments["traffic:high-aircraft"]?.relevance ==
                 it.droneskycheck.app.data.traffic.TrafficRelevance.ATTENTION
         }
 
         assertTrue(viewModel.uiState.value.highAltitudeTrafficAlertEnabled)
         assertEquals(
+            listOf("traffic:high-aircraft"),
+            viewModel.uiState.value.trafficAwareness.response?.traffic?.targets.orEmpty().map { it.id }
+        )
+        assertEquals(
             it.droneskycheck.app.data.traffic.TrafficRelevance.ATTENTION,
             viewModel.uiState.value.trafficVisualAssessments["traffic:high-aircraft"]?.relevance
         )
+        scope.cancel()
+    }
+
+    @Test
+    fun highAltitudeTrafficFilterKeepsLowAndUnknownAglTargetsVisible() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val lowAircraft = trafficTarget(
+            id = "traffic:low-aircraft",
+            lat = 41.9 + metersToLatDegreesForTest(1_900.0),
+            lon = 12.5,
+            callsign = "LOW",
+            speedMps = 40.0,
+            trackDeg = 180.0,
+            ageSec = 2.0,
+            aglM = 999.0
+        )
+        val unknownAltitudeAircraft = trafficTarget(
+            id = "traffic:unknown-aircraft",
+            lat = 41.9 + metersToLatDegreesForTest(2_100.0),
+            lon = 12.5,
+            callsign = "UNK",
+            speedMps = 40.0,
+            trackDeg = 180.0,
+            ageSec = 2.0,
+            aglM = null
+        )
+        val viewModel = viewModel(
+            scope = scope,
+            traffic = FakeTrafficAwarenessClient(
+                results = ArrayDeque(
+                    listOf(
+                        Result.success(
+                            trafficResponse(
+                                center = MapPoint(41.9, 12.5),
+                                targets = listOf(lowAircraft, unknownAltitudeAircraft)
+                            )
+                        )
+                    )
+                )
+            ),
+            preferences = InMemoryMapPreferences(initialHighAltitudeTrafficAlertEnabled = false),
+            trafficPollingIntervalMillis = 10_000
+        )
+
+        viewModel.onMapTapped(selection(41.9, 12.5))
+        waitUntil { viewModel.uiState.value.selectedPoint != null }
+        viewModel.enableTrafficAwareness()
+        waitUntil { viewModel.uiState.value.trafficAwareness.response?.traffic?.targets?.size == 2 }
+
+        assertEquals(
+            listOf("traffic:low-aircraft", "traffic:unknown-aircraft"),
+            viewModel.uiState.value.trafficAwareness.response?.traffic?.targets.orEmpty().map { it.id }
+        )
+        assertTrue(viewModel.uiState.value.trafficVisualAssessments.keys.containsAll(listOf("traffic:low-aircraft", "traffic:unknown-aircraft")))
         scope.cancel()
     }
 
@@ -1295,6 +1347,42 @@ class MapViewModelTest {
         assertTrue(viewModel.uiState.value.highAltitudeTrafficAlertEnabled)
         assertFalse(viewModel.uiState.value.isTrafficAlertSettingsSheetVisible)
         assertFalse(viewModel.uiState.value.trafficAwareness.enabled)
+        scope.cancel()
+    }
+
+    @Test
+    fun enhancedZoneOutlinesAndMapDarkeningAreMutuallyExclusive() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val preferences = InMemoryMapPreferences(initialMapDarkeningEnabled = true)
+        val viewModel = viewModel(
+            scope = scope,
+            preferences = preferences,
+            trafficPollingIntervalMillis = 10_000
+        )
+
+        assertTrue(viewModel.uiState.value.isMapDarkeningEnabled)
+        assertFalse(viewModel.uiState.value.isEnhancedZoneOutlinesEnabled)
+
+        viewModel.onEnhancedZoneOutlinesEnabledChanged(true)
+
+        assertTrue(preferences.isEnhancedZoneOutlinesEnabled())
+        assertFalse(preferences.isMapDarkeningEnabled())
+        assertTrue(viewModel.uiState.value.isEnhancedZoneOutlinesEnabled)
+        assertFalse(viewModel.uiState.value.isMapDarkeningEnabled)
+
+        viewModel.onMapDarkeningEnabledChanged(true)
+
+        assertTrue(preferences.isMapDarkeningEnabled())
+        assertFalse(preferences.isEnhancedZoneOutlinesEnabled())
+        assertTrue(viewModel.uiState.value.isMapDarkeningEnabled)
+        assertFalse(viewModel.uiState.value.isEnhancedZoneOutlinesEnabled)
+
+        viewModel.onMapDarkeningEnabledChanged(false)
+
+        assertFalse(preferences.isMapDarkeningEnabled())
+        assertFalse(preferences.isEnhancedZoneOutlinesEnabled())
+        assertFalse(viewModel.uiState.value.isMapDarkeningEnabled)
+        assertFalse(viewModel.uiState.value.isEnhancedZoneOutlinesEnabled)
         scope.cancel()
     }
 

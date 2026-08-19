@@ -5,6 +5,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -136,7 +138,13 @@ fun HelpTopicDialog(
         },
         title = { Text(topic.title) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = HelpTopicDialogBodyMaxHeight)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
                 HelpTopicBody(topic)
             }
         }
@@ -587,6 +595,7 @@ private fun topicIcon(id: String): ImageVector =
     }
 
 private val HelpImageShape = RoundedCornerShape(10.dp)
+private val HelpTopicDialogBodyMaxHeight = 420.dp
 private val HelpImageMaxHeight = 260.dp
 private val HelpImageZoomMaxHeight = 760.dp
 private const val LogTag = "HelpUi"

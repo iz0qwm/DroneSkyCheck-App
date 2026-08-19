@@ -8,6 +8,8 @@ object DscZoneMapColors {
     val limited45m = Rgba(255.0f, 235.0f, 59.0f, "#ffeb3b")
     val limited60m = Rgba(41.0f, 182.0f, 246.0f, "#29b6f6")
     val fallback = Rgba(158.0f, 158.0f, 158.0f, "#9e9e9e")
+    val environmentalProtectedAreaFill = Rgba(165.0f, 214.0f, 167.0f, "#a5d6a7")
+    val environmentalProtectedAreaLine = Rgba(46.0f, 125.0f, 50.0f, "#2e7d32")
 
     fun fillExpression(): Expression =
         limitColorExpression(
@@ -49,12 +51,12 @@ object DscZoneMapColors {
             Expression.literal(0.19f)
         )
 
-    fun lineOpacityExpression(): Expression =
+    fun lineOpacityExpression(enhanced: Boolean = false): Expression =
         Expression.match(
             lowerLimitTextExpression(),
             Expression.literal("120"),
             Expression.literal(0.0f),
-            Expression.literal(0.92f)
+            Expression.literal(if (enhanced) 1.0f else 0.92f)
         )
 
     private fun limitColorExpression(

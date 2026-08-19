@@ -923,17 +923,18 @@ class MapViewModel(
                 nowMillis = nowMillis
             )
             latestUnfilteredTrafficAwarenessResponse = unfilteredResponse
-            val visibleResponse = unfilteredResponse.filteredByTrafficFeed(_uiState.value.trafficFeedFilters)
-            val rawAssessments = trafficRelevanceEngine.assessTrafficBatch(
+            val visibleResponse = unfilteredResponse.filteredForTrafficPresentation(
+                filters = _uiState.value.trafficFeedFilters,
+                showHighAltitudeTraffic = _uiState.value.highAltitudeTrafficAlertEnabled
+            )
+            val assessments = trafficRelevanceEngine.assessTrafficBatch(
                 targets = visibleResponse.traffic.targets,
                 operationCenter = TrafficOperationCenter(point.lat, point.lon),
                 nowMillis = nowMillis
             )
-            val assessments = rawAssessments.withHighAltitudeAircraftFilter(
-                targets = visibleResponse.traffic.targets,
-                enabled = _uiState.value.highAltitudeTrafficAlertEnabled
-            )
-            val rawAttentionCount = rawAssessments.values.count { it.relevance == TrafficRelevance.ATTENTION }
+            val hiddenHighAltitudeCount = unfilteredResponse.traffic.targets.count { target ->
+                target.isHiddenHighAltitudeTraffic(_uiState.value.highAltitudeTrafficAlertEnabled)
+            }
             val alertAttentionCount = assessments.values.count { it.relevance == TrafficRelevance.ATTENTION }
             assessments.forEach { (id, assessment) ->
                 DscLogger.trace(
@@ -943,11 +944,11 @@ class MapViewModel(
                         "cpa=${assessment.cpaDistanceM?.toInt()} tcpa=${assessment.timeToCpaSec?.toInt()}"
                 )
             }
-            if (rawAttentionCount > 0 || alertAttentionCount > 0) {
+            if (hiddenHighAltitudeCount > 0 || alertAttentionCount > 0) {
                 DscLogger.debug(
                     TrafficAwarenessLogTag,
-                    "attention visual=$rawAttentionCount alert=$alertAttentionCount " +
-                        "highAltitudeEnabled=${_uiState.value.highAltitudeTrafficAlertEnabled}"
+                    "attention visible=$alertAttentionCount hiddenHighAltitude=$hiddenHighAltitudeCount " +
+                        "highAltitudeVisible=${_uiState.value.highAltitudeTrafficAlertEnabled}"
                 )
             }
             if (!_uiState.value.trafficAwareness.enabled || _uiState.value.trafficAwarenessCenter != point) {
@@ -971,7 +972,7 @@ class MapViewModel(
                     lastUpdatedAt = nowMillis
                 ),
                 trafficAssessments = assessments,
-                trafficVisualAssessments = rawAssessments,
+                trafficVisualAssessments = assessments,
                 selectedTrafficTarget = _uiState.value.selectedTrafficTarget?.let { selected ->
                     visibleResponse.traffic.targets.firstOrNull { it.id == selected.id }
                 }
@@ -1033,7 +1034,7 @@ class MapViewModel(
         mapPreferences.setHighAltitudeTrafficAlertEnabled(enabled)
         DscLogger.debug(TrafficAwarenessLogTag, "alert highAltitude enabled=$enabled")
         _uiState.value = _uiState.value.copy(highAltitudeTrafficAlertEnabled = enabled)
-        refreshTrafficAssessmentsForCurrentSnapshot()
+        refreshTrafficPresentationForCurrentSnapshot()
     }
 
     fun onTrafficAwarenessPositionLockedChanged(locked: Boolean) {
@@ -1051,10 +1052,13 @@ class MapViewModel(
         _uiState.value = _uiState.value.copy(
             trafficFeedFilters = filters,
             trafficAwareness = _uiState.value.trafficAwareness.copy(
-                response = currentResponse?.filteredByTrafficFeed(filters)
+                response = currentResponse?.filteredForTrafficPresentation(
+                    filters = filters,
+                    showHighAltitudeTraffic = _uiState.value.highAltitudeTrafficAlertEnabled
+                )
             )
         )
-        refreshTrafficAssessmentsForCurrentSnapshot()
+        refreshTrafficPresentationForCurrentSnapshot()
     }
 
     fun onLargeTextEnabledChanged(enabled: Boolean) {
@@ -1063,8 +1067,25 @@ class MapViewModel(
     }
 
     fun onMapDarkeningEnabledChanged(enabled: Boolean) {
+        if (enabled) {
+            mapPreferences.setEnhancedZoneOutlinesEnabled(false)
+        }
         mapPreferences.setMapDarkeningEnabled(enabled)
-        _uiState.value = _uiState.value.copy(isMapDarkeningEnabled = enabled)
+        _uiState.value = _uiState.value.copy(
+            isMapDarkeningEnabled = enabled,
+            isEnhancedZoneOutlinesEnabled = if (enabled) false else _uiState.value.isEnhancedZoneOutlinesEnabled
+        )
+    }
+
+    fun onEnhancedZoneOutlinesEnabledChanged(enabled: Boolean) {
+        if (enabled) {
+            mapPreferences.setMapDarkeningEnabled(false)
+        }
+        mapPreferences.setEnhancedZoneOutlinesEnabled(enabled)
+        _uiState.value = _uiState.value.copy(
+            isEnhancedZoneOutlinesEnabled = enabled,
+            isMapDarkeningEnabled = if (enabled) false else _uiState.value.isMapDarkeningEnabled
+        )
     }
 
     private fun trafficAwarenessStopReason(point: MapPoint): String =
@@ -1075,9 +1096,15 @@ class MapViewModel(
         }
 
     private fun loadAccessibilityPreferences() {
+        val mapDarkeningEnabled = mapPreferences.isMapDarkeningEnabled()
+        val enhancedZoneOutlinesEnabled = mapPreferences.isEnhancedZoneOutlinesEnabled() && !mapDarkeningEnabled
+        if (mapDarkeningEnabled && mapPreferences.isEnhancedZoneOutlinesEnabled()) {
+            mapPreferences.setEnhancedZoneOutlinesEnabled(false)
+        }
         _uiState.value = _uiState.value.copy(
             isLargeTextEnabled = mapPreferences.isLargeTextEnabled(),
-            isMapDarkeningEnabled = mapPreferences.isMapDarkeningEnabled()
+            isMapDarkeningEnabled = mapDarkeningEnabled,
+            isEnhancedZoneOutlinesEnabled = enhancedZoneOutlinesEnabled
         )
     }
 
@@ -1091,44 +1118,38 @@ class MapViewModel(
         )
     }
 
-    private fun Map<String, TrafficAssessment>.withHighAltitudeAircraftFilter(
-        targets: List<TrafficTarget>,
-        enabled: Boolean
-    ): Map<String, TrafficAssessment> {
-        if (enabled) return this
-        val targetsById = targets.associateBy { it.id }
-        return mapValues { (targetId, assessment) ->
-            val target = targetsById[targetId] ?: return@mapValues assessment
-            if (
-                assessment.relevance == TrafficRelevance.ATTENTION &&
-                target.trafficTargetKind() in HighAltitudeTrafficTargetKinds &&
-                target.altitude.aglM?.let { it.isFinite() && it >= HighAltitudeTrafficAlertThresholdM } == true
-            ) {
-                assessment.copy(relevance = TrafficRelevance.MONITOR)
-            } else {
-                assessment
-            }
-        }
-    }
-
-    private fun refreshTrafficAssessmentsForCurrentSnapshot() {
+    private fun refreshTrafficPresentationForCurrentSnapshot() {
         val state = _uiState.value
         val point = state.trafficAwarenessCenter ?: state.selectedPoint ?: return
-        val targets = state.trafficAwareness.response?.traffic?.targets.orEmpty()
-        if (targets.isEmpty()) return
+        val response = (latestUnfilteredTrafficAwarenessResponse ?: state.trafficAwareness.response)
+            ?.filteredForTrafficPresentation(
+                filters = state.trafficFeedFilters,
+                showHighAltitudeTraffic = state.highAltitudeTrafficAlertEnabled
+            )
+        val targets = response?.traffic?.targets.orEmpty()
+        if (targets.isEmpty()) {
+            _uiState.value = state.copy(
+                trafficAwareness = state.trafficAwareness.copy(response = response),
+                trafficAssessments = emptyMap(),
+                trafficVisualAssessments = emptyMap(),
+                selectedTrafficTarget = null
+            )
+            return
+        }
 
         val nowMillis = clock.millis()
-        val rawAssessments = trafficRelevanceEngine.assessTrafficBatch(
+        val assessments = trafficRelevanceEngine.assessTrafficBatch(
             targets = targets,
             operationCenter = TrafficOperationCenter(point.lat, point.lon),
             nowMillis = nowMillis
         )
         _uiState.value = _uiState.value.copy(
-            trafficAssessments = rawAssessments.withHighAltitudeAircraftFilter(
-                targets = targets,
-                enabled = _uiState.value.highAltitudeTrafficAlertEnabled
-            ),
-            trafficVisualAssessments = rawAssessments
+            trafficAwareness = state.trafficAwareness.copy(response = response),
+            trafficAssessments = assessments,
+            trafficVisualAssessments = assessments,
+            selectedTrafficTarget = state.selectedTrafficTarget?.let { selected ->
+                targets.firstOrNull { it.id == selected.id }
+            }
         )
     }
 
@@ -1190,12 +1211,14 @@ class MapViewModel(
             )
         )
 
-    private fun TrafficAwarenessResponse.filteredByTrafficFeed(
-        filters: Map<TrafficFeedType, Boolean>
+    private fun TrafficAwarenessResponse.filteredForTrafficPresentation(
+        filters: Map<TrafficFeedType, Boolean>,
+        showHighAltitudeTraffic: Boolean
     ): TrafficAwarenessResponse {
         val targets = traffic.targets.filter { target ->
             val type = target.trafficFeedType()
-            type == TrafficFeedType.UNKNOWN || filters[type] != false
+            (type == TrafficFeedType.UNKNOWN || filters[type] != false) &&
+                !target.isHiddenHighAltitudeTraffic(showHighAltitudeTraffic)
         }
         return copy(
             traffic = traffic.copy(
@@ -1204,6 +1227,11 @@ class MapViewModel(
             )
         )
     }
+
+    private fun TrafficTarget.isHiddenHighAltitudeTraffic(showHighAltitudeTraffic: Boolean): Boolean =
+        !showHighAltitudeTraffic &&
+            trafficTargetKind() in HighAltitudeTrafficTargetKinds &&
+            altitude.aglM?.let { it.isFinite() && it >= HighAltitudeTrafficAlertThresholdM } == true
 
     fun onDroneSelected(droneId: String) {
         scope.launch {

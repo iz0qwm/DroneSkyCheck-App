@@ -56,12 +56,12 @@ object AppReleaseNotes {
         title = "Sviluppo Drone Sky Check 3.1",
         intro = "Questa sezione raccoglie le modifiche introdotte durante lo sviluppo della versione 3.1.",
         highlights = listOf(
-            "Traffico sulla mappa distinto per ADS-B, FANET, FLARM e FreeFlight quando la sorgente normalizzata lo permette.",
-            "Nuovi filtri locali Traffic Awareness per attivare o nascondere ADS-B, FANET, FLARM e FreeFlight.",
-            "Nuovo pulsante Meteo sulla mappa, basato sul punto selezionato e non sulla posizione GPS.",
-            "Pannello meteo compatto con vento, direzione, raffiche, temperatura, stato meteo e METAR vicino quando disponibile entro circa 20 km.",
-            "Vettore di movimento davanti ai target, calcolato da heading/traccia e ground speed con proiezione temporale limitata.",
-            "Quota AGL in metri sotto le icone traffico quando il dato normalizzato e' disponibile."
+            "Traffic Awareness aggiornato con filtri per sorgente ADS-B, FANET, FLARM e FreeFlight, target disegnati con sagoma, vettore, halo e label radar Canvas coerenti.",
+            "Filtro traffico sopra 1000 m AGL reso coerente su icone, vettori, halo, label Canvas e selezione sulla mappa.",
+            "Nuovo pannello meteo sul punto selezionato, con vento, raffiche, temperatura, stato meteo e METAR vicino quando disponibile.",
+            "Nuovo layer Aree protette ambientali, disattivato di default, in verde chiaro e con scheda informativa senza effetto automatico sul verdetto operativo.",
+            "Nuova impostazione Contorni zone piu visibili, alternativa alla modalita Mappa piu scura.",
+            "Guida aggiornata con schede NOTAM scrollabili, collegamento informativo ENR e nuovi contenuti su AIP/ENR, aree protette e impostazioni mappa."
         )
     )
 }

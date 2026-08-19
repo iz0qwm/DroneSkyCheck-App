@@ -100,6 +100,8 @@ fun SettingsSheet(
     onLargeTextEnabledChanged: (Boolean) -> Unit,
     mapDarkeningEnabled: Boolean,
     onMapDarkeningEnabledChanged: (Boolean) -> Unit,
+    enhancedZoneOutlinesEnabled: Boolean,
+    onEnhancedZoneOutlinesEnabledChanged: (Boolean) -> Unit,
     appThemeMode: AppThemeMode,
     onAppThemeModeChanged: (AppThemeMode) -> Unit,
     onRefreshHelp: () -> Unit,
@@ -156,6 +158,8 @@ fun SettingsSheet(
                     onLargeTextEnabledChanged = onLargeTextEnabledChanged,
                     mapDarkeningEnabled = mapDarkeningEnabled,
                     onMapDarkeningEnabledChanged = onMapDarkeningEnabledChanged,
+                    enhancedZoneOutlinesEnabled = enhancedZoneOutlinesEnabled,
+                    onEnhancedZoneOutlinesEnabledChanged = onEnhancedZoneOutlinesEnabledChanged,
                     appThemeMode = appThemeMode,
                     onAppThemeModeChanged = onAppThemeModeChanged
                 )
@@ -260,6 +264,8 @@ private fun DisplaySettingsPage(
     onLargeTextEnabledChanged: (Boolean) -> Unit,
     mapDarkeningEnabled: Boolean,
     onMapDarkeningEnabledChanged: (Boolean) -> Unit,
+    enhancedZoneOutlinesEnabled: Boolean,
+    onEnhancedZoneOutlinesEnabledChanged: (Boolean) -> Unit,
     appThemeMode: AppThemeMode,
     onAppThemeModeChanged: (AppThemeMode) -> Unit
 ) {
@@ -317,6 +323,33 @@ private fun DisplaySettingsPage(
             Switch(
                 checked = mapDarkeningEnabled,
                 onCheckedChange = onMapDarkeningEnabledChanged
+            )
+        }
+        HorizontalDivider()
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 72.dp)
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            SettingsIcon(Icons.Default.Visibility)
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    "Contorni zone piu visibili",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    "Aumenta il contrasto dei confini delle zone sulla mappa.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(
+                checked = enhancedZoneOutlinesEnabled,
+                onCheckedChange = onEnhancedZoneOutlinesEnabledChanged
             )
         }
     }

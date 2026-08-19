@@ -487,6 +487,7 @@ fun MapScreen(
             trafficAwareness = uiState.trafficAwareness,
             trafficAssessments = uiState.trafficVisualAssessments,
             mapDarkeningEnabled = uiState.isMapDarkeningEnabled,
+            enhancedZoneOutlinesEnabled = uiState.isEnhancedZoneOutlinesEnabled,
             userLocation = uiState.userLocation,
             shouldCenterOnUserLocation = uiState.shouldCenterOnUserLocation,
             cameraFocusPoint = pendingCameraFocusPoint,
@@ -773,6 +774,8 @@ fun MapScreen(
                 onLargeTextEnabledChanged = viewModel::onLargeTextEnabledChanged,
                 mapDarkeningEnabled = uiState.isMapDarkeningEnabled,
                 onMapDarkeningEnabledChanged = viewModel::onMapDarkeningEnabledChanged,
+                enhancedZoneOutlinesEnabled = uiState.isEnhancedZoneOutlinesEnabled,
+                onEnhancedZoneOutlinesEnabledChanged = viewModel::onEnhancedZoneOutlinesEnabledChanged,
                 appThemeMode = appThemeMode,
                 onAppThemeModeChanged = onAppThemeModeChanged,
                 onRefreshHelp = viewModel::refreshHelpManifestNow,
@@ -3250,6 +3253,8 @@ private fun ZoneBottomSheet(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
+            EnvironmentalProtectedAreaInfoCard(zone)
+
             if (isLoading) {
                 OperationalCheckLoadingCard(point = point, zone = zone)
             }
@@ -4950,7 +4955,10 @@ private fun ZoneInfoCard(
                     notams = zone.notams,
                     onHelpClick = { onContextualHelpRequested("notam") }
                 )
-                EnrSection(zone.enr)
+                EnrSection(
+                    enr = zone.enr,
+                    onHelpClick = { onContextualHelpRequested("enr_aip") }
+                )
                 SupSection(zone.sup)
                 UasGeographicalZoneSection(zone.uasGeographicalZone)
                 AuthorizationSection(
@@ -5484,6 +5492,37 @@ private fun SelectedMapNotamFallbackSection(
 }
 
 @Composable
+private fun EnvironmentalProtectedAreaInfoCard(zone: DemoZone?) {
+    if (zone?.isEnvironmentalProtectedArea() != true) return
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.52f),
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        border = BorderStroke(1.dp, Color(0xFF81C784))
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "Area protetta ambientale",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            CompactInfoPill("Informazione ambientale")
+            ZoneOptionalDetail("Nome", zone.name.cleanZoneName())
+            Text(
+                text = EnvironmentalProtectedAreaInfoText,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSecondaryContainer
+            )
+        }
+    }
+}
+
+@Composable
 private fun NotamSummaryCard(presentation: NotamPresentation) {
     val isManual = presentation.statusLabel.equals("Verifica necessaria", ignoreCase = true)
     val containerColor = if (isManual) {
@@ -5521,10 +5560,16 @@ private fun NotamSummaryCard(presentation: NotamPresentation) {
 }
 
 @Composable
-private fun EnrSection(enr: EnrInfo?) {
+private fun EnrSection(
+    enr: EnrInfo?,
+    onHelpClick: () -> Unit
+) {
     if (enr == null || !enr.hasContent()) return
 
-    ZoneSection(title = "ENR") {
+    ZoneSection(
+        title = "ENR",
+        onHelpClick = onHelpClick
+    ) {
         ZoneOptionalDetail("Nome", enr.name)
         ZoneOptionalDetail("Riferimento", enr.classification)
         ZoneOptionalDetail("Stato", enr.validity?.statusLabel())
@@ -6963,6 +7008,9 @@ private fun ZoneInfo.userCategoryTitle(): String? =
 private fun DemoZone.userCategoryTitle(): String? =
     MapLayerIds.categoryForFeatureType(type)?.title
 
+private fun DemoZone.isEnvironmentalProtectedArea(): Boolean =
+    MapLayerIds.categoryForFeatureType(type) == DscLayerCategory.EnvironmentalProtectedAreas
+
 private fun DemoZone.isNotamZone(): Boolean =
     type.contains("NOTAM", ignoreCase = true) ||
         name.contains("NOTAM", ignoreCase = true) ||
@@ -7620,4 +7668,15 @@ private const val TrafficAlertToneDurationMillis = 220
 private const val TrafficAlertToneVolume = 60
 private const val PeriodicNoticeLogTag = "DscPeriodicNotice"
 private const val PeriodicNoticeUiSettlingMillis = 700L
+private const val EnvironmentalProtectedAreaInfoText =
+    "Quest'area identifica un territorio soggetto a tutela ambientale.\n\n" +
+        "La presenza dell'area in questa mappa non significa automaticamente che l'intero territorio " +
+        "costituisca una zona aeronautica proibita o una zona UAS nella quale il volo sia sempre vietato.\n\n" +
+        "La normativa sulle aree protette, compresa la Legge quadro n. 394/1991, prevede tutele anche " +
+        "in relazione al sorvolo. Specifiche restrizioni possono essere richieste dall'Ente gestore e " +
+        "pubblicate dalle autorita competenti nelle fonti aeronautiche ufficiali.\n\n" +
+        "Prima del volo verifica quindi sia le eventuali restrizioni presenti nelle fonti aeronautiche " +
+        "ufficiali sia le disposizioni e le eventuali autorizzazioni richieste dall'Ente gestore del parco " +
+        "o dell'area protetta.\n\n" +
+        "Questo layer ha funzione informativa e non sostituisce la verifica delle fonti ufficiali."
 private const val PeriodicNoticeCoffeeButtonText = "☕ Offrimi un caffè"

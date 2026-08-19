@@ -5,13 +5,25 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 
-class CachedGeoJsonRepository(context: Context) {
-    private val cacheDir = File(context.cacheDir, "dsc_geojson_layers").apply {
+class CachedGeoJsonRepository internal constructor(
+    cacheDir: File
+) {
+    constructor(context: Context) : this(File(context.cacheDir, "dsc_geojson_layers"))
+
+    private val cacheDir = cacheDir.apply {
         mkdirs()
     }
 
-    fun get(url: String, cacheKey: String): CachedGeoJson {
+    fun get(url: String, cacheKey: String, ttlMillis: Long? = null): CachedGeoJson {
         val cacheFile = File(cacheDir, "${cacheKey.cacheSafeName()}.geojson")
+        val now = System.currentTimeMillis()
+
+        if (ttlMillis != null &&
+            cacheFile.exists() &&
+            now - cacheFile.lastModified() < ttlMillis
+        ) {
+            return CachedGeoJson(cacheFile.readText(Charsets.UTF_8), degraded = false)
+        }
 
         return runCatching {
             fetch(url).also { body ->

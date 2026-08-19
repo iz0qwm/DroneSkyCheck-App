@@ -84,6 +84,7 @@ fun DroneSkyMapView(
     trafficAwareness: TrafficAwarenessState,
     trafficAssessments: Map<String, TrafficAssessment>,
     mapDarkeningEnabled: Boolean,
+    enhancedZoneOutlinesEnabled: Boolean,
     userLocation: UserLocation?,
     shouldCenterOnUserLocation: Boolean,
     cameraFocusPoint: MapPoint?,
@@ -118,6 +119,7 @@ fun DroneSkyMapView(
                     onCameraIdle,
                     onMapDataDegraded,
                     mapDarkeningEnabled,
+                    enhancedZoneOutlinesEnabled,
                     radarLabelOverlay
                 )
             }
@@ -185,6 +187,7 @@ fun DroneSkyMapView(
                     addTrafficAwarenessLayers(style)
                     addMapDarkeningLayer(style)
                     updateMapDarkening(style, mapDarkeningEnabled)
+                    updateZoneOutlines(style, enhancedZoneOutlinesEnabled)
                     applyLayerVisibility(style, visibleLayerCategories)
                     loadDynamicZonesSources(
                         zonesRepository = ZonesRepository(mapView.context.applicationContext),
@@ -226,6 +229,7 @@ private fun configureMap(
     onCameraIdle: (CameraBounds) -> Unit,
     onMapDataDegraded: () -> Unit,
     mapDarkeningEnabled: Boolean,
+    enhancedZoneOutlinesEnabled: Boolean,
     radarLabelOverlay: TrafficRadarLabelOverlay
 ) {
     map.cameraPosition = CameraPosition.Builder()
@@ -248,6 +252,7 @@ private fun configureMap(
         addTrafficAwarenessLayers(it)
         addMapDarkeningLayer(it)
         updateMapDarkening(it, mapDarkeningEnabled)
+        updateZoneOutlines(it, enhancedZoneOutlinesEnabled)
         addPointMarkerLayers(it)
         radarLabelOverlay.attachToMap(map)
         startTrafficAttentionPulse(map)
@@ -608,6 +613,32 @@ private fun updateMapDarkening(style: Style, enabled: Boolean) {
     )
 }
 
+private fun updateZoneOutlines(style: Style, enhanced: Boolean) {
+    MapLayerIds.STATIC_LAYERS.forEach { layer ->
+        val mapLayer = style.getLayer(layer.lineLayerId) ?: return@forEach
+        if (layer.isEnvironmentalProtectedArea) {
+            mapLayer.setProperties(
+                lineOpacity(if (enhanced) 0.96f else 0.82f),
+                lineWidth(zoneOutlineWidth(layer.lineWidth, enhanced))
+            )
+        } else {
+            mapLayer.setProperties(
+                lineOpacity(DscZoneMapColors.lineOpacityExpression(enhanced)),
+                lineWidth(zoneOutlineWidth(layer.lineWidth, enhanced))
+            )
+        }
+    }
+    MapLayerIds.DYNAMIC_ZONES_LAYERS.forEach { layer ->
+        style.getLayer(layer.lineLayerId)?.setProperties(
+            lineOpacity(DscZoneMapColors.lineOpacityExpression(enhanced)),
+            lineWidth(zoneOutlineWidth(layer.lineWidth, enhanced))
+        )
+    }
+}
+
+private fun zoneOutlineWidth(baseWidth: Float, enhanced: Boolean): Float =
+    if (enhanced) baseWidth + 1.1f else baseWidth
+
 private fun startTrafficAttentionPulse(map: MapLibreMap) {
     if (trafficAttentionPulseRunnable != null) return
     val runnable = object : Runnable {
@@ -787,15 +818,22 @@ private fun centerOnPoint(map: MapLibreMap, point: MapPoint, minZoom: Double) {
 private fun addDscLayers(style: Style) {
     MapLayerIds.STATIC_LAYERS.forEach { layer ->
         style.addSource(GeoJsonSource(layer.sourceId))
-        style.addLayer(
-                FillLayer(
-                    layer.fillLayerId,
-                    layer.sourceId
-                ).withProperties(
-                    fillColor(zoneFillColorExpression()),
-                    fillOpacity(DscZoneMapColors.fillOpacityExpression(layer))
-                ).withZoomRange(layer)
+        val fillLayer = FillLayer(
+            layer.fillLayerId,
+            layer.sourceId
+        ).withZoomRange(layer)
+        if (layer.isEnvironmentalProtectedArea) {
+            fillLayer.withProperties(
+                fillColor(DscZoneMapColors.environmentalProtectedAreaFill.webHex),
+                fillOpacity(layer.zeroLimitOpacity)
             )
+        } else {
+            fillLayer.withProperties(
+                fillColor(zoneFillColorExpression()),
+                fillOpacity(DscZoneMapColors.fillOpacityExpression(layer))
+            )
+        }
+        style.addLayer(fillLayer)
         if (layer.usesZebraPattern) {
             style.addLayer(
                 FillLayer(
@@ -807,16 +845,24 @@ private fun addDscLayers(style: Style) {
                 ).withZoomRange(layer)
             )
         }
-        style.addLayer(
-                LineLayer(
-                    layer.lineLayerId,
-                    layer.sourceId
-                ).withProperties(
-                    lineColor(zoneLineColorExpression()),
-                    lineOpacity(DscZoneMapColors.lineOpacityExpression()),
-                    lineWidth(layer.lineWidth)
-                ).withZoomRange(layer)
+        val lineLayer = LineLayer(
+            layer.lineLayerId,
+            layer.sourceId
+        ).withZoomRange(layer)
+        if (layer.isEnvironmentalProtectedArea) {
+            lineLayer.withProperties(
+                lineColor(DscZoneMapColors.environmentalProtectedAreaLine.webHex),
+                lineOpacity(0.82f),
+                lineWidth(layer.lineWidth)
             )
+        } else {
+            lineLayer.withProperties(
+                lineColor(zoneLineColorExpression()),
+                lineOpacity(DscZoneMapColors.lineOpacityExpression()),
+                lineWidth(layer.lineWidth)
+            )
+        }
+        style.addLayer(lineLayer)
     }
     MapLayerIds.DYNAMIC_ZONES_LAYERS.forEach { layer ->
         style.addSource(GeoJsonSource(layer.sourceId, emptyFeatureCollection()))
@@ -850,8 +896,8 @@ private fun loadDscGeoJsonSources(
     MapLayerIds.STATIC_LAYERS.forEach { layer ->
         DSC_GEOJSON_EXECUTOR.execute {
             runCatching {
-                val cached = geoJsonRepository.get(layer.url, layer.key)
-                cached to FeatureCollection.fromJson(cached.body)
+                val cached = geoJsonRepository.get(layer.url, layer.key, layer.cacheTtlMillis)
+                cached to FeatureCollection.fromJson(cached.body).withStaticLayerProperties(layer)
             }.onSuccess { (cached, featureCollection) ->
                 if (cached.degraded) {
                     MAIN_HANDLER.post(onMapDataDegraded)
@@ -1019,7 +1065,11 @@ private fun featureToDemoZone(feature: Feature): DemoZone {
         id = properties?.stringValue("id")
             ?: properties?.stringValue("identifier")
             ?: "",
-        name = properties?.stringValue("name") ?: "Zona senza nome",
+        name = properties?.stringValue("name")
+            ?: properties?.stringValue("denominazi")
+            ?: properties?.stringValue("denominazione")
+            ?: properties?.stringValue("nome")
+            ?: "Zona senza nome",
         type = properties?.stringValue("_splitType")
             ?: properties?.stringValue("type")
             ?: "UNKNOWN",
@@ -1036,6 +1086,29 @@ private fun featureToDemoZone(feature: Feature): DemoZone {
         description = properties?.stringValue("description")
             ?: properties?.stringValue("message")
     )
+}
+
+private fun FeatureCollection.withStaticLayerProperties(layer: DscMapLayer): FeatureCollection {
+    features().orEmpty().forEach { feature ->
+        if (feature.properties()?.stringValue("_splitType").isNullOrBlank()) {
+            feature.addStringProperty(
+                "_splitType",
+                if (layer.isEnvironmentalProtectedArea) "PARKS_ENV" else layer.key
+            )
+        }
+        if (layer.isEnvironmentalProtectedArea) {
+            val properties = feature.properties()
+            val name = properties?.stringValue("name")
+                ?: properties?.stringValue("denominazi")
+                ?: properties?.stringValue("denominazione")
+                ?: properties?.stringValue("nome")
+            if (!name.isNullOrBlank()) {
+                feature.addStringProperty("name", name)
+            }
+            feature.addBooleanProperty("_environmentalOnly", true)
+        }
+    }
+    return this
 }
 
 private fun featureToTrafficTargetId(feature: Feature): String? =

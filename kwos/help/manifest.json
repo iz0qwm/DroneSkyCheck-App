@@ -1,0 +1,462 @@
+{
+  "schemaVersion": 1,
+  "contentVersion": 10,
+  "updatedAt": "2026-08-19T12:35:00Z",
+  "onboardingVersion": 5,
+  "onboarding": {
+    "steps": [
+      {
+        "id": "map_point",
+        "target": "map",
+        "title": "La mappa operativa",
+        "text": "La mappa e il punto di partenza: da qui scegli l'area da controllare e leggi le informazioni operative.",
+        "order": 1
+      },
+      {
+        "id": "selected_point_panel",
+        "target": "selected_point_panel",
+        "action": "open_selected_point_details",
+        "title": "Controllo zona",
+        "text": "Quando tocchi un punto della mappa, si apre il pannello di controllo della zona con verdetto, limitazioni e dettagli operativi.",
+        "order": 2
+      },
+      {
+        "id": "weather_flow",
+        "target": "flight_opportunity_card",
+        "action": "open_weather",
+        "title": "Meteo e finestre di volo",
+        "text": "Dal pannello del punto puoi aprire il report operativo per vedere meteo, finestre favorevoli e compatibilita con il drone.",
+        "order": 3
+      },
+      {
+        "id": "zones",
+        "target": "zones_button",
+        "action": "open_zones",
+        "title": "Zone sulla mappa",
+        "text": "Qui puoi scegliere quali informazioni e zone aeronautiche visualizzare sulla mappa.",
+        "order": 4
+      },
+      {
+        "id": "location_button",
+        "target": "location_button",
+        "title": "La tua posizione",
+        "text": "Usa questo comando per riportare rapidamente la mappa sulla tua posizione.",
+        "order": 5
+      },
+      {
+        "id": "traffic_button",
+        "target": "traffic_button",
+        "action": "open_traffic",
+        "title": "Traffico aereo",
+        "text": "Attiva questa funzione per visualizzare il traffico aereo rilevato nell'area circostante.",
+        "order": 6
+      },
+      {
+        "id": "profile_button",
+        "target": "profile_button",
+        "action": "open_profile",
+        "title": "Profilo pilota e drone",
+        "text": "Qui puoi configurare pilota, operatore, attestati e drone utilizzato nelle valutazioni.",
+        "order": 7
+      }
+    ]
+  },
+  "topics": [
+    {
+      "id": "getting_started",
+      "title": "Primi passi",
+      "summary": "Come orientarsi sulla mappa e iniziare il controllo di un punto.",
+      "introduction": "La mappa è il punto di partenza di Drone Sky Check. Da qui puoi scegliere il luogo in cui vuoi volare e accedere alle principali funzioni dell'app.",
+      "image": "mappa_operativa.jpeg",
+      "imageAlt": "Mappa principale di Drone Sky Check con i comandi Cerca, Pilota, Zone, Posizione e Traffico",
+      "order": 1,
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "Per iniziare, tocca direttamente un punto della mappa. Drone Sky Check analizzerà quella posizione e aprirà il pannello Controllo zona con le informazioni operative disponibili."
+        },
+        {
+          "type": "bullet_list",
+          "items": [
+            "Cerca: trova rapidamente una città, una via, un indirizzo oppure inserisci le coordinate.",
+            "Pilota: apre il profilo con dati personali, attestati, operatore UAS e droni.",
+            "Zone: permette di scegliere quali tipi di zone visualizzare graficamente sulla mappa.",
+            "Posizione: riporta la mappa sulla posizione del dispositivo.",
+            "Traffico: attiva la visualizzazione del traffico aereo rilevato nell'area."
+          ]
+        },
+        {
+          "type": "image",
+          "src": "ricerca_punto.jpeg",
+          "alt": "Pannello Cerca un punto di Drone Sky Check"
+        },
+        {
+          "type": "paragraph",
+          "text": "Se il punto che vuoi controllare non è immediatamente visibile sulla mappa, usa Cerca. Puoi cercare un luogo per nome o indirizzo oppure passare alla modalità coordinate per indicare direttamente latitudine e longitudine."
+        },
+        {
+          "type": "note",
+          "text": "Il modo più rapido per usare Drone Sky Check è semplice: scegli il punto in cui vuoi volare e toccalo sulla mappa. Le informazioni più dettagliate saranno disponibili nel pannello che si apre."
+        }
+      ]
+    },
+    {
+      "id": "check_area",
+      "title": "Controllare una zona",
+      "summary": "Come leggere il verdetto operativo del punto selezionato.",
+      "introduction": "Quando tocchi un punto della mappa, Drone Sky Check apre il pannello Controllo zona e riassume le condizioni operative disponibili per quella posizione.",
+      "image": "controllo_zona.jpeg",
+      "imageAlt": "Pannello Controllo zona con verdetto operativo, meteo e zone presenti",
+      "order": 2,
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "Nella parte alta del pannello trovi il verdetto principale. Questo riquadro indica in modo immediato la condizione operativa del punto selezionato, ad esempio la quota massima consentita oppure la presenza di limitazioni o restrizioni."
+        },
+        {
+          "type": "bullet_list",
+          "items": [
+            "Il riquadro verde principale mostra il risultato operativo sintetico del punto selezionato.",
+            "La sezione Meteo e prossime ore permette di aprire l’analisi meteo e il report operativo.",
+            "Zone presenti elenca le aree che interessano quel punto.",
+            "Ogni zona può mostrare stato operativo, orari di attività e altri dettagli utili.",
+            "Il pulsante Meno o Più serve a comprimere o ampliare le informazioni della singola zona."
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "Quando nel punto selezionato sono presenti una o più zone, Drone Sky Check mostra le informazioni principali di ciascuna. In questo modo puoi capire rapidamente se una zona è attiva, non attiva in questo momento oppure se richiede maggiore attenzione."
+        },
+        {
+          "type": "image",
+          "src": "dettagli_temporali_enr.jpeg",
+          "alt": "Sezione Dettagli temporali con settimana, giornata UTC e stato attuale"
+        },
+        {
+          "type": "paragraph",
+          "text": "Aprendo i Dettagli temporali puoi vedere meglio quando una zona è attiva durante la settimana e nell’arco della giornata UTC. Questa vista aiuta a capire se la restrizione è attiva adesso, in quali orari si applica e come varia nel tempo."
+        },
+        {
+          "type": "bullet_list",
+          "items": [
+            "Settimana: mostra in modo sintetico i giorni in cui la zona può risultare attiva o non attiva.",
+            "Giornata UTC: rappresenta l’andamento nell’arco delle 24 ore.",
+            "Stato attuale: riporta la condizione operativa del momento.",
+            "Orari di attività: descrive gli orari interpretati dall’app.",
+            "Dato originale: permette di confrontare il testo sorgente quando disponibile."
+          ]
+        },
+        {
+          "type": "note",
+          "text": "Il pannello Controllo zona è pensato per aiutarti a capire rapidamente la situazione del punto selezionato. Quando il caso è più complesso, consulta sempre anche i dettagli mostrati dall’app e le fonti aeronautiche applicabili."
+        }
+      ]
+    },
+    {
+      "id": "weather",
+      "title": "Meteo e opportunità di volo",
+      "summary": "Trova le finestre più favorevoli combinando disponibilità dello spazio aereo e condizioni meteo.",
+      "introduction": "Dopo aver controllato un punto, Drone Sky Check può analizzare le prossime ore e i giorni successivi per individuare quando esistono le condizioni più favorevoli per il volo.",
+      "image": "opportunita_di_volo.jpeg",
+      "imageAlt": "Scheda Opportunità di volo con migliore finestra, punteggio, meteo e previsione del weekend",
+      "order": 3,
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "La scheda Opportunità di volo combina le informazioni operative del punto selezionato con le previsioni meteorologiche. L'obiettivo è darti rapidamente una risposta alla domanda: quando conviene volare?"
+        },
+        {
+          "type": "bullet_list",
+          "items": [
+            "Migliore finestra: indica il giorno e l'intervallo orario con la valutazione complessiva più favorevole.",
+            "Punteggio: riassume la qualità della finestra su una scala da 0 a 100.",
+            "Condizione operativa: indica se la finestra è compatibile con il volo e riporta l'eventuale quota massima applicabile.",
+            "Affidabilità previsione: indica quanto è attendibile la previsione meteorologica per quella finestra.",
+            "Prima finestra disponibile: mostra l'occasione utile più vicina nel tempo, anche quando non coincide con quella migliore.",
+            "Meteo e vento: evidenziano rapidamente condizioni favorevoli o eventuali criticità."
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "Se nel profilo sono presenti uno o più droni, Drone Sky Check può confrontare le condizioni previste con i loro dati tecnici. In questo modo la valutazione può tenere conto, ad esempio, del margine disponibile rispetto al vento previsto e indicare il drone più adatto alla finestra considerata."
+        },
+        {
+          "type": "paragraph",
+          "text": "La sezione Weekend offre una vista rapida delle migliori opportunità previste per sabato e domenica, utile quando stai pianificando il volo con qualche giorno di anticipo."
+        },
+        {
+          "type": "note",
+          "text": "Il punteggio non rappresenta un'autorizzazione al volo. Una buona valutazione meteo non rende utilizzabile uno spazio aereo soggetto a restrizioni o autorizzazioni."
+        },
+        {
+          "type": "paragraph",
+          "text": "Se vuoi approfondire l'analisi, tocca Report operativo. Da lì puoi consultare in maggiore dettaglio le condizioni meteorologiche, le criticità previste e la compatibilità con il drone selezionato."
+        },
+        {
+          "type": "note",
+          "text": "Le previsioni meteorologiche sono un supporto alla pianificazione. Prima del volo verifica sempre anche le condizioni realmente presenti sul posto e la loro evoluzione."
+        }
+      ]
+    },
+    {
+      "id": "traffic",
+      "title": "Traffico aereo",
+      "summary": "Visualizza gli aeromobili rilevati nell'area e individua quelli che richiedono maggiore attenzione.",
+      "introduction": "La funzione Traffico aereo aumenta la consapevolezza di ciò che sta volando nelle vicinanze, mostrando sulla mappa gli aeromobili rilevati dalle sorgenti disponibili a Drone Sky Check.",
+      "image": "traffic_overview.jpeg",
+      "imageAlt": "Mappa di Drone Sky Check con la funzione Traffico aereo attiva e gli aeromobili rilevati nell'area",
+      "order": 4,
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "Tocca il pulsante Traffico sulla mappa per attivare la visualizzazione. Gli aeromobili rilevati vengono mostrati direttamente sulla mappa e la situazione viene aggiornata periodicamente."
+        },
+        {
+          "type": "bullet_list",
+          "items": [
+            "Gli aeromobili rilevati vengono rappresentati sulla mappa utilizzando l'ultima posizione disponibile.",
+            "Gli aeromobili ad alta quota possono essere mostrati come informazione senza generare necessariamente un avviso.",
+            "I traffici che richiedono maggiore attenzione vengono evidenziati rispetto agli altri.",
+            "Un avviso nella parte superiore della mappa può segnalare il traffico in avvicinamento più significativo.",
+            "Toccando un aeromobile puoi aprire la relativa scheda di dettaglio."
+          ]
+        },
+        {
+          "type": "image",
+          "src": "traffic_details.jpeg",
+          "alt": "Scheda di dettaglio di un aeromobile con distanza, velocità e informazioni CPA"
+        },
+        {
+          "type": "paragraph",
+          "text": "La scheda dell'aeromobile mostra le informazioni disponibili sul traffico selezionato, come distanza, direzione, velocità e dati relativi al suo avvicinamento."
+        },
+        {
+          "type": "paragraph",
+          "text": "Il CPA, Closest Point of Approach, indica il massimo avvicinamento previsto del traffico rispetto al punto di riferimento. Drone Sky Check può mostrare sia il tempo previsto al CPA sia la distanza minima stimata."
+        },
+        {
+          "type": "note",
+          "text": "La funzione Traffico aereo mostra soltanto gli aeromobili che possono essere rilevati attraverso le sorgenti disponibili a Drone Sky Check. L'assenza di traffico sulla mappa non significa che lo spazio aereo sia libero."
+        },
+        {
+          "type": "note",
+          "text": "Le informazioni sul traffico hanno finalità di consapevolezza situazionale e non sostituiscono l'osservazione dello spazio aereo, i servizi ATS o le procedure previste per l'operazione."
+        }
+      ]
+    },
+    {
+      "id": "notam",
+      "title": "NOTAM",
+      "summary": "Informazioni temporanee che possono modificare la disponibilità dello spazio aereo.",
+      "introduction": "I NOTAM sono avvisi aeronautici pubblicati per comunicare condizioni o attività temporanee che possono interessare lo spazio aereo e le operazioni di volo.",
+      "image": "info_notam.jpeg",
+      "imageAlt": "Scheda informativa di un NOTAM interpretato da Drone Sky Check",
+      "order": 5,
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "Quando un NOTAM interessa il punto selezionato, Drone Sky Check ne analizza le informazioni principali e prova a presentarle in una forma più semplice da leggere."
+        },
+        {
+          "type": "bullet_list",
+          "items": [
+            "Stato: indica se il NOTAM risulta attivo nel momento del controllo.",
+            "Validità: mostra il periodo durante il quale il NOTAM può produrre effetti.",
+            "Orari: quando presenti, Drone Sky Check interpreta giorni e fasce orarie di attività.",
+            "Motivo del NOTAM: riassume il contenuto operativo del campo E), aiutandoti a capire perché l'avviso è stato pubblicato.",
+            "Testo ufficiale: permette di consultare anche le informazioni aeronautiche originali quando disponibili."
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "Un NOTAM può riguardare, ad esempio, attività militari, esercitazioni, lancio paracadutisti, manifestazioni, lavori, attività UAS, ostacoli oppure altre condizioni temporanee. Il motivo effettivo viene ricavato dal contenuto del NOTAM."
+        },
+        {
+          "type": "paragraph",
+          "text": "Gli orari possono essere espressi con intervalli, giorni della settimana oppure riferimenti aeronautici come alba e tramonto. Drone Sky Check prova a tradurli in una descrizione più leggibile e a stabilire se l'attività è in corso nel momento selezionato."
+        },
+        {
+          "type": "note",
+          "text": "Le restrizioni pubblicate tramite NOTAM sono temporanee. Il normale sistema automatico di richiesta autorizzazioni di Drone Sky Check non è applicabile direttamente a queste situazioni."
+        },
+        {
+          "type": "note",
+          "text": "Quando il contenuto del NOTAM non consente un'interpretazione sufficientemente affidabile, consulta il testo ufficiale e le fonti aeronautiche indicate dall'app."
+        }
+      ]
+    },
+	{
+	  "id": "enr_aip",
+	  "title": "AIP ed ENR",
+	  "summary": "Come leggere le informazioni ENR dell'AIP e riconoscere le aree P, R e D.",
+	  "introduction": "L'AIP, Aeronautical Information Publication, raccoglie le informazioni aeronautiche ufficiali di carattere durevole. La sezione ENR, En-route, descrive lo spazio aereo, le rotte e numerose aree o attività che possono interessare le operazioni di volo.",
+	  "image": "info_enr_aip.png",
+	  "imageAlt": "Esempio di una zona ENR pubblicata nell'AIP Italia",
+	  "order": 6,
+	  "blocks": [
+		{
+		  "type": "paragraph",
+		  "text": "Drone Sky Check utilizza le informazioni ENR disponibili per aiutarti a leggere in modo più immediato le zone che interessano il punto selezionato. Quando possibile, interpreta sigla, limiti verticali, giorni e orari di attività mantenendo disponibile anche il testo aeronautico originale."
+		},
+		{
+		  "type": "image",
+		  "src": "info_enr_dsc.jpeg",
+		  "alt": "La stessa zona ENR interpretata e mostrata da Drone Sky Check"
+		},
+		{
+		  "type": "paragraph",
+		  "text": "Nell'esempio mostrato, l'area LI R314 Sabina è pubblicata nell'AIP come area regolamentata con limiti verticali da SFC a FL70 e specifici periodi di attività. Drone Sky Check utilizza queste informazioni per rappresentare la zona sulla mappa e rendere più immediata la lettura del suo stato e dei relativi orari. Tra le aree più comuni pubblicate nelle informazioni ENR trovi le zone identificate dalle lettere P, R e D."
+		},
+		{
+		  "type": "bullet_list",
+		  "items": [
+			"P — Prohibited area, area proibita: è uno spazio aereo nel quale l'attività di volo è vietata.",
+			"R — Restricted area, area regolamentata: è uno spazio aereo nel quale il volo è subordinato a specifiche condizioni, come particolari periodi di attività o autorizzazioni.",
+			"D — Danger area, area pericolosa: è uno spazio aereo nel quale, in determinati periodi, possono svolgersi attività potenzialmente pericolose per il volo degli aeromobili."
+		  ]
+		},
+		{
+		  "type": "paragraph",
+		  "text": "Una zona R o D non deve quindi essere interpretata automaticamente come un divieto permanente. È importante leggere gli orari, le condizioni di utilizzo e le eventuali indicazioni pubblicate per quella specifica area."
+		},
+		{
+		  "type": "note",
+		  "text": "La lettera D di una Danger Area non indica la classe D dello spazio aereo. Si tratta di due classificazioni differenti."
+		},
+		{
+		  "type": "paragraph",
+		  "text": "Nei Dettagli temporali Drone Sky Check prova a trasformare gli orari aeronautici pubblicati nell'ENR in una rappresentazione più semplice, mostrando ad esempio i giorni della settimana, la giornata UTC e lo stato della zona nel momento selezionato."
+		},
+		{
+		  "type": "paragraph",
+		  "text": "Le informazioni pubblicate stabilmente nell'AIP possono essere integrate o modificate temporaneamente da NOTAM e Supplementi AIP. Per questo la situazione operativa di una zona può cambiare rispetto alla sola pubblicazione ENR di base."
+		},
+		{
+		  "type": "note",
+		  "text": "Drone Sky Check semplifica la consultazione delle informazioni aeronautiche, ma non sostituisce l'AIP, i NOTAM e le altre fonti ufficiali applicabili all'operazione."
+		}
+	  ]
+	},	
+    {
+      "id": "authorizations",
+      "title": "Autorizzazioni",
+      "summary": "Come preparare una richiesta quando il punto selezionato richiede un'autorizzazione.",
+      "introduction": "Quando Drone Sky Check riconosce una zona per la quale è disponibile una procedura di richiesta supportata, può guidarti nella preparazione dei dati e dei documenti necessari.",
+      "image": "disegno_zona_richiesta.jpeg",
+      "imageAlt": "Disegno dell'area di operazione per una richiesta di autorizzazione",
+      "order": 7,
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "La procedura parte dal punto che hai controllato sulla mappa. Quando disponibile, il comando per richiedere l'autorizzazione apre una procedura guidata che raccoglie le informazioni necessarie per descrivere l'operazione."
+        },
+        {
+          "type": "paragraph",
+          "text": "Nella prima fase puoi definire l'area interessata dal volo direttamente sulla mappa. L'area disegnata viene utilizzata per descrivere con maggiore precisione la zona nella quale intendi svolgere l'operazione."
+        },
+        {
+          "type": "image",
+          "src": "compilazione_domanda_richiesta.jpeg",
+          "alt": "Compilazione dei dati della domanda di autorizzazione"
+        },
+        {
+          "type": "paragraph",
+          "text": "Successivamente Drone Sky Check raccoglie i dati necessari alla domanda. Quando disponibili, alcune informazioni possono essere recuperate automaticamente dal Profilo pilota, dall'operatore UAS e dal drone selezionato, riducendo i campi da compilare manualmente."
+        },
+        {
+          "type": "note",
+          "text": "Prima di generare la domanda controlla sempre i dati inseriti, l'area di operazione, le quote richieste e le informazioni relative al pilota e al drone."
+        },
+        {
+          "type": "image",
+          "src": "generazione_pdf_atm.jpeg",
+          "alt": "Generazione del documento PDF per la richiesta di autorizzazione"
+        },
+        {
+          "type": "paragraph",
+          "text": "Al termine della compilazione, quando la procedura è supportata, Drone Sky Check può preparare il documento PDF utilizzando il modello previsto per il tipo di richiesta individuato."
+        },
+        {
+          "type": "image",
+          "src": "atm_05.jpeg",
+          "alt": "Esempio di modulo ATM-05 generato da Drone Sky Check"
+        },
+        {
+          "type": "paragraph",
+          "text": "Il documento generato può essere controllato prima dell'invio. In base alla zona e al tipo di operazione, Drone Sky Check può indicare la procedura applicabile, ad esempio ATM-05 o altre procedure supportate dall'app."
+        },
+        {
+          "type": "note",
+          "text": "Il PDF generato da Drone Sky Check è una richiesta da presentare all'ente competente: non costituisce di per sé un'autorizzazione al volo."
+        },
+        {
+          "type": "note",
+          "text": "Non tutte le limitazioni dello spazio aereo possono essere gestite con una richiesta automatica. In particolare, restrizioni temporanee come quelle pubblicate tramite NOTAM possono richiedere verifiche o procedure differenti."
+        }
+      ]
+    },
+    {
+      "id": "pilot_profile",
+      "title": "Profilo pilota e droni",
+      "summary": "Configura pilota, attestati, operatore UAS e droni utilizzati nelle valutazioni.",
+      "introduction": "Il Profilo pilota raccoglie le informazioni che Drone Sky Check può utilizzare nelle valutazioni operative e, quando supportato, nella preparazione delle richieste di autorizzazione.",
+      "image": "profilo_pilota.jpeg",
+      "imageAlt": "Schermata del Profilo pilota di Drone Sky Check",
+      "order": 8,
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "Nella prima sezione puoi inserire e modificare i dati del pilota. Queste informazioni restano salvate sul dispositivo e possono essere riutilizzate nelle funzioni dell'app che richiedono i dati dell'utente."
+        },
+        {
+          "type": "image",
+          "src": "profilo_attestati_operatore.jpeg",
+          "alt": "Sezione del profilo con attestati e dati dell'operatore UAS"
+        },
+        {
+          "type": "paragraph",
+          "text": "La sezione Attestati permette di registrare le abilitazioni possedute, mentre la sezione Operatore UAS raccoglie i dati dell'operatore associato al profilo."
+        },
+        {
+          "type": "bullet_list",
+          "items": [
+            "Attestati: registra le abilitazioni del pilota disponibili nel profilo.",
+            "Operatore UAS: memorizza i dati dell'operatore e il relativo codice identificativo.",
+            "Assicurazione e altri dati disponibili possono essere utilizzati quando richiesti da una procedura.",
+            "Le informazioni salvate possono essere richiamate automaticamente durante la preparazione di una richiesta di autorizzazione."
+          ]
+        },
+        {
+          "type": "image",
+          "src": "scheda_drone.jpeg",
+          "alt": "Scheda del drone con dati identificativi e caratteristiche operative"
+        },
+        {
+          "type": "paragraph",
+          "text": "Nella sezione Droni puoi registrare uno o più aeromobili e scegliere quello predefinito. Il drone selezionato viene utilizzato, quando possibile, nelle valutazioni che dipendono dalle caratteristiche tecniche del mezzo."
+        },
+        {
+          "type": "bullet_list",
+          "items": [
+            "Puoi salvare marca, modello, classe e dati identificativi del drone.",
+            "Puoi indicare informazioni come Remote ID e dichiarazioni STS quando disponibili.",
+            "Il drone predefinito viene utilizzato come riferimento nelle analisi operative.",
+            "Quando il modello è riconosciuto dal catalogo tecnico di Drone Sky Check, l'app può utilizzare anche dati come la resistenza dichiarata al vento e altri limiti tecnici disponibili."
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "Queste informazioni permettono, ad esempio, di confrontare il vento previsto con le caratteristiche del drone durante l'analisi Meteo e opportunità di volo."
+        },
+        {
+          "type": "note",
+          "text": "Controlla che i dati del profilo e del drone siano corretti e aggiornati prima di utilizzarli per una valutazione operativa o per preparare una richiesta."
+        },
+        {
+          "type": "note",
+          "text": "I dati del profilo della versione FREE vengono conservati localmente sul dispositivo."
+        }
+      ]
+    }
+  ]
+}
