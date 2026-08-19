@@ -13,6 +13,8 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.view.ViewGroup
+import android.widget.FrameLayout
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
@@ -48,7 +50,6 @@ import org.maplibre.android.style.layers.FillLayer
 import org.maplibre.android.style.layers.Layer
 import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.Property
-import org.maplibre.android.style.layers.SymbolLayer
 import org.maplibre.android.style.layers.PropertyFactory.circleBlur
 import org.maplibre.android.style.layers.PropertyFactory.circleColor
 import org.maplibre.android.style.layers.PropertyFactory.circleOpacity
@@ -64,15 +65,6 @@ import org.maplibre.android.style.layers.PropertyFactory.lineColor
 import org.maplibre.android.style.layers.PropertyFactory.lineJoin
 import org.maplibre.android.style.layers.PropertyFactory.lineOpacity
 import org.maplibre.android.style.layers.PropertyFactory.lineWidth
-import org.maplibre.android.style.layers.PropertyFactory.textAllowOverlap
-import org.maplibre.android.style.layers.PropertyFactory.textAnchor
-import org.maplibre.android.style.layers.PropertyFactory.textColor
-import org.maplibre.android.style.layers.PropertyFactory.textField
-import org.maplibre.android.style.layers.PropertyFactory.textHaloColor
-import org.maplibre.android.style.layers.PropertyFactory.textHaloWidth
-import org.maplibre.android.style.layers.PropertyFactory.textIgnorePlacement
-import org.maplibre.android.style.layers.PropertyFactory.textOpacity
-import org.maplibre.android.style.layers.PropertyFactory.textSize
 import org.maplibre.android.style.layers.PropertyFactory.visibility
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.geojson.Feature
@@ -105,6 +97,14 @@ fun DroneSkyMapView(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val radarLabelOverlay = remember {
+        TrafficRadarLabelOverlay(context).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        }
+    }
     val mapView = remember {
         MapView(context).apply {
             onCreate(Bundle())
@@ -117,13 +117,26 @@ fun DroneSkyMapView(
                     onMapTapped,
                     onCameraIdle,
                     onMapDataDegraded,
-                    mapDarkeningEnabled
+                    mapDarkeningEnabled,
+                    radarLabelOverlay
                 )
             }
         }
     }
+    val mapContainer = remember {
+        FrameLayout(context).apply {
+            addView(
+                mapView,
+                FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+            )
+            addView(radarLabelOverlay)
+        }
+    }
 
-    DisposableEffect(lifecycleOwner, mapView) {
+    DisposableEffect(lifecycleOwner, mapView, radarLabelOverlay) {
         var isDestroyed = false
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
@@ -153,6 +166,8 @@ fun DroneSkyMapView(
 
         onDispose {
             stopTrafficAttentionPulse()
+            radarLabelOverlay.detachFromMap()
+            radarLabelOverlay.setTargets(emptyList())
             context.applicationContext.unregisterComponentCallbacks(callbacks)
             lifecycleOwner.lifecycle.removeObserver(observer)
             if (!isDestroyed) {
@@ -163,16 +178,16 @@ fun DroneSkyMapView(
     }
 
     AndroidView(
-        factory = { mapView },
+        factory = { mapContainer },
         update = { view ->
-            view.getMapAsync { map ->
+            mapView.getMapAsync { map ->
                 map.getStyle { style ->
                     addTrafficAwarenessLayers(style)
                     addMapDarkeningLayer(style)
                     updateMapDarkening(style, mapDarkeningEnabled)
                     applyLayerVisibility(style, visibleLayerCategories)
                     loadDynamicZonesSources(
-                        zonesRepository = ZonesRepository(view.context.applicationContext),
+                        zonesRepository = ZonesRepository(mapView.context.applicationContext),
                         style = style,
                         cameraBounds = map.currentCameraBounds(),
                         visibleLayerCategories = visibleLayerCategories,
@@ -180,7 +195,13 @@ fun DroneSkyMapView(
                     )
                     updatePointMarkers(style, selectedPoint, userLocation)
                     updateAuthorizationDrawing(style, authorizationTakeoff, authorizationAreaPoints, authorizationAreaClosed)
-                    updateTrafficAwareness(style, trafficAwarenessCenter ?: selectedPoint, trafficAwareness, trafficAssessments)
+                    updateTrafficAwareness(
+                        style,
+                        trafficAwarenessCenter ?: selectedPoint,
+                        trafficAwareness,
+                        trafficAssessments,
+                        radarLabelOverlay
+                    )
                     if (shouldCenterOnUserLocation && userLocation != null) {
                         centerOnUserLocation(map, userLocation)
                         onUserLocationCentered()
@@ -204,7 +225,8 @@ private fun configureMap(
     onMapTapped: (MapTapSelection) -> Unit,
     onCameraIdle: (CameraBounds) -> Unit,
     onMapDataDegraded: () -> Unit,
-    mapDarkeningEnabled: Boolean
+    mapDarkeningEnabled: Boolean,
+    radarLabelOverlay: TrafficRadarLabelOverlay
 ) {
     map.cameraPosition = CameraPosition.Builder()
         .target(LatLng(ROME_LATITUDE, ROME_LONGITUDE))
@@ -227,6 +249,7 @@ private fun configureMap(
         addMapDarkeningLayer(it)
         updateMapDarkening(it, mapDarkeningEnabled)
         addPointMarkerLayers(it)
+        radarLabelOverlay.attachToMap(map)
         startTrafficAttentionPulse(map)
         updatePointMarkers(it, null, null)
         loadDscGeoJsonSources(geoJsonRepository, it, onMapDataDegraded)
@@ -418,11 +441,6 @@ private fun addTrafficAwarenessLayers(style: Style) {
         MapLayerIds.TRAFFIC_AWARENESS_GLYPH_SOURCE_ID,
         emptyTrafficFeatureCollection()
     )
-    val altitudeLabelSourceCreated = style.addGeoJsonSourceIfMissing(
-        MapLayerIds.TRAFFIC_AWARENESS_ALTITUDE_LABEL_SOURCE_ID,
-        emptyTrafficFeatureCollection()
-    )
-
     val radiusFillLayerCreated = style.addLayerIfMissing(
         MapLayerIds.TRAFFIC_AWARENESS_RADIUS_FILL_LAYER_ID,
         FillLayer(
@@ -536,29 +554,11 @@ private fun addTrafficAwarenessLayers(style: Style) {
             lineJoin(Property.LINE_JOIN_ROUND)
         )
     )
-    val altitudeLabelLayerCreated = style.addLayerIfMissing(
-        MapLayerIds.TRAFFIC_AWARENESS_ALTITUDE_LABEL_LAYER_ID,
-        SymbolLayer(
-            MapLayerIds.TRAFFIC_AWARENESS_ALTITUDE_LABEL_LAYER_ID,
-            MapLayerIds.TRAFFIC_AWARENESS_ALTITUDE_LABEL_SOURCE_ID
-        ).withProperties(
-            textField(Expression.get(TrafficAwarenessMapProperties.AltitudeLabel)),
-            textSize(TrafficMapStyle.AltitudeLabelTextSize),
-            textAnchor(Property.TEXT_ANCHOR_CENTER),
-            textColor("#000000"),
-            textOpacity(1.0f),
-            textHaloColor("#ffffff"),
-            textHaloWidth(3.0f),
-            textAllowOverlap(true),
-            textIgnorePlacement(true)
-        )
-    )
     if (
         radiusSourceCreated ||
         targetSourceCreated ||
         vectorSourceCreated ||
         glyphSourceCreated ||
-        altitudeLabelSourceCreated ||
         radiusFillLayerCreated ||
         radiusLineLayerCreated ||
         attentionHaloLayerCreated ||
@@ -566,8 +566,7 @@ private fun addTrafficAwarenessLayers(style: Style) {
         markerLayerCreated ||
         attentionGlyphLayerCreated ||
         glyphHaloLayerCreated ||
-        glyphLayerCreated ||
-        altitudeLabelLayerCreated
+        glyphLayerCreated
     ) {
         DscLogger.debug(
             TrafficAwarenessLogTag,
@@ -576,7 +575,6 @@ private fun addTrafficAwarenessLayers(style: Style) {
                 "vectorLayerCreated=$vectorLayerCreated markerLayerCreated=$markerLayerCreated " +
                 "attentionGlyphLayerCreated=$attentionGlyphLayerCreated " +
                 "glyphLayerCreated=${glyphHaloLayerCreated || glyphLayerCreated} " +
-                "altitudeLabelSourceCreated=$altitudeLabelSourceCreated altitudeLabelLayerCreated=$altitudeLabelLayerCreated " +
                 "radiusSourceCreated=$radiusSourceCreated radiusLayersCreated=${radiusFillLayerCreated || radiusLineLayerCreated}"
         )
     }
@@ -586,9 +584,7 @@ private fun addTrafficAwarenessLayers(style: Style) {
             "map traffic layers ready marker=${style.getLayer(MapLayerIds.TRAFFIC_AWARENESS_MARKER_LAYER_ID) != null} " +
                 "source=${style.getSourceAs<GeoJsonSource>(MapLayerIds.TRAFFIC_AWARENESS_SOURCE_ID) != null} " +
                 "vectorSource=${style.getSourceAs<GeoJsonSource>(MapLayerIds.TRAFFIC_AWARENESS_VECTOR_SOURCE_ID) != null} " +
-                "glyph=${style.getLayer(MapLayerIds.TRAFFIC_AWARENESS_GLYPH_LAYER_ID) != null} " +
-                "altitudeLabelSource=${style.getSourceAs<GeoJsonSource>(MapLayerIds.TRAFFIC_AWARENESS_ALTITUDE_LABEL_SOURCE_ID) != null} " +
-                "altitudeLabelLayer=${style.getLayer(MapLayerIds.TRAFFIC_AWARENESS_ALTITUDE_LABEL_LAYER_ID) != null}"
+                "glyph=${style.getLayer(MapLayerIds.TRAFFIC_AWARENESS_GLYPH_LAYER_ID) != null}"
         )
     }
 }
@@ -697,7 +693,8 @@ private fun updateTrafficAwareness(
     style: Style,
     selectedPoint: MapPoint?,
     trafficAwareness: TrafficAwarenessState,
-    trafficAssessments: Map<String, TrafficAssessment>
+    trafficAssessments: Map<String, TrafficAssessment>,
+    radarLabelOverlay: TrafficRadarLabelOverlay
 ) {
     val enabled = trafficAwareness.enabled
     val targets = if (enabled) {
@@ -712,6 +709,10 @@ private fun updateTrafficAwareness(
         MapLayerIds.TRAFFIC_AWARENESS_SOURCE_ID,
         targetFeatures
     )
+    radarLabelOverlay.setTargets(
+        if (enabled) targets.toTrafficRadarLabelTargets(trafficAssessments) else emptyList()
+    )
+    val targetFeatureList = targetFeatures.features().orEmpty()
     val vectorFeatures = if (enabled) {
         trafficDirectionVectorFeatureCollection(targets)
     } else {
@@ -730,33 +731,19 @@ private fun updateTrafficAwareness(
         MapLayerIds.TRAFFIC_AWARENESS_GLYPH_SOURCE_ID,
         glyphFeatures
     )
-    val altitudeLabelFeatures = if (enabled) {
-        trafficAltitudeLabelFeatureCollection(targets)
-    } else {
-        emptyTrafficFeatureCollection()
-    }
-    val altitudeLabelUpdated = style.setGeoJsonSourceIfAvailable(
-        MapLayerIds.TRAFFIC_AWARENESS_ALTITUDE_LABEL_SOURCE_ID,
-        altitudeLabelFeatures
-    )
     if (enabled || targets.isNotEmpty()) {
-        val targetFeatureList = targetFeatures.features().orEmpty()
-        val altitudeLabelFeatureList = altitudeLabelFeatures.features().orEmpty()
         val firstFeature = targetFeatureList.firstOrNull()
         val firstProperties = firstFeature?.properties()
-        val firstLabelProperties = altitudeLabelFeatureList.firstOrNull()?.properties()
         DscLogger.debug(
             TrafficAwarenessLogTag,
             "map traffic render update enabled=$enabled targets=${targets.size} " +
                 "pointFeatures=${targetFeatureList.size} vectorFeatures=${vectorFeatures.features().orEmpty().size} " +
-                "glyphFeatures=${glyphFeatures.features().orEmpty().size} altitudeLabelFeatures=${altitudeLabelFeatureList.size} " +
+                "glyphFeatures=${glyphFeatures.features().orEmpty().size} radarLabelFeatures=${targetFeatureList.count { it.properties()?.has(TrafficAwarenessMapProperties.RadarLabel) == true }} " +
                 "targetSourceUpdated=$targetUpdated targetLayer=${style.getLayer(MapLayerIds.TRAFFIC_AWARENESS_MARKER_LAYER_ID) != null} " +
                 "glyphLayer=${style.getLayer(MapLayerIds.TRAFFIC_AWARENESS_GLYPH_LAYER_ID) != null} " +
-                "altitudeLabelSourceUpdated=$altitudeLabelUpdated " +
-                "altitudeLabelLayer=${style.getLayer(MapLayerIds.TRAFFIC_AWARENESS_ALTITUDE_LABEL_LAYER_ID) != null} " +
                 "firstId=${firstProperties?.stringValue(TrafficAwarenessMapProperties.TargetId) ?: "none"} " +
                 "firstAltLabel=${firstProperties?.stringValue(TrafficAwarenessMapProperties.AltitudeLabel) ?: "none"} " +
-                "firstRenderedAltLabel=${firstLabelProperties?.stringValue(TrafficAwarenessMapProperties.AltitudeLabel) ?: "none"} " +
+                "firstRadarLabel=${firstProperties?.stringValue(TrafficAwarenessMapProperties.RadarLabel) ?: "none"} " +
                 "firstBand=${firstProperties?.stringValue(TrafficAwarenessMapProperties.AltitudeBand) ?: "none"} " +
                 "firstFeed=${firstProperties?.stringValue(TrafficAwarenessMapProperties.FeedType) ?: "none"}"
         )
@@ -945,8 +932,7 @@ private fun Style.setGeoJsonSourceIfAvailable(sourceId: String, featureCollectio
             if (sourceId == MapLayerIds.TRAFFIC_AWARENESS_SOURCE_ID ||
                 sourceId == MapLayerIds.TRAFFIC_AWARENESS_RADIUS_SOURCE_ID ||
                 sourceId == MapLayerIds.TRAFFIC_AWARENESS_VECTOR_SOURCE_ID ||
-                sourceId == MapLayerIds.TRAFFIC_AWARENESS_GLYPH_SOURCE_ID ||
-                sourceId == MapLayerIds.TRAFFIC_AWARENESS_ALTITUDE_LABEL_SOURCE_ID
+                sourceId == MapLayerIds.TRAFFIC_AWARENESS_GLYPH_SOURCE_ID
             ) {
                 DscLogger.warn(TrafficAwarenessLogTag, "map source missing source=$sourceId")
             }
@@ -959,8 +945,7 @@ private fun Style.setGeoJsonSourceIfAvailable(sourceId: String, featureCollectio
         if (sourceId == MapLayerIds.TRAFFIC_AWARENESS_SOURCE_ID ||
             sourceId == MapLayerIds.TRAFFIC_AWARENESS_RADIUS_SOURCE_ID ||
             sourceId == MapLayerIds.TRAFFIC_AWARENESS_VECTOR_SOURCE_ID ||
-            sourceId == MapLayerIds.TRAFFIC_AWARENESS_GLYPH_SOURCE_ID ||
-            sourceId == MapLayerIds.TRAFFIC_AWARENESS_ALTITUDE_LABEL_SOURCE_ID
+            sourceId == MapLayerIds.TRAFFIC_AWARENESS_GLYPH_SOURCE_ID
         ) {
             DscLogger.warn(TrafficAwarenessLogTag, "map style not ready source=$sourceId", error)
         } else {
@@ -1181,8 +1166,7 @@ private fun trafficSymbolLayerIds(): Array<String> =
         MapLayerIds.TRAFFIC_AWARENESS_MARKER_LAYER_ID,
         MapLayerIds.TRAFFIC_AWARENESS_ATTENTION_GLYPH_LAYER_ID,
         MapLayerIds.TRAFFIC_AWARENESS_GLYPH_LAYER_ID,
-        MapLayerIds.TRAFFIC_AWARENESS_GLYPH_HALO_LAYER_ID,
-        MapLayerIds.TRAFFIC_AWARENESS_ALTITUDE_LABEL_LAYER_ID
+        MapLayerIds.TRAFFIC_AWARENESS_GLYPH_HALO_LAYER_ID
     ).toTypedArray()
 
 private fun mapDarkeningFeatureCollection(): FeatureCollection =
@@ -1251,7 +1235,6 @@ private const val LOG_TAG = "DroneSkyMap"
 
 private object TrafficMapStyle {
     const val AttentionHaloRadius = 17.0f
-    const val AltitudeLabelTextSize = 15.0f
 }
 
 private val MAIN_HANDLER = Handler(Looper.getMainLooper())

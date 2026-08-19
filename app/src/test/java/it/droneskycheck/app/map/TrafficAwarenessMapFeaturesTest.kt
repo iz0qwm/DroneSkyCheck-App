@@ -83,7 +83,6 @@ class TrafficAwarenessMapFeaturesTest {
     @Test
     fun layerIdsAreConsistentWithInstallAndUpdateNames() {
         assertEquals("traffic-awareness-source", MapLayerIds.TRAFFIC_AWARENESS_SOURCE_ID)
-        assertEquals("traffic-awareness-altitude-label-source", MapLayerIds.TRAFFIC_AWARENESS_ALTITUDE_LABEL_SOURCE_ID)
         assertEquals("traffic-awareness-marker-layer", MapLayerIds.TRAFFIC_AWARENESS_MARKER_LAYER_ID)
         assertEquals("traffic-awareness-glyph-source", MapLayerIds.TRAFFIC_AWARENESS_GLYPH_SOURCE_ID)
         assertEquals("traffic-awareness-attention-glyph-layer", MapLayerIds.TRAFFIC_AWARENESS_ATTENTION_GLYPH_LAYER_ID)
@@ -314,34 +313,101 @@ class TrafficAwarenessMapFeaturesTest {
     }
 
     @Test
-    fun altitudeLabelUsesAglAndFallsBackToAvailableAltitude() {
+    fun altitudeLabelUsesAglAndFallsBackToIdentifiedAvailableAltitude() {
         val agl = trafficTargetsFeatureCollection(
             listOf(trafficTarget(id = "traffic:agl", aglM = 849.6))
         ).features().orEmpty().single()
-        val geo = trafficTargetsFeatureCollection(
-            listOf(trafficTarget(id = "traffic:no-agl", geoM = 1_000.0, aglM = null))
+        val msl = trafficTargetsFeatureCollection(
+            listOf(trafficTarget(id = "traffic:no-agl", mslM = 2_450.0, aglM = null))
         ).features().orEmpty().single()
 
-        assertEquals("850 m", agl.properties()?.get(TrafficAwarenessMapProperties.AltitudeLabel)?.asString)
-        assertEquals("1000 m", geo.properties()?.get(TrafficAwarenessMapProperties.AltitudeLabel)?.asString)
+        assertEquals("850 m AGL", agl.properties()?.get(TrafficAwarenessMapProperties.AltitudeLabel)?.asString)
+        assertEquals("2450 m AMSL", msl.properties()?.get(TrafficAwarenessMapProperties.AltitudeLabel)?.asString)
     }
 
     @Test
-    fun altitudeLabelsUseDedicatedFeaturesAwayFromAircraftCenter() {
-        val target = trafficTarget(
-            id = "traffic:label",
-            lat = 41.9,
-            lon = 12.5,
-            aglM = 120.0,
-            trackDeg = 0.0
+    fun radarLabelCombinesTypeAglAndSpeedOnTargetFeature() {
+        val feature = trafficTargetsFeatureCollection(
+            listOf(
+                trafficTarget(
+                    id = "traffic:label",
+                    aglM = 720.0,
+                    speedMps = 74.595
+                )
+            )
+        ).features().orEmpty().single()
+
+        assertEquals(
+            "AEREO · 720 m AGL\n145 kt",
+            feature.properties()?.get(TrafficAwarenessMapProperties.RadarLabel)?.asString
         )
+        assertEquals("AEREO", feature.properties()?.get(TrafficAwarenessMapProperties.TrafficTypeLabel)?.asString)
+        assertEquals("145 kt", feature.properties()?.get(TrafficAwarenessMapProperties.SpeedLabel)?.asString)
+    }
 
-        val feature = trafficAltitudeLabelFeatureCollection(listOf(target)).features().orEmpty().single()
-        val point = feature.geometry() as Point
+    @Test
+    fun radarLabelFallsBackToMslWithoutInventingAgl() {
+        val feature = trafficTargetsFeatureCollection(
+            listOf(
+                trafficTarget(
+                    id = "traffic:msl",
+                    provider = null,
+                    source = null,
+                    callsign = null,
+                    aglM = null,
+                    mslM = 2_450.0
+                )
+            )
+        ).features().orEmpty().single()
 
-        assertEquals("traffic:label", feature.properties()?.get(TrafficAwarenessMapProperties.TargetId)?.asString)
-        assertEquals("120 m", feature.properties()?.get(TrafficAwarenessMapProperties.AltitudeLabel)?.asString)
-        assertTrue(point.latitude() < target.position.lat)
+        assertEquals(
+            "TRAFFICO · 2450 m AMSL",
+            feature.properties()?.get(TrafficAwarenessMapProperties.RadarLabel)?.asString
+        )
+    }
+
+    @Test
+    fun radarLabelOmitsMissingAndZeroSpeed() {
+        val features = trafficTargetsFeatureCollection(
+            listOf(
+                trafficTarget(id = "traffic:missing-speed", source = "FLARM", provider = "OGN", aglM = 950.0, speedMps = null),
+                trafficTarget(id = "traffic:zero-speed", source = "FREEFLIGHT", provider = "OGN", aglM = 640.0, speedMps = 0.0)
+            )
+        ).features().orEmpty()
+
+        assertEquals(
+            "GLIDER · 950 m AGL",
+            features[0].properties()?.get(TrafficAwarenessMapProperties.RadarLabel)?.asString
+        )
+        assertEquals(
+            "FREEFLIGHT · 640 m AGL",
+            features[1].properties()?.get(TrafficAwarenessMapProperties.RadarLabel)?.asString
+        )
+        assertFalse(features.any {
+            it.properties()?.get(TrafficAwarenessMapProperties.RadarLabel)?.asString?.contains("0 kt") == true
+        })
+    }
+
+    @Test
+    fun radarLabelDoesNotRenderNullOrNanText() {
+        val feature = trafficTargetsFeatureCollection(
+            listOf(
+                trafficTarget(
+                    id = "traffic:nulls",
+                    provider = null,
+                    source = null,
+                    callsign = null,
+                    aglM = Double.NaN,
+                    geoM = Double.NaN,
+                    speedMps = Double.NaN
+                )
+            )
+        ).features().orEmpty().single()
+        val radarLabel = feature.properties()?.get(TrafficAwarenessMapProperties.RadarLabel)?.asString.orEmpty()
+
+        assertEquals("TRAFFICO", radarLabel)
+        assertFalse(radarLabel.contains("null", ignoreCase = true))
+        assertFalse(radarLabel.contains("NaN", ignoreCase = true))
     }
 
     @Test
@@ -427,6 +493,7 @@ private fun trafficTarget(
     category: String? = null,
     aircraftType: String? = null,
     geoM: Double? = null,
+    mslM: Double? = null,
     aglM: Double? = null,
     objectType: String? = null
 ): TrafficTarget =
@@ -442,7 +509,7 @@ private fun trafficTarget(
         altitude = TrafficAltitude(
             baroM = null,
             geoM = geoM,
-            mslM = null,
+            mslM = mslM,
             aglM = aglM,
             sourceM = null,
             sourceReference = null

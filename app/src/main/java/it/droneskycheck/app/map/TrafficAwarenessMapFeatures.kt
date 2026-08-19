@@ -40,6 +40,10 @@ object TrafficAwarenessMapProperties {
     const val TargetKind = "targetKind"
     const val FeedType = "feedType"
     const val AltitudeLabel = "altitudeLabel"
+    const val TrafficTypeLabel = "trafficTypeLabel"
+    const val SpeedLabel = "speedLabel"
+    const val RadarLabel = "radarLabel"
+    const val RadarLabelPriority = "radarLabelPriority"
 }
 
 enum class TrafficAltitudeBand {
@@ -77,6 +81,17 @@ fun trafficTargetsFeatureCollection(
             target.mapAltitudeLabel()?.let {
                 addStringProperty(TrafficAwarenessMapProperties.AltitudeLabel, it)
             }
+            addStringProperty(TrafficAwarenessMapProperties.TrafficTypeLabel, target.mapTrafficTypeLabel())
+            target.mapSpeedLabel()?.let {
+                addStringProperty(TrafficAwarenessMapProperties.SpeedLabel, it)
+            }
+            target.mapRadarLabel()?.let {
+                addStringProperty(TrafficAwarenessMapProperties.RadarLabel, it)
+            }
+            addNumberProperty(
+                TrafficAwarenessMapProperties.RadarLabelPriority,
+                target.mapRadarLabelPriority(assessments[target.id]?.relevance ?: TrafficRelevance.INFORMATION)
+            )
         }.also {
             DscLogger.trace(
                 TrafficAwarenessLogTag,
@@ -147,28 +162,6 @@ fun trafficAircraftGlyphFeatureCollection(
     return FeatureCollection.fromFeatures(features)
 }
 
-fun trafficAltitudeLabelFeatureCollection(
-    targets: List<TrafficTarget>
-): FeatureCollection {
-    val features = targets.mapNotNull { target ->
-        if (!target.position.lat.isFinite() || !target.position.lon.isFinite()) {
-            return@mapNotNull null
-        }
-        val label = target.mapAltitudeLabel() ?: return@mapNotNull null
-        val labelPoint = target.position.offsetByGlyphPoint(
-            TrafficGlyphPoint(0.0, -target.trafficGlyphShape().labelBehindMeters),
-            target.mapRotationDeg()
-        )
-        Feature.fromGeometry(labelPoint).apply {
-            addStringProperty(TrafficAwarenessMapProperties.TargetId, target.id)
-            addStringProperty(TrafficAwarenessMapProperties.AltitudeLabel, label)
-            addStringProperty(TrafficAwarenessMapProperties.AltitudeBand, target.trafficAltitudeBand().name)
-            addStringProperty(TrafficAwarenessMapProperties.FeedType, target.trafficFeedType().name)
-        }
-    }
-    return FeatureCollection.fromFeatures(features)
-}
-
 fun trafficRadiusFeatureCollection(
     center: MapPoint?,
     radiusKm: Double = TrafficAwarenessDefaults.DefaultRadiusKm,
@@ -221,13 +214,84 @@ fun TrafficTarget.trafficAltitudeBand(): TrafficAltitudeBand =
     trafficAltitudeBandForAgl(altitude.aglM)
 
 fun TrafficTarget.mapAltitudeLabel(): String? =
-    altitude.mapDisplayAltitudeM()
-        ?.roundToInt()
-        ?.let { "$it m" }
+    altitude.mapDisplayAltitudeLabel()
 
-private fun TrafficAltitude.mapDisplayAltitudeM(): Double? =
-    listOf(aglM, sourceM, geoM, mslM, baroM)
-        .firstOrNull { it?.isFinite() == true }
+fun TrafficTarget.mapRadarLabel(): String? {
+    val altitudeLabel = mapAltitudeLabel()
+    val firstLine = listOfNotNull(mapTrafficTypeLabel(), altitudeLabel)
+        .joinToString(" · ")
+        .takeIf { it.isNotBlank() }
+        ?: return null
+    return listOfNotNull(firstLine, mapSpeedLabel()).joinToString("\n")
+}
+
+fun TrafficTarget.mapTrafficTypeLabel(): String =
+    when (trafficFeedType()) {
+        TrafficFeedType.FLARM -> "GLIDER"
+        TrafficFeedType.FANET,
+        TrafficFeedType.FREEFLIGHT -> "FREEFLIGHT"
+        TrafficFeedType.ADSB -> when (trafficTargetKind()) {
+            TrafficTargetKind.AIRCRAFT -> "AEREO"
+            TrafficTargetKind.HELICOPTER -> "ELICOTTERO"
+            TrafficTargetKind.DRONE -> "DRONE"
+        }
+        TrafficFeedType.UNKNOWN -> when (trafficTargetKind()) {
+            TrafficTargetKind.HELICOPTER -> "ELICOTTERO"
+            TrafficTargetKind.DRONE -> "DRONE"
+            TrafficTargetKind.AIRCRAFT -> "TRAFFICO"
+        }
+    }
+
+fun TrafficTarget.mapSpeedLabel(): String? {
+    val knots = motion.groundSpeedMps
+        ?.takeIf { it.isFinite() && it > 0.0 }
+        ?.let { (it * METERS_PER_SECOND_TO_KNOTS).roundToInt() }
+        ?.takeIf { it > 0 }
+        ?: return null
+    return "$knots kt"
+}
+
+private fun TrafficTarget.mapRadarLabelPriority(relevance: TrafficRelevance): Double =
+    when (relevance) {
+        TrafficRelevance.INFORMATION -> 0.0
+        TrafficRelevance.MONITOR -> 10.0
+        TrafficRelevance.ATTENTION -> 20.0
+    }
+
+private fun TrafficAltitude.mapDisplayAltitudeLabel(): String? =
+    mapDisplayAltitude()
+        ?.roundToInt()
+        ?.let { "${it} m ${mapDisplayAltitudeReference()}" }
+
+private fun TrafficAltitude.mapDisplayAltitude(): Double? =
+    when {
+        aglM?.isFinite() == true -> aglM
+        mslM?.isFinite() == true -> mslM
+        geoM?.isFinite() == true -> geoM
+        baroM?.isFinite() == true -> baroM
+        sourceM?.isFinite() == true -> sourceM
+        else -> null
+    }
+
+private fun TrafficAltitude.mapDisplayAltitudeReference(): String =
+    when {
+        aglM?.isFinite() == true -> "AGL"
+        mslM?.isFinite() == true -> "AMSL"
+        geoM?.isFinite() == true -> "GEO"
+        baroM?.isFinite() == true -> "BARO"
+        sourceM?.isFinite() == true -> sourceReference.mapSourceAltitudeReferenceLabel()
+        else -> "ALT"
+    }
+
+private fun String?.mapSourceAltitudeReferenceLabel(): String =
+    when {
+        this == null -> "ALT"
+        contains("agl", ignoreCase = true) -> "AGL"
+        contains("msl", ignoreCase = true) || contains("amsl", ignoreCase = true) -> "AMSL"
+        contains("geo", ignoreCase = true) -> "GEO"
+        contains("baro", ignoreCase = true) -> "BARO"
+        else -> "ALT"
+    }
 
 fun trafficAltitudeBandForAgl(aglM: Double?): TrafficAltitudeBand =
     when {
@@ -385,3 +449,4 @@ private const val MIN_TRAFFIC_VECTOR_SPEED_MPS = 1.0
 private const val MIN_TRAFFIC_VECTOR_DISTANCE_M = 25.0
 private const val MIN_TRAFFIC_VECTOR_VISIBLE_LENGTH_M = 150.0
 private const val MAX_TRAFFIC_VECTOR_DISTANCE_M = 3_000.0
+private const val METERS_PER_SECOND_TO_KNOTS = 1.9438444924406
