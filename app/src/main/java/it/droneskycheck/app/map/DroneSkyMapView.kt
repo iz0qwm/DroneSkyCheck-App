@@ -24,6 +24,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import it.droneskycheck.app.data.CachedGeoJson
 import it.droneskycheck.app.data.CachedGeoJsonRepository
 import it.droneskycheck.app.data.DscLogger
 import it.droneskycheck.app.data.ZonesRepository
@@ -37,6 +38,7 @@ import it.droneskycheck.app.ui.map.DemoZone
 import it.droneskycheck.app.ui.map.MapPoint
 import it.droneskycheck.app.ui.map.MapTapSelection
 import it.droneskycheck.app.ui.map.UserLocation
+import java.util.Collections
 import java.util.concurrent.Executors
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
@@ -69,7 +71,9 @@ import org.maplibre.android.style.layers.PropertyFactory.visibility
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.geojson.Feature
 import org.maplibre.geojson.FeatureCollection
+import org.maplibre.geojson.Geometry
 import org.maplibre.geojson.LineString
+import org.maplibre.geojson.MultiPolygon
 import org.maplibre.geojson.Point
 import org.maplibre.geojson.Polygon
 
@@ -106,6 +110,12 @@ fun DroneSkyMapView(
             )
         }
     }
+    val geoJsonRepository = remember(context) {
+        CachedGeoJsonRepository(context.applicationContext)
+    }
+    val requestedStaticLayerKeys = remember { Collections.synchronizedSet(mutableSetOf<String>()) }
+    val requestedDynamicZoneKeys = remember { Collections.synchronizedSet(mutableSetOf<String>()) }
+    val loadedStaticLayerCollections = remember { Collections.synchronizedMap(mutableMapOf<String, FeatureCollection>()) }
     val mapView = remember {
         MapView(context).apply {
             onCreate(Bundle())
@@ -113,6 +123,10 @@ fun DroneSkyMapView(
                 configureMap(
                     this,
                     map,
+                    geoJsonRepository,
+                    requestedStaticLayerKeys,
+                    requestedDynamicZoneKeys,
+                    loadedStaticLayerCollections,
                     visibleLayerCategories,
                     onTrafficTargetTapped,
                     onMapTapped,
@@ -189,11 +203,27 @@ fun DroneSkyMapView(
                     updateMapDarkening(style, mapDarkeningEnabled)
                     updateZoneOutlines(style, enhancedZoneOutlinesEnabled)
                     applyLayerVisibility(style, visibleLayerCategories)
+                    updateViewportFilteredStaticSources(
+                        style = style,
+                        loadedLayerCollections = loadedStaticLayerCollections,
+                        cameraBounds = map.currentCameraBounds(),
+                        visibleLayerCategories = visibleLayerCategories
+                    )
+                    loadDscGeoJsonSources(
+                        geoJsonRepository = geoJsonRepository,
+                        style = style,
+                        cameraBounds = map.currentCameraBounds(),
+                        visibleLayerCategories = visibleLayerCategories,
+                        requestedLayerKeys = requestedStaticLayerKeys,
+                        loadedLayerCollections = loadedStaticLayerCollections,
+                        onMapDataDegraded = onMapDataDegraded
+                    )
                     loadDynamicZonesSources(
                         zonesRepository = ZonesRepository(mapView.context.applicationContext),
                         style = style,
                         cameraBounds = map.currentCameraBounds(),
                         visibleLayerCategories = visibleLayerCategories,
+                        requestedLayerKeys = requestedDynamicZoneKeys,
                         onMapDataDegraded = onMapDataDegraded
                     )
                     updatePointMarkers(style, selectedPoint, userLocation)
@@ -223,6 +253,10 @@ fun DroneSkyMapView(
 private fun configureMap(
     mapView: MapView,
     map: MapLibreMap,
+    geoJsonRepository: CachedGeoJsonRepository,
+    requestedStaticLayerKeys: MutableSet<String>,
+    requestedDynamicZoneKeys: MutableSet<String>,
+    loadedStaticLayerCollections: MutableMap<String, FeatureCollection>,
     visibleLayerCategories: Set<DscLayerCategory>,
     onTrafficTargetTapped: (String) -> Unit,
     onMapTapped: (MapTapSelection) -> Unit,
@@ -238,7 +272,6 @@ private fun configureMap(
         .build()
 
     val styleBuilder = Style.Builder().fromUri(MapLayerIds.STYLE_URL)
-    val geoJsonRepository = CachedGeoJsonRepository(mapView.context.applicationContext)
     val zonesRepository = ZonesRepository(mapView.context.applicationContext)
     val touchDensity = mapView.context.resources.displayMetrics.density
 
@@ -257,12 +290,21 @@ private fun configureMap(
         radarLabelOverlay.attachToMap(map)
         startTrafficAttentionPulse(map)
         updatePointMarkers(it, null, null)
-        loadDscGeoJsonSources(geoJsonRepository, it, onMapDataDegraded)
+        loadDscGeoJsonSources(
+            geoJsonRepository = geoJsonRepository,
+            style = it,
+            cameraBounds = map.currentCameraBounds(),
+            visibleLayerCategories = visibleLayerCategories,
+            requestedLayerKeys = requestedStaticLayerKeys,
+            loadedLayerCollections = loadedStaticLayerCollections,
+            onMapDataDegraded = onMapDataDegraded
+        )
         loadDynamicZonesSources(
             zonesRepository,
             it,
             map.currentCameraBounds(),
             visibleLayerCategories,
+            requestedDynamicZoneKeys,
             onMapDataDegraded
         )
         applyLayerVisibility(it, visibleLayerCategories)
@@ -311,11 +353,18 @@ private fun configureMap(
             )
             onCameraIdle(cameraBounds)
             map.getStyle { style ->
+                updateViewportFilteredStaticSources(
+                    style = style,
+                    loadedLayerCollections = loadedStaticLayerCollections,
+                    cameraBounds = cameraBounds,
+                    visibleLayerCategories = visibleLayerCategories
+                )
                 loadDynamicZonesSources(
                     zonesRepository,
                     style,
                     cameraBounds,
                     visibleLayerCategories,
+                    requestedDynamicZoneKeys,
                     onMapDataDegraded
                 )
             }
@@ -891,25 +940,179 @@ private fun addDscLayers(style: Style) {
 private fun loadDscGeoJsonSources(
     geoJsonRepository: CachedGeoJsonRepository,
     style: Style,
+    cameraBounds: CameraBounds,
+    visibleLayerCategories: Set<DscLayerCategory>,
+    requestedLayerKeys: MutableSet<String>,
+    loadedLayerCollections: MutableMap<String, FeatureCollection>,
     onMapDataDegraded: () -> Unit
 ) {
-    MapLayerIds.STATIC_LAYERS.forEach { layer ->
-        DSC_GEOJSON_EXECUTOR.execute {
-            runCatching {
-                val cached = geoJsonRepository.get(layer.url, layer.key, layer.cacheTtlMillis)
-                cached to FeatureCollection.fromJson(cached.body).withStaticLayerProperties(layer)
-            }.onSuccess { (cached, featureCollection) ->
-                if (cached.degraded) {
-                    MAIN_HANDLER.post(onMapDataDegraded)
+    MapLayerIds.STATIC_LAYERS
+        .filter { layer -> !layer.loadOnlyWhenVisible || layer.category in visibleLayerCategories }
+        .forEach { layer ->
+            if (!requestedLayerKeys.add(layer.key)) return@forEach
+            val executor = if (layer.loadOnlyWhenVisible) {
+                ON_DEMAND_GEOJSON_EXECUTOR
+            } else {
+                STATIC_GEOJSON_EXECUTOR
+            }
+            executor.execute {
+                Log.i(LOG_TAG, "GeoJSON load start key=${layer.key}, url=${layer.url}")
+                runCatching {
+                    loadStaticGeoJsonLayer(geoJsonRepository, layer)
+                }.onSuccess { (cached, featureCollection) ->
+                    if (cached.degraded) {
+                        MAIN_HANDLER.post(onMapDataDegraded)
+                    }
+                    loadedLayerCollections[layer.key] = featureCollection
+                    Log.i(
+                        LOG_TAG,
+                        "GeoJSON load success key=${layer.key}, degraded=${cached.degraded}, " +
+                            "features=${featureCollection.features().orEmpty().size}"
+                    )
+                    MAIN_HANDLER.post {
+                        style.setGeoJsonSourceIfAvailable(
+                            layer.sourceId,
+                            featureCollection.forVisibleMapSource(layer, cameraBounds, visibleLayerCategories)
+                        )
+                    }
+                }.onFailure { error ->
+                    requestedLayerKeys.remove(layer.key)
+                    Log.w(LOG_TAG, "GeoJSON fetch failed key=${layer.key}, url=${layer.url}", error)
                 }
-                MAIN_HANDLER.post {
-                    style.setGeoJsonSourceIfAvailable(layer.sourceId, featureCollection)
-                }
-            }.onFailure { error ->
-                Log.w(LOG_TAG, "GeoJSON fetch failed key=${layer.key}, url=${layer.url}", error)
             }
         }
+}
+
+private fun loadStaticGeoJsonLayer(
+    geoJsonRepository: CachedGeoJsonRepository,
+    layer: DscMapLayer
+): Pair<CachedGeoJson, FeatureCollection> {
+    val cached = geoJsonRepository.get(
+        url = layer.url,
+        cacheKey = layer.key,
+        ttlMillis = layer.cacheTtlMillis,
+        timeoutMillis = layer.networkTimeoutMillis
+    )
+    val parsed = runCatching {
+        FeatureCollection.fromJson(cached.body).withStaticLayerProperties(layer)
+            .requireUsableStaticLayer(layer)
+    }.getOrElse { parseError ->
+        Log.w(LOG_TAG, "GeoJSON cache invalid key=${layer.key}; deleting cache and refetching", parseError)
+        geoJsonRepository.invalidate(layer.key)
+        val refreshed = geoJsonRepository.get(
+            url = layer.url,
+            cacheKey = layer.key,
+            ttlMillis = layer.cacheTtlMillis,
+            timeoutMillis = layer.networkTimeoutMillis,
+            forceRefresh = true
+        )
+        return refreshed to FeatureCollection.fromJson(refreshed.body).withStaticLayerProperties(layer)
+            .requireUsableStaticLayer(layer)
     }
+    return cached to parsed
+}
+
+private fun FeatureCollection.requireUsableStaticLayer(layer: DscMapLayer): FeatureCollection {
+    if (layer.isEnvironmentalProtectedArea && features().orEmpty().isEmpty()) {
+        throw IllegalStateException("Environmental GeoJSON has no features")
+    }
+    return this
+}
+
+private fun updateViewportFilteredStaticSources(
+    style: Style,
+    loadedLayerCollections: Map<String, FeatureCollection>,
+    cameraBounds: CameraBounds,
+    visibleLayerCategories: Set<DscLayerCategory>
+) {
+    MapLayerIds.STATIC_LAYERS
+        .filter { layer -> layer.loadOnlyWhenVisible && layer.category in visibleLayerCategories }
+        .forEach { layer ->
+            val featureCollection = loadedLayerCollections[layer.key] ?: return@forEach
+            style.setGeoJsonSourceIfAvailable(
+                layer.sourceId,
+                featureCollection.forVisibleMapSource(layer, cameraBounds, visibleLayerCategories)
+            )
+        }
+}
+
+private fun FeatureCollection.forVisibleMapSource(
+    layer: DscMapLayer,
+    cameraBounds: CameraBounds,
+    visibleLayerCategories: Set<DscLayerCategory>
+): FeatureCollection {
+    if (!layer.isEnvironmentalProtectedArea) return this
+    if (layer.category !in visibleLayerCategories || cameraBounds.zoom < layer.minZoom) return emptyFeatureCollection()
+
+    val bounds = cameraBounds.expanded(EnvironmentalViewportPaddingDegrees)
+    val visibleFeatures = features()
+        .orEmpty()
+        .asSequence()
+        .filter { feature -> feature.geometry()?.intersects(bounds) == true }
+        .take(MaxEnvironmentalFeaturesInSource + 1)
+        .toList()
+
+    val cappedFeatures = visibleFeatures.take(MaxEnvironmentalFeaturesInSource)
+    if (visibleFeatures.size > MaxEnvironmentalFeaturesInSource) {
+        Log.w(
+            LOG_TAG,
+            "GeoJSON viewport capped key=${layer.key}, features=${visibleFeatures.size}, " +
+                "cap=$MaxEnvironmentalFeaturesInSource, zoom=${cameraBounds.zoom}"
+        )
+    }
+    return FeatureCollection.fromFeatures(cappedFeatures)
+}
+
+private fun CameraBounds.expanded(paddingDegrees: Double): CameraBounds =
+    copy(
+        north = north + paddingDegrees,
+        south = south - paddingDegrees,
+        east = east + paddingDegrees,
+        west = west - paddingDegrees
+    )
+
+private fun Geometry.intersects(bounds: CameraBounds): Boolean =
+    featureBounds()?.intersects(bounds) ?: true
+
+private fun Geometry.featureBounds(): FeatureBounds? =
+    when (this) {
+        is Point -> FeatureBounds(
+            west = longitude(),
+            south = latitude(),
+            east = longitude(),
+            north = latitude()
+        )
+        is Polygon -> coordinates().flatten().toFeatureBounds()
+        is MultiPolygon -> coordinates().flatten().flatten().toFeatureBounds()
+        else -> null
+    }
+
+private fun List<Point>.toFeatureBounds(): FeatureBounds? {
+    if (isEmpty()) return null
+    var west = Double.POSITIVE_INFINITY
+    var south = Double.POSITIVE_INFINITY
+    var east = Double.NEGATIVE_INFINITY
+    var north = Double.NEGATIVE_INFINITY
+    forEach { point ->
+        west = minOf(west, point.longitude())
+        south = minOf(south, point.latitude())
+        east = maxOf(east, point.longitude())
+        north = maxOf(north, point.latitude())
+    }
+    return FeatureBounds(west = west, south = south, east = east, north = north)
+}
+
+private data class FeatureBounds(
+    val west: Double,
+    val south: Double,
+    val east: Double,
+    val north: Double
+) {
+    fun intersects(bounds: CameraBounds): Boolean =
+        east >= bounds.west &&
+            west <= bounds.east &&
+            north >= bounds.south &&
+            south <= bounds.north
 }
 
 private fun loadDynamicZonesSources(
@@ -917,6 +1120,7 @@ private fun loadDynamicZonesSources(
     style: Style,
     cameraBounds: CameraBounds,
     visibleLayerCategories: Set<DscLayerCategory>,
+    requestedLayerKeys: MutableSet<String>,
     onMapDataDegraded: () -> Unit
 ) {
     MapLayerIds.DYNAMIC_ZONES_LAYERS
@@ -924,7 +1128,9 @@ private fun loadDynamicZonesSources(
             layer.category in visibleLayerCategories && cameraBounds.zoom >= layer.minZoom
         }
         .forEach { layer ->
-            DSC_GEOJSON_EXECUTOR.execute {
+            val requestKey = "${layer.key}:${cameraBounds.bbox}"
+            if (!requestedLayerKeys.add(requestKey)) return@forEach
+            DYNAMIC_ZONES_EXECUTOR.execute {
                 runCatching {
                     val cached = zonesRepository.getZonesResult(
                         bbox = cameraBounds.bbox,
@@ -939,6 +1145,7 @@ private fun loadDynamicZonesSources(
                         style.setGeoJsonSourceIfAvailable(layer.sourceId, featureCollection)
                     }
                 }.onFailure { error ->
+                    requestedLayerKeys.remove(requestKey)
                     Log.w(LOG_TAG, "[zones-api] fetch failed type=${layer.zonesType}", error)
                 }
             }
@@ -1304,6 +1511,8 @@ private const val NOTAM_ZEBRA_SIZE_PX = 32
 private const val NOTAM_ZEBRA_STEP_PX = 16
 private const val NOTAM_ZEBRA_STROKE_PX = 2.2f
 private const val NOTAM_ZEBRA_OPACITY = 0.22f
+private const val MaxEnvironmentalFeaturesInSource = 450
+private const val EnvironmentalViewportPaddingDegrees = 0.35
 private const val LOG_TAG = "DroneSkyMap"
 
 private object TrafficMapStyle {
@@ -1311,5 +1520,7 @@ private object TrafficMapStyle {
 }
 
 private val MAIN_HANDLER = Handler(Looper.getMainLooper())
-private val DSC_GEOJSON_EXECUTOR = Executors.newFixedThreadPool(3)
+private val STATIC_GEOJSON_EXECUTOR = Executors.newFixedThreadPool(2)
+private val ON_DEMAND_GEOJSON_EXECUTOR = Executors.newSingleThreadExecutor()
+private val DYNAMIC_ZONES_EXECUTOR = Executors.newSingleThreadExecutor()
 private var trafficAttentionPulseRunnable: Runnable? = null

@@ -59,7 +59,7 @@ object AppReleaseNotes {
             "Traffic Awareness aggiornato con filtri per sorgente ADS-B, FANET, FLARM e FreeFlight, target disegnati con sagoma, vettore, halo e label radar Canvas coerenti.",
             "Filtro traffico sopra 1000 m AGL reso coerente su icone, vettori, halo, label Canvas e selezione sulla mappa.",
             "Nuovo pannello meteo sul punto selezionato, con vento, raffiche, temperatura, stato meteo e METAR vicino quando disponibile.",
-            "Nuovo layer Aree protette ambientali, disattivato di default, in verde chiaro e con scheda informativa senza effetto automatico sul verdetto operativo.",
+            "Nuovo layer Aree protette ambientali, disattivato di default, caricato solo quando abilitato, in verde chiaro e con scheda informativa senza effetto automatico sul verdetto operativo.",
             "Nuova impostazione Contorni zone piu visibili, alternativa alla modalita Mappa piu scura.",
             "Guida aggiornata con schede NOTAM scrollabili, collegamento informativo ENR e nuovi contenuti su AIP/ENR, aree protette e impostazioni mappa."
         )

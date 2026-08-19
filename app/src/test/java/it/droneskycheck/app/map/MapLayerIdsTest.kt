@@ -98,6 +98,8 @@ class MapLayerIdsTest {
         assertEquals("dsc-parks-env-fill", layer.fillLayerId)
         assertEquals("dsc-parks-env-line", layer.lineLayerId)
         assertTrue(layer.isEnvironmentalProtectedArea)
+        assertTrue(layer.loadOnlyWhenVisible)
+        assertTrue(layer.networkTimeoutMillis >= 120_000)
         assertEquals(DscLayerCategory.EnvironmentalProtectedAreas, MapLayerIds.categoryForFeatureType("PARKS_ENV"))
         assertFalse(DscLayerCategory.defaultVisibility.getValue(DscLayerCategory.EnvironmentalProtectedAreas))
     }

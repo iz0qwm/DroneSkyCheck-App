@@ -52,6 +52,28 @@ class CachedGeoJsonRepositoryTest {
         }
     }
 
+    @Test
+    fun staticGeoJsonCacheCanBeInvalidatedAfterCorruptRead() {
+        FakeGeoJsonServer(
+            listOf(
+                FakeGeoJsonResponse(200, """{"type":"FeatureCollection","features":[{"id":"fresh"}]}""")
+            )
+        ).use { server ->
+            val cacheDir = Files.createTempDirectory("cached-geojson-test").toFile()
+            val repository = CachedGeoJsonRepository(cacheDir)
+            val corruptCache = cacheDir.resolve("parks-env.geojson")
+            corruptCache.writeText("""{"type":"FeatureCollection","features":[""", Charsets.UTF_8)
+
+            val corrupt = repository.get(server.url, "parks-env", ttlMillis = Days180Millis)
+            repository.invalidate("parks-env")
+            val fresh = repository.get(server.url, "parks-env", ttlMillis = Days180Millis, forceRefresh = true)
+
+            assertTrue(corrupt.body.endsWith("["))
+            assertEquals("""{"type":"FeatureCollection","features":[{"id":"fresh"}]}""", fresh.body)
+            assertEquals(1, server.calls.size)
+        }
+    }
+
     private fun java.io.File.singleGeoJsonFile() =
         listFiles { file -> file.extension == "geojson" }?.single()
             ?: error("Expected one cached GeoJSON file")

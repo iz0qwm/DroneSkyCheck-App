@@ -28,6 +28,8 @@ object MapLayerIds {
             zeroLimitOpacity = 0.28f,
             lineWidth = 1.2f,
             cacheTtlMillis = 180L * 24L * 60L * 60L * 1000L,
+            networkTimeoutMillis = 120_000,
+            loadOnlyWhenVisible = true,
             featureTypeAliases = setOf("PARKS_ENV", "layer_parchi")
         ),
         DscMapLayer("p-parks-enr", "split/P_PARKS_ENR_561.geojson", DscLayerCategory.Parks, "Parks ENR 5.6.1", minZoom = 5.0f, zeroLimitOpacity = 0.05f),
@@ -215,6 +217,8 @@ data class DscMapLayer(
     val zeroLimitOpacity: Float = 0.19f,
     val lineWidth: Float = 0.9f,
     val cacheTtlMillis: Long? = null,
+    val networkTimeoutMillis: Int = 8_000,
+    val loadOnlyWhenVisible: Boolean = false,
     val featureTypeAliases: Set<String> = emptySet()
 ) {
     val sourceId: String = "dsc-$key-source"

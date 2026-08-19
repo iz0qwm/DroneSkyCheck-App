@@ -4,6 +4,8 @@ import android.content.Context
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 
 class CachedGeoJsonRepository internal constructor(
     cacheDir: File
@@ -14,11 +16,18 @@ class CachedGeoJsonRepository internal constructor(
         mkdirs()
     }
 
-    fun get(url: String, cacheKey: String, ttlMillis: Long? = null): CachedGeoJson {
+    fun get(
+        url: String,
+        cacheKey: String,
+        ttlMillis: Long? = null,
+        timeoutMillis: Int = DefaultTimeoutMillis,
+        forceRefresh: Boolean = false
+    ): CachedGeoJson {
         val cacheFile = File(cacheDir, "${cacheKey.cacheSafeName()}.geojson")
         val now = System.currentTimeMillis()
 
-        if (ttlMillis != null &&
+        if (!forceRefresh &&
+            ttlMillis != null &&
             cacheFile.exists() &&
             now - cacheFile.lastModified() < ttlMillis
         ) {
@@ -26,8 +35,8 @@ class CachedGeoJsonRepository internal constructor(
         }
 
         return runCatching {
-            fetch(url).also { body ->
-                cacheFile.writeText(body, Charsets.UTF_8)
+            fetch(url, timeoutMillis).also { body ->
+                cacheFile.writeAtomically(body)
             }.let { body ->
                 CachedGeoJson(body, degraded = false)
             }
@@ -40,10 +49,16 @@ class CachedGeoJsonRepository internal constructor(
         }
     }
 
-    private fun fetch(url: String): String {
+    fun invalidate(cacheKey: String) {
+        val cacheFile = File(cacheDir, "${cacheKey.cacheSafeName()}.geojson")
+        runCatching { cacheFile.delete() }
+        runCatching { File(cacheDir, "${cacheFile.name}.tmp").delete() }
+    }
+
+    private fun fetch(url: String, timeoutMillis: Int): String {
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
-            connectTimeout = TimeoutMillis
-            readTimeout = TimeoutMillis
+            connectTimeout = timeoutMillis
+            readTimeout = timeoutMillis
             requestMethod = "GET"
             useCaches = true
             setRequestProperty("Accept", "application/geo+json, application/json")
@@ -69,8 +84,27 @@ class CachedGeoJsonRepository internal constructor(
     private fun String.cacheSafeName(): String =
         replace(Regex("[^A-Za-z0-9._-]"), "_")
 
-    private companion object {
-        const val TimeoutMillis = 8_000
+    private fun File.writeAtomically(body: String) {
+        val tempFile = File(parentFile, "$name.tmp")
+        tempFile.writeText(body, Charsets.UTF_8)
+        runCatching {
+            Files.move(
+                tempFile.toPath(),
+                toPath(),
+                StandardCopyOption.REPLACE_EXISTING,
+                StandardCopyOption.ATOMIC_MOVE
+            )
+        }.getOrElse {
+            Files.move(
+                tempFile.toPath(),
+                toPath(),
+                StandardCopyOption.REPLACE_EXISTING
+            )
+        }
+    }
+
+    companion object {
+        const val DefaultTimeoutMillis = 8_000
     }
 }
 
