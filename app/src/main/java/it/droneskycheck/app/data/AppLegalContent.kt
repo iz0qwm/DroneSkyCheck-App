@@ -6,6 +6,8 @@ object AppExternalLinks {
     const val YouTubeChannelUrl = "https://www.youtube.com/@RaffaelloKWOS"
     const val TikTokChannelUrl = "https://www.tiktok.com/@raffaellokwos"
     const val DronePilotsTeamUrl = "https://www.dronepilotsteam.it/"
+    const val TelegramCommunityUrl = "https://t.me/tuttosuidroni"
+    const val TelegramUpdatesUrl = "https://t.me/DronePilotApp"
     const val SupportUrl = "https://buymeacoffee.com/tuttosuidroni"
 
     val CommunityLinks = listOf(
@@ -40,6 +42,18 @@ object AppExternalLinks {
             icon = ExternalLinkIcon.Community
         ),
         ExternalLink(
+            title = "Telegram Tutto sui Droni",
+            subtitle = "Community generale e confronto sulle app",
+            url = TelegramCommunityUrl,
+            icon = ExternalLinkIcon.Community
+        ),
+        ExternalLink(
+            title = "Telegram Drone Pilot App",
+            subtitle = "Info di sistema e aggiornamenti app",
+            url = TelegramUpdatesUrl,
+            icon = ExternalLinkIcon.Social
+        ),
+        ExternalLink(
             title = "Sostieni Drone Sky Check",
             subtitle = "buymeacoffee.com/tuttosuidroni",
             url = SupportUrl,
@@ -61,6 +75,7 @@ object AppReleaseNotes {
             "Nuovo pannello meteo sul punto selezionato, con vento, raffiche, temperatura, stato meteo e METAR vicino quando disponibile.",
             "Nuovo layer Aree protette ambientali, disattivato di default, caricato solo quando abilitato, in verde chiaro e con scheda informativa senza effetto automatico sul verdetto operativo.",
             "Nuova impostazione Contorni zone piu visibili, alternativa alla modalita Mappa piu scura.",
+            "Nuovi collegamenti Telegram per community, confronto sulle app, informazioni di sistema e aggiornamenti.",
             "Guida aggiornata con schede NOTAM scrollabili, collegamento informativo ENR e nuovi contenuti su AIP/ENR, aree protette e impostazioni mappa."
         )
     )
