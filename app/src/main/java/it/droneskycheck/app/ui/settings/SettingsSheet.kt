@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.ListAlt
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Description
@@ -35,6 +36,7 @@ import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.SettingsBrightness
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VideoLibrary
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -66,13 +68,16 @@ import it.droneskycheck.app.data.AppReleaseNotes
 import it.droneskycheck.app.data.AppThemeMode
 import it.droneskycheck.app.data.ExternalLink
 import it.droneskycheck.app.data.ExternalLinkIcon
+import it.droneskycheck.app.data.PeriodicNoticeLinks
 import it.droneskycheck.app.data.ReleaseNotes
 import it.droneskycheck.app.data.help.HelpManifest
 import it.droneskycheck.app.ui.help.HelpBottomSheet
 
 private enum class SettingsPage {
     Home,
+    BeginnerGuide,
     Display,
+    DroneWorld,
     Legal,
     WhatsNew,
     LegalInfo,
@@ -104,6 +109,9 @@ fun SettingsSheet(
     onEnhancedZoneOutlinesEnabledChanged: (Boolean) -> Unit,
     appThemeMode: AppThemeMode,
     onAppThemeModeChanged: (AppThemeMode) -> Unit,
+    beginnerStartupEnabled: Boolean,
+    onBeginnerStartupEnabledChanged: (Boolean) -> Unit,
+    onOpenBeginnerGuide: () -> Unit,
     onRefreshHelp: () -> Unit,
     onRepeatTour: () -> Unit,
     onOpenUrl: (String) -> Unit,
@@ -149,8 +157,17 @@ fun SettingsSheet(
             )
             when (page) {
                 SettingsPage.Home -> SettingsHome(
+                    onOpenBeginnerGuide = { page = SettingsPage.BeginnerGuide },
                     onOpenDisplay = { page = SettingsPage.Display },
+                    onOpenDroneWorld = { page = SettingsPage.DroneWorld },
+                    onSupport = { onOpenUrl(PeriodicNoticeLinks.BuyMeACoffeeUrl) },
                     onOpenLegal = { page = SettingsPage.Legal }
+                )
+
+                SettingsPage.BeginnerGuide -> BeginnerGuideSettingsPage(
+                    startupEnabled = beginnerStartupEnabled,
+                    onStartupEnabledChanged = onBeginnerStartupEnabledChanged,
+                    onOpenGuide = onOpenBeginnerGuide
                 )
 
                 SettingsPage.Display -> DisplaySettingsPage(
@@ -163,6 +180,8 @@ fun SettingsSheet(
                     appThemeMode = appThemeMode,
                     onAppThemeModeChanged = onAppThemeModeChanged
                 )
+
+                SettingsPage.DroneWorld -> DroneWorldPage(onOpenUrl = onOpenUrl)
 
                 SettingsPage.Legal -> LegalHomePage(
                     onOpenManual = { isHelpSheetVisible = true },
@@ -237,15 +256,32 @@ private fun SettingsTopBar(
 
 @Composable
 private fun SettingsHome(
+    onOpenBeginnerGuide: () -> Unit,
     onOpenDisplay: () -> Unit,
+    onOpenDroneWorld: () -> Unit,
+    onSupport: () -> Unit,
     onOpenLegal: () -> Unit
 ) {
     SettingsSection {
+        SettingsRow(
+            icon = Icons.AutoMirrored.Filled.MenuBook,
+            title = "Prima di volare",
+            subtitle = "Guida essenziale per iniziare",
+            onClick = onOpenBeginnerGuide
+        )
+        HorizontalDivider()
         SettingsRow(
             icon = Icons.Default.PhoneAndroid,
             title = "Schermo",
             subtitle = "Testo, tema e visualizzazione",
             onClick = onOpenDisplay
+        )
+        HorizontalDivider()
+        SettingsRow(
+            icon = Icons.Default.Public,
+            title = "Mondo droni",
+            subtitle = "News, video e approfondimenti",
+            onClick = onOpenDroneWorld
         )
     }
     SettingsSection {
@@ -255,6 +291,84 @@ private fun SettingsHome(
             subtitle = "Manuale, informazioni e community",
             onClick = onOpenLegal
         )
+    }
+    SupportDroneSkyCheckCard(onSupport = onSupport)
+}
+
+@Composable
+private fun SupportDroneSkyCheckCard(onSupport: () -> Unit) {
+    SettingsSection {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.Top
+            ) {
+                SettingsIcon(Icons.Default.Favorite)
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        "Sostieni Drone Sky Check",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        "Drone Sky Check è sviluppato e mantenuto indipendentemente. Se ti è utile, puoi contribuire con un caffè.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Button(onClick = onSupport) {
+                Text("Offrimi un caffè")
+            }
+        }
+    }
+}
+
+@Composable
+private fun BeginnerGuideSettingsPage(
+    startupEnabled: Boolean,
+    onStartupEnabledChanged: (Boolean) -> Unit,
+    onOpenGuide: () -> Unit
+) {
+    SettingsSection {
+        SettingsRow(
+            icon = Icons.AutoMirrored.Filled.MenuBook,
+            title = "Percorso essenziale",
+            subtitle = "Apri la guida per principianti",
+            onClick = onOpenGuide
+        )
+        HorizontalDivider()
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 72.dp)
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            SettingsIcon(Icons.Default.PlayArrow)
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    "Mostra \"Prima di volare\" all'avvio",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    "Ripropone la presentazione iniziale senza limitare l'accesso manuale.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(
+                checked = startupEnabled,
+                onCheckedChange = onStartupEnabledChanged
+            )
+        }
     }
 }
 
@@ -423,6 +537,19 @@ private fun LegalHomePage(
         SettingsRow(Icons.Default.Link, "Link e Community", "Sito, mappa web e canali ufficiali", onOpenCommunityLinks)
         HorizontalDivider()
         SettingsRow(Icons.Default.Groups, "Contribuzioni", "Community, tester e segnalazioni", onOpenContributions)
+    }
+}
+
+@Composable
+private fun DroneWorldPage(onOpenUrl: (String) -> Unit) {
+    SettingsSection {
+        AppExternalLinks.DroneWorldLinks.forEachIndexed { index, link ->
+            ExternalLinkRow(
+                link = link,
+                onClick = { onOpenUrl(link.url) }
+            )
+            if (index < AppExternalLinks.DroneWorldLinks.lastIndex) HorizontalDivider()
+        }
     }
 }
 
@@ -714,7 +841,9 @@ private fun SettingsIcon(icon: ImageVector) {
 private fun SettingsPage.titleText(): String =
     when (this) {
         SettingsPage.Home -> "Impostazioni"
+        SettingsPage.BeginnerGuide -> "Prima di volare"
         SettingsPage.Display -> "Schermo"
+        SettingsPage.DroneWorld -> "Mondo droni"
         SettingsPage.Legal -> "Legale e informazioni"
         SettingsPage.WhatsNew -> "Cosa c'e di nuovo"
         SettingsPage.LegalInfo -> "Informazioni legali"

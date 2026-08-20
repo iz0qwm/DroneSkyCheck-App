@@ -60,23 +60,43 @@ object AppExternalLinks {
             icon = ExternalLinkIcon.Support
         )
     )
+
+    const val DroneZineUrl = "https://www.dronezine.it/"
+    const val QuadricotteroNewsUrl = "https://www.youtube.com/@QuadricotteroN"
+    const val DroneZineYouTubeUrl = "https://www.youtube.com/@DroneZine"
+
+    val DroneWorldLinks = listOf(
+        ExternalLink(
+            title = "DroneZine",
+            subtitle = "Notizie e approfondimenti",
+            url = DroneZineUrl,
+            icon = ExternalLinkIcon.Website
+        ),
+        ExternalLink(
+            title = "Quadricottero News",
+            subtitle = "Video, prove e novita",
+            url = QuadricotteroNewsUrl,
+            icon = ExternalLinkIcon.Video
+        ),
+        ExternalLink(
+            title = "DroneZine YouTube",
+            subtitle = "Video e approfondimenti",
+            url = DroneZineYouTubeUrl,
+            icon = ExternalLinkIcon.Video
+        )
+    )
 }
 
 object AppReleaseNotes {
     // When versionName changes, reset this section for the new version and collect only that version's changes.
     val Current = ReleaseNotes(
-        versionName = "3.1",
-        versionCode = 21,
-        title = "Sviluppo Drone Sky Check 3.1",
-        intro = "Questa sezione raccoglie le modifiche introdotte durante lo sviluppo della versione 3.1.",
+        versionName = "3.2",
+        versionCode = 22,
+        title = "Sviluppo Drone Sky Check 3.2",
+        intro = "Questa sezione raccoglie le modifiche introdotte durante lo sviluppo della versione 3.2.",
         highlights = listOf(
-            "Traffic Awareness aggiornato con filtri per sorgente ADS-B, FANET, FLARM e FreeFlight, target disegnati con sagoma, vettore, halo e label radar Canvas coerenti.",
-            "Filtro traffico sopra 1000 m AGL reso coerente su icone, vettori, halo, label Canvas e selezione sulla mappa.",
-            "Nuovo pannello meteo sul punto selezionato, con vento, raffiche, temperatura, stato meteo e METAR vicino quando disponibile.",
-            "Nuovo layer Aree protette ambientali, disattivato di default, caricato solo quando abilitato, in verde chiaro e con scheda informativa senza effetto automatico sul verdetto operativo.",
-            "Nuova impostazione Contorni zone piu visibili, alternativa alla modalita Mappa piu scura.",
-            "Nuovi collegamenti Telegram per community, confronto sulle app, informazioni di sistema e aggiornamenti.",
-            "Guida aggiornata con schede NOTAM scrollabili, collegamento informativo ENR e nuovi contenuti su AIP/ENR, aree protette e impostazioni mappa."
+            "Nuova sezione Prima di volare con percorso essenziale per chi inizia a usare un drone.",
+            "Nuova sezione Mondo droni con news, video e approfondimenti selezionati."
         )
     )
 }
@@ -170,8 +190,9 @@ object AppLegalContent {
                 "Andrea Fanelli",
                 "Andrea Pinotti",
                 "Danilo Scarato",
-                "Stefano Orsi",
-                "Francesco Romeo"
+                "Francesco Romeo",
+                "Silvio Gaetani",
+                "Stefano Orsi"
             )
         )
     )

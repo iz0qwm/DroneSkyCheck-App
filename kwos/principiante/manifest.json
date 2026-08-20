@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "contentVersion": "1.0.0",
+  "id": "principiante",
+  "title": "Prima di volare",
+  "description": "Le cose essenziali da sapere prima di usare un drone.",
+  "language": "it-IT",
+  "country": "IT",
+  "audience": "beginner",
+  "pages": [
+    {
+      "id": "01",
+      "image": "01.png",
+      "title": "Hai comprato un drone?",
+      "accessibilityText": "Hai comprato un drone? Non basta accenderlo e partire. Prima del primo volo ci sono alcune cose importanti da sapere. Prima si controlla, poi si vola.",
+      "order": 1
+    },
+    {
+      "id": "02",
+      "image": "02.png",
+      "title": "Devi registrarti come operatore?",
+      "accessibilityText": "In molti casi devi registrarti come operatore UAS. Se il drone ha una telecamera o non è un semplice giocattolo, verifica l'obbligo di registrazione. In Italia la registrazione dell'operatore si gestisce tramite d-flight.",
+      "order": 2
+    },
+    {
+      "id": "03",
+      "image": "03.png",
+      "title": "QR code: cos'è e dove va",
+      "accessibilityText": "Dopo la registrazione come operatore ottieni il QR code operatore. Il codice identifica l'operatore e deve essere applicato sul drone in modo visibile quando previsto.",
+      "order": 3
+    },
+    {
+      "id": "04",
+      "image": "04.png",
+      "title": "Assicurazione: non dimenticarla",
+      "accessibilityText": "Prima di volare verifica di avere una copertura assicurativa adeguata all'uso del drone. L'assicurazione è una parte importante della preparazione al volo e della responsabilità dell'operatore.",
+      "order": 4
+    },
+    {
+      "id": "05",
+      "image": "05.png",
+      "title": "Ti serve un attestato?",
+      "accessibilityText": "L'attestato richiesto dipende dalla classe del drone e dal tipo di operazione. In alcuni casi può non essere richiesto, in altri serve almeno l'attestato A1/A3 o una qualifica aggiuntiva. Verifica sempre cosa si applica al tuo drone.",
+      "order": 5
+    },
+    {
+      "id": "06",
+      "image": "06.png",
+      "title": "Prima di volare controlla sempre la mappa",
+      "accessibilityText": "Prima di ogni volo controlla le zone geografiche e le eventuali limitazioni nel luogo in cui vuoi decollare. Anche un luogo che sembra libero può avere restrizioni aeronautiche o operative.",
+      "order": 6
+    },
+    {
+      "id": "07",
+      "image": "07.png",
+      "title": "Una mappa verde non significa che puoi fare qualsiasi cosa",
+      "accessibilityText": "Una zona apparentemente libera sulla mappa non elimina tutte le altre regole. Devi comunque rispettare quota, persone, visibilità del drone, condizioni locali e gli eventuali vincoli applicabili al luogo.",
+      "order": 7
+    },
+    {
+      "id": "08",
+      "image": "08.png",
+      "title": "Il drone deve rimanere a vista",
+      "accessibilityText": "Durante il volo il drone deve rimanere visibile e riconoscibile senza ostacoli. Se voli con goggles FPV, serve un osservatore vicino al pilota che mantenga il contatto visivo con il drone.",
+      "order": 8
+    },
+    {
+      "id": "09",
+      "image": "09.png",
+      "title": "Il segnale radio non è una garanzia",
+      "accessibilityText": "La portata dichiarata del radiocomando non garantisce il collegamento in ogni situazione. Edifici, alberi, terreno, interferenze, orientamento e distanza possono ridurre il segnale. Avere ancora il collegamento radio non sostituisce l'obbligo di mantenere il drone a vista.",
+      "order": 9
+    },
+    {
+      "id": "10",
+      "image": "10.png",
+      "title": "Attenzione a parchi, beni culturali e siti archeologici",
+      "accessibilityText": "In alcuni luoghi possono esistere ulteriori vincoli o regole oltre alle limitazioni aeronautiche visibili sulla mappa. Presta particolare attenzione a parchi, aree protette, beni culturali e siti archeologici e verifica le regole applicabili al luogo.",
+      "order": 10
+    },
+    {
+      "id": "11",
+      "image": "11.png",
+      "title": "Controlla il drone prima di decollare",
+      "accessibilityText": "Prima del decollo osserva il drone e verifica che non ci siano danni o anomalie. Controlla in particolare eliche, bracci, motori, batteria, sensori e parti mobili.",
+      "order": 11
+    },
+    {
+      "id": "12",
+      "image": "12.png",
+      "title": "Manutenzione, eliche e batterie",
+      "accessibilityText": "Prima e dopo il volo controlla che il drone sia pulito e senza danni. Verifica soprattutto eliche, batteria e parti soggette a usura. Controlla, pulisci e sostituisci ciò che serve: anche la manutenzione è sicurezza.",
+      "order": 12
+    }
+  ]
+}

@@ -150,6 +150,8 @@ import it.droneskycheck.app.data.AuthorizationZoneReference
 import it.droneskycheck.app.data.AppExternalLinks
 import it.droneskycheck.app.data.AppLegalContent
 import it.droneskycheck.app.data.AppThemeMode
+import it.droneskycheck.app.data.beginner.BeginnerGuidePreferencesRepository
+import it.droneskycheck.app.data.beginner.BeginnerGuideRepository
 import it.droneskycheck.app.data.filterableTypes
 import it.droneskycheck.app.data.AuthorityInfo
 import it.droneskycheck.app.data.CreateAuthorizationDraftResult
@@ -238,6 +240,8 @@ import it.droneskycheck.app.map.MapLayerIds
 import it.droneskycheck.app.ui.authorization.AuthorizationDraftSheet
 import it.droneskycheck.app.ui.accessibility.DroneSkyCheckTextScaleProvider
 import it.droneskycheck.app.ui.accessibility.effectiveDscFontScale
+import it.droneskycheck.app.ui.beginner.BeginnerGuideExperienceDialog
+import it.droneskycheck.app.ui.beginner.BeginnerGuideStartupIntroDialog
 import it.droneskycheck.app.ui.help.HelpBottomSheet
 import it.droneskycheck.app.ui.help.HelpTopicDialog
 import it.droneskycheck.app.ui.profile.PilotProfileSheet
@@ -279,6 +283,12 @@ fun MapScreen(
     val periodicNoticePreferences = remember(context) {
         PeriodicNoticePreferencesRepository(context.applicationContext)
     }
+    val beginnerGuideRepository = remember(context) {
+        BeginnerGuideRepository(context.applicationContext)
+    }
+    val beginnerGuidePreferences = remember(context) {
+        BeginnerGuidePreferencesRepository(context.applicationContext)
+    }
     val activity = context.findActivity()
     val uiState by viewModel.uiState.collectAsState()
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -309,6 +319,11 @@ fun MapScreen(
     var isHelpSheetVisible by remember { mutableStateOf(false) }
     var isPeriodicNoticeVisible by remember { mutableStateOf(false) }
     var periodicNoticeShownThisSession by remember { mutableStateOf(false) }
+    var isBeginnerGuideVisible by remember { mutableStateOf(false) }
+    var beginnerGuideStartInBook by remember { mutableStateOf(false) }
+    var isBeginnerStartupIntroVisible by remember { mutableStateOf(false) }
+    var beginnerStartupIntroShownThisSession by remember { mutableStateOf(false) }
+    var beginnerStartupEnabled by remember { mutableStateOf(true) }
     val trafficAttention = trafficAttentionPresentation(
         targets = uiState.trafficAwareness.response?.traffic?.targets.orEmpty(),
         assessments = uiState.trafficAssessments
@@ -339,6 +354,12 @@ fun MapScreen(
 
     LaunchedEffect(authorizationRepository) {
         reloadActiveDraft()
+    }
+
+    LaunchedEffect(beginnerGuidePreferences) {
+        beginnerStartupEnabled = withContext(Dispatchers.IO) {
+            beginnerGuidePreferences.getReadingState().autoStartupEnabled
+        }
     }
 
     LaunchedEffect(viewModel, lifecycleOwner) {
@@ -438,7 +459,31 @@ fun MapScreen(
         !uiState.isZoneSheetVisible &&
         contextualHelpTopic == null &&
         !isHelpSheetVisible &&
+        !isBeginnerGuideVisible &&
+        !isBeginnerStartupIntroVisible &&
         !isPeriodicNoticeVisible
+
+    val canShowBeginnerStartupIntro = uiState.helpManifest.contentVersion > 0 &&
+        uiState.activeHelpOnboarding == null &&
+        !uiState.isLayerSheetVisible &&
+        !uiState.locationPermissionSheetVisible &&
+        !uiState.isLocationControlSheetVisible &&
+        !isLocationSearchSheetVisible &&
+        !isSettingsSheetVisible &&
+        !uiState.isTrafficAlertSettingsSheetVisible &&
+        !uiState.isAppInfoSheetVisible &&
+        uiState.selectedTrafficTarget == null &&
+        !isPilotProfileSheetVisible &&
+        !isDraftSheetVisible &&
+        conflictingDraft == null &&
+        !uiState.isZoneSheetVisible &&
+        contextualHelpTopic == null &&
+        !isHelpSheetVisible &&
+        !isPeriodicNoticeVisible &&
+        !isBeginnerGuideVisible &&
+        !isBeginnerStartupIntroVisible &&
+        beginnerStartupEnabled &&
+        !beginnerStartupIntroShownThisSession
 
     LaunchedEffect(canShowPeriodicNotice, periodicNoticeShownThisSession, periodicNoticePreferences) {
         if (!canShowPeriodicNotice || periodicNoticeShownThisSession) return@LaunchedEffect
@@ -458,6 +503,15 @@ fun MapScreen(
         }
     }
 
+    LaunchedEffect(canShowBeginnerStartupIntro, beginnerStartupEnabled, beginnerGuidePreferences) {
+        if (!canShowBeginnerStartupIntro) return@LaunchedEffect
+        delay(BeginnerGuideStartupSettlingMillis)
+        if (beginnerGuidePreferences.getReadingState().autoStartupEnabled) {
+            beginnerStartupIntroShownThisSession = true
+            isBeginnerStartupIntroVisible = true
+        }
+    }
+
     DroneSkyCheckTextScaleProvider(largeTextEnabled = uiState.isLargeTextEnabled) {
         contextualHelpTopic?.let { topic ->
             HelpTopicDialog(
@@ -473,6 +527,36 @@ fun MapScreen(
                 refreshMessage = uiState.helpManifestRefreshMessage,
                 onRefresh = viewModel::refreshHelpManifestNow,
                 onDismiss = { isHelpSheetVisible = false }
+            )
+        }
+
+        if (isBeginnerStartupIntroVisible) {
+            BeginnerGuideStartupIntroDialog(
+                onOpenGuide = {
+                    isBeginnerStartupIntroVisible = false
+                    beginnerGuideStartInBook = true
+                    isBeginnerGuideVisible = true
+                },
+                onDisableStartup = {
+                    beginnerStartupEnabled = false
+                    isBeginnerStartupIntroVisible = false
+                    coroutineScope.launch(Dispatchers.IO) {
+                        beginnerGuidePreferences.setAutoStartupEnabled(false)
+                    }
+                },
+                onDismiss = { isBeginnerStartupIntroVisible = false }
+            )
+        }
+
+        if (isBeginnerGuideVisible) {
+            BeginnerGuideExperienceDialog(
+                repository = beginnerGuideRepository,
+                preferences = beginnerGuidePreferences,
+                startInBook = beginnerGuideStartInBook,
+                onDismiss = {
+                    isBeginnerGuideVisible = false
+                    beginnerGuideStartInBook = false
+                }
             )
         }
 
@@ -778,6 +862,18 @@ fun MapScreen(
                 onEnhancedZoneOutlinesEnabledChanged = viewModel::onEnhancedZoneOutlinesEnabledChanged,
                 appThemeMode = appThemeMode,
                 onAppThemeModeChanged = onAppThemeModeChanged,
+                beginnerStartupEnabled = beginnerStartupEnabled,
+                onBeginnerStartupEnabledChanged = { enabled ->
+                    beginnerStartupEnabled = enabled
+                    coroutineScope.launch(Dispatchers.IO) {
+                        beginnerGuidePreferences.setAutoStartupEnabled(enabled)
+                    }
+                },
+                onOpenBeginnerGuide = {
+                    isSettingsSheetVisible = false
+                    beginnerGuideStartInBook = false
+                    isBeginnerGuideVisible = true
+                },
                 onRefreshHelp = viewModel::refreshHelpManifestNow,
                 onRepeatTour = {
                     isSettingsSheetVisible = false
@@ -1234,7 +1330,7 @@ private fun MapControlsToolbar(
     val actionExit = fadeOut() + scaleOut(transformOrigin = TransformOrigin(1f, 1f))
 
     Box(
-        modifier = modifier.size(width = 336.dp, height = 400.dp),
+        modifier = modifier.size(width = 264.dp, height = 400.dp),
         contentAlignment = Alignment.BottomEnd
     ) {
         AnimatedVisibility(
@@ -7668,6 +7764,7 @@ private const val TrafficAlertToneDurationMillis = 220
 private const val TrafficAlertToneVolume = 60
 private const val PeriodicNoticeLogTag = "DscPeriodicNotice"
 private const val PeriodicNoticeUiSettlingMillis = 700L
+private const val BeginnerGuideStartupSettlingMillis = 500L
 private const val EnvironmentalProtectedAreaInfoText =
     "Quest'area identifica un territorio soggetto a tutela ambientale.\n\n" +
         "La presenza dell'area in questa mappa non significa automaticamente che l'intero territorio " +
