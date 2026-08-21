@@ -109,7 +109,7 @@ object AppLegalContent {
 
         Drone Sky Check non costituisce una fonte aeronautica ufficiale, non rilascia autorizzazioni al volo e non sostituisce i servizi e le pubblicazioni ufficiali messi a disposizione dalle autorita competenti.
 
-        Prima di ogni operazione il pilota e tenuto a verificare le informazioni rilevanti sulle fonti ufficiali e ad assicurarsi che il volo possa essere svolto nel rispetto della normativa applicabile.
+        Prima di ogni operazione il pilota è tenuto a verificare le informazioni rilevanti sulle fonti ufficiali e ad assicurarsi che il volo possa essere svolto nel rispetto della normativa applicabile.
 
         Le informazioni relative a meteo, spazio aereo, NOTAM, traffico e altre condizioni operative sono fornite come supporto alla valutazione del pilota e non costituiscono garanzia della possibilita o della sicurezza del volo.
 
@@ -139,7 +139,7 @@ object AppLegalContent {
     """.trimIndent()
 
     val PrivacyText = """
-        Drone Sky Check e progettato per ridurre al minimo la raccolta di dati personali.
+        Drone Sky Check è progettato per ridurre al minimo la raccolta di dati personali.
 
         Profilo e dati del pilota
 

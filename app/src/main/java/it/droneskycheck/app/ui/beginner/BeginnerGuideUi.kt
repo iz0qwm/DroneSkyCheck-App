@@ -622,45 +622,50 @@ private fun BeginnerGuideBook(
             )
         }
 
-        if (pageIndex > 0) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.CenterStart)
-                    .fillMaxHeight()
-                    .fillMaxWidth(0.28f)
-                    .clickable(
-                        enabled = !scale.isZoomed(),
-                        role = Role.Button,
-                        onClickLabel = "Indietro",
-                        onClick = ::previousPage
-                    )
-                    .semantics {
-                        role = Role.Button
-                        contentDescription = "Pagina precedente"
-                    }
-            )
-        }
-
-        Box(
+        Row(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .height(BottomActionHeight)
-                .clickable(
-                    enabled = !scale.isZoomed(),
-                    role = Role.Button,
-                    onClickLabel = if (pageIndex == pages.lastIndex) "Fine" else "Avanti",
-                    onClick = ::nextPage
-                )
-                .semantics {
-                    role = Role.Button
-                    contentDescription = if (pageIndex == pages.lastIndex) {
-                        "Fine, torna a Prima di volare"
-                    } else {
-                        "Pagina successiva"
+        ) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .then(
+                        if (pageIndex > 0) {
+                            Modifier
+                                .clickable(
+                                    enabled = !scale.isZoomed(),
+                                    role = Role.Button,
+                                    onClickLabel = "Pagina precedente",
+                                    onClick = ::previousPage
+                                )
+                                .semantics {
+                                    role = Role.Button
+                                    contentDescription = "Pagina precedente"
+                                }
+                        } else {
+                            Modifier
+                        }
+                    )
+            )
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .clickable(
+                        enabled = !scale.isZoomed(),
+                        role = Role.Button,
+                        onClickLabel = if (pageIndex == pages.lastIndex) "Fine" else "Pagina successiva",
+                        onClick = ::nextPage
+                    )
+                    .semantics {
+                        role = Role.Button
+                        contentDescription = if (pageIndex == pages.lastIndex) "Fine" else "Pagina successiva"
                     }
-                }
-        )
+            )
+        }
 
         if (showZoomHint) {
             Surface(
