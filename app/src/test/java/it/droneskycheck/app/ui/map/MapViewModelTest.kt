@@ -109,6 +109,30 @@ class MapViewModelTest {
     }
 
     @Test
+    fun enablingLocationAnalyzesFirstUserLocation() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val viewModel = viewModel(
+            scope = scope,
+            preferences = InMemoryMapPreferences()
+        )
+
+        viewModel.onLocationEnabled()
+        viewModel.onUserLocationUpdated(
+            UserLocation(
+                point = MapPoint(43.0, 10.0),
+                accuracyMeters = 8f,
+                isPrecise = true
+            )
+        )
+        waitUntil { viewModel.uiState.value.selectedPoint != null && !viewModel.uiState.value.isVerdictLoading }
+
+        assertEquals(MapPoint(43.0, 10.0), viewModel.uiState.value.selectedPoint)
+        assertTrue(viewModel.uiState.value.isZoneSheetVisible)
+        assertTrue(viewModel.uiState.value.shouldCenterOnUserLocation)
+        scope.cancel()
+    }
+
+    @Test
     fun requestingOperationalContextStartsTimelineAndWeatherForSelectedPoint() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val weather = FakeWeatherClient(forecast = weatherForecast())

@@ -703,7 +703,11 @@ fun MapScreen(
             onTrafficSettingsClick = viewModel::onTrafficAlertSettingsRequested,
             onSettingsClick = { isSettingsSheetVisible = true },
             onLocationClick = {
+                val userLocation = uiState.userLocation
                 when {
+                    uiState.isUserLocationEnabled &&
+                        userLocation != null &&
+                        uiState.selectedPoint != userLocation.point -> viewModel.onAnalyzeUserLocationRequested()
                     uiState.isUserLocationEnabled -> viewModel.onLocationControlRequested()
                     permissionState.hasForegroundLocation -> viewModel.onLocationEnabled()
                     else -> viewModel.onLocationPermissionExplanationRequested()

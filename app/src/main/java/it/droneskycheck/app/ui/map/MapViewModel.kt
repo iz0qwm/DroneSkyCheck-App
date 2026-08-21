@@ -142,6 +142,7 @@ class MapViewModel(
     private var latestUnfilteredTrafficAwarenessResponse: TrafficAwarenessResponse? = null
     private var lastLegalTimelineRequest: LegalTimelineRequestKey? = null
     private var catalogResolver: DroneTechnicalCatalogResolver = DroneTechnicalCatalogResolver.empty()
+    private var analyzeNextUserLocation = false
     private val trafficRelevanceEngine = TrafficRelevanceEngine()
     private val trafficAlertController = TrafficAlertController()
 
@@ -579,12 +580,7 @@ class MapViewModel(
 
     fun onAnalyzeUserLocationRequested() {
         val location = _uiState.value.userLocation ?: return
-        requestAnalysis(
-            MapTapSelection(
-                point = location.point,
-                zone = null
-            )
-        )
+        selectUserLocationForAnalysis(location)
     }
 
     fun onLocationSearchSelected(point: MapPoint) {
@@ -1775,6 +1771,8 @@ class MapViewModel(
     }
 
     fun onLocationEnabled() {
+        val location = _uiState.value.userLocation
+        analyzeNextUserLocation = location == null
         _uiState.value = _uiState.value.copy(
             isUserLocationEnabled = true,
             shouldCenterOnUserLocation = true,
@@ -1782,9 +1780,13 @@ class MapViewModel(
             locationPermissionSheetVisible = false,
             locationStatusMessage = null
         )
+        if (location != null) {
+            selectUserLocationForAnalysis(location)
+        }
     }
 
     fun onLocationDisabled() {
+        analyzeNextUserLocation = false
         _uiState.value = _uiState.value.copy(
             isUserLocationEnabled = false,
             userLocation = null,
@@ -1811,6 +1813,10 @@ class MapViewModel(
 
     fun onUserLocationUpdated(location: UserLocation) {
         _uiState.value = _uiState.value.copy(userLocation = location)
+        if (analyzeNextUserLocation && _uiState.value.isUserLocationEnabled) {
+            analyzeNextUserLocation = false
+            selectUserLocationForAnalysis(location)
+        }
     }
 
     fun onUserLocationCentered() {
@@ -1818,6 +1824,7 @@ class MapViewModel(
     }
 
     fun onLocationPermissionDenied(permanently: Boolean) {
+        analyzeNextUserLocation = false
         _uiState.value = _uiState.value.copy(
             isUserLocationEnabled = false,
             userLocation = null,
@@ -1833,6 +1840,7 @@ class MapViewModel(
     }
 
     fun onLocationPermissionRevoked() {
+        analyzeNextUserLocation = false
         _uiState.value = _uiState.value.copy(
             isUserLocationEnabled = false,
             userLocation = null,
@@ -1843,8 +1851,25 @@ class MapViewModel(
     }
 
     fun onLocationProviderUnavailable() {
+        analyzeNextUserLocation = false
         _uiState.value = _uiState.value.copy(
             locationStatusMessage = "Posizione non disponibile: controlla che i servizi di localizzazione siano attivi."
+        )
+    }
+
+    private fun selectUserLocationForAnalysis(location: UserLocation) {
+        _uiState.value = _uiState.value.copy(
+            userLocation = location,
+            shouldCenterOnUserLocation = true,
+            isLocationControlSheetVisible = false,
+            locationPermissionSheetVisible = false,
+            locationStatusMessage = null
+        )
+        requestAnalysis(
+            MapTapSelection(
+                point = location.point,
+                zone = null
+            )
         )
     }
 
