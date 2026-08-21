@@ -8,8 +8,20 @@ data class ZoneCheckV3Response(
     val warnings: List<Issue>,
     val baseline: Baseline,
     val meta: Meta,
-    val responsibleZone: ResponsibleZone? = null
+    val responsibleZone: ResponsibleZone? = null,
+    val offlineCache: ZoneCheckOfflineCacheInfo? = null
 )
+
+data class ZoneCheckOfflineCacheInfo(
+    val analyzedAtUtcMillis: Long,
+    val reason: ZoneCheckOfflineFallbackReason
+)
+
+enum class ZoneCheckOfflineFallbackReason {
+    NETWORK_FAILURE,
+    TIMEOUT,
+    SERVER_UNAVAILABLE
+}
 
 data class Position(
     val lat: Double,

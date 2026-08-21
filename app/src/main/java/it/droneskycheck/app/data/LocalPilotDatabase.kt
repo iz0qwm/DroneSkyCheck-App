@@ -100,6 +100,19 @@ data class AuthorizationDraftEntity(
     val updatedAt: Long = System.currentTimeMillis()
 )
 
+@Entity(tableName = "cached_zone_analyses")
+data class CachedZoneAnalysisEntity(
+    @PrimaryKey val id: String,
+    val lat: Double,
+    val lon: Double,
+    val normalizedLat: String,
+    val normalizedLon: String,
+    val analyzedAtUtc: Long,
+    val responseJson: String,
+    val zoneIds: String = "",
+    val notamCodes: String = ""
+)
+
 @Dao
 interface LocalPilotDao {
     @Query("SELECT * FROM pilot_profile WHERE id = :id LIMIT 1")
@@ -152,6 +165,30 @@ interface LocalPilotDao {
 
     @Query("DELETE FROM authorization_drafts WHERE id = :id")
     suspend fun deleteAuthorizationDraftById(id: String)
+
+    @Query(
+        """
+        SELECT * FROM cached_zone_analyses
+        WHERE normalizedLat = :normalizedLat AND normalizedLon = :normalizedLon
+        LIMIT 1
+        """
+    )
+    suspend fun getCachedZoneAnalysis(normalizedLat: String, normalizedLon: String): CachedZoneAnalysisEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertCachedZoneAnalysis(entity: CachedZoneAnalysisEntity)
+
+    @Query(
+        """
+        DELETE FROM cached_zone_analyses
+        WHERE id NOT IN (
+            SELECT id FROM cached_zone_analyses
+            ORDER BY analyzedAtUtc DESC
+            LIMIT :keep
+        )
+        """
+    )
+    suspend fun trimCachedZoneAnalyses(keep: Int)
 }
 
 @Database(
@@ -160,9 +197,10 @@ interface LocalPilotDao {
         PilotCertificateEntity::class,
         UasOperatorEntity::class,
         LocalDroneEntity::class,
-        AuthorizationDraftEntity::class
+        AuthorizationDraftEntity::class,
+        CachedZoneAnalysisEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = true
 )
 abstract class LocalPilotDatabase : RoomDatabase() {
@@ -181,6 +219,7 @@ abstract class LocalPilotDatabase : RoomDatabase() {
                 )
                     .addMigrations(Migration1To2)
                     .addMigrations(Migration2To3)
+                    .addMigrations(Migration3To4)
                     .fallbackToDestructiveMigration(false)
                     .build()
                     .also { instance = it }
@@ -215,6 +254,27 @@ abstract class LocalPilotDatabase : RoomDatabase() {
         private val Migration2To3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `local_drones` ADD COLUMN `manualMaxWindResistanceMs` REAL")
+            }
+        }
+
+        val Migration3To4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `cached_zone_analyses` (
+                        `id` TEXT NOT NULL,
+                        `lat` REAL NOT NULL,
+                        `lon` REAL NOT NULL,
+                        `normalizedLat` TEXT NOT NULL,
+                        `normalizedLon` TEXT NOT NULL,
+                        `analyzedAtUtc` INTEGER NOT NULL,
+                        `responseJson` TEXT NOT NULL,
+                        `zoneIds` TEXT NOT NULL,
+                        `notamCodes` TEXT NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent()
+                )
             }
         }
     }

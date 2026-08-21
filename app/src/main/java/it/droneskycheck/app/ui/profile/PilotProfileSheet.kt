@@ -139,6 +139,9 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
+
+private const val ProfilePhotoDecodeMaxSizePx = 2048
 
 private enum class ProfileEditor {
     Pilot,
@@ -991,8 +994,9 @@ private fun ProfileAvatar(
     onClick: (() -> Unit)? = null
 ) {
     val photoPath = profile?.profilePhoto.orEmpty()
+    val photoRevision = profilePhotoRevision(photoPath)
     val initials = profile.initials()
-    val bitmap = remember(photoPath) {
+    val bitmap = remember(photoPath, photoRevision) {
         loadProfileBitmap(photoPath)
     }
 
@@ -2531,17 +2535,64 @@ private fun loadProfileBitmap(path: String): Bitmap? {
     }.getOrNull()
 }
 
+private fun profilePhotoRevision(path: String): String {
+    val trimmed = path.trim()
+    if (trimmed.isBlank()) return ""
+    return runCatching {
+        val file = File(trimmed)
+        "${file.lastModified()}:${file.length()}"
+    }.getOrDefault("")
+}
+
 private fun decodeBitmap(context: Context, uri: Uri): Bitmap? =
     runCatching {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             val source = ImageDecoder.createSource(context.contentResolver, uri)
-            ImageDecoder.decodeBitmap(source) { decoder, _, _ ->
+            ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
                 decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                targetBitmapSize(
+                    width = info.size.width,
+                    height = info.size.height,
+                    maxSize = ProfilePhotoDecodeMaxSizePx
+                )?.let { (targetWidth, targetHeight) ->
+                    decoder.setTargetSize(targetWidth, targetHeight)
+                }
             }
         } else {
-            context.contentResolver.openInputStream(uri)?.use(BitmapFactory::decodeStream)
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                BitmapFactory.decodeStream(input, null, bounds)
+            }
+            val decodeOptions = BitmapFactory.Options().apply {
+                inSampleSize = bitmapSampleSize(
+                    width = bounds.outWidth,
+                    height = bounds.outHeight,
+                    maxSize = ProfilePhotoDecodeMaxSizePx
+                )
+            }
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                BitmapFactory.decodeStream(input, null, decodeOptions)
+            }
         }
     }.getOrNull()
+
+private fun targetBitmapSize(width: Int, height: Int, maxSize: Int): Pair<Int, Int>? {
+    val largestSide = max(width, height)
+    if (width <= 0 || height <= 0 || largestSide <= maxSize) return null
+    val scale = maxSize.toFloat() / largestSide.toFloat()
+    return (width * scale).roundToInt().coerceAtLeast(1) to
+        (height * scale).roundToInt().coerceAtLeast(1)
+}
+
+private fun bitmapSampleSize(width: Int, height: Int, maxSize: Int): Int {
+    val largestSide = max(width, height)
+    if (width <= 0 || height <= 0 || largestSide <= maxSize) return 1
+    var sampleSize = 1
+    while (largestSide / sampleSize > maxSize) {
+        sampleSize *= 2
+    }
+    return sampleSize
+}
 
 private fun it.droneskycheck.app.data.drone.DroneCatalogMatchResult.profileSummaryText(): String =
     when (status) {

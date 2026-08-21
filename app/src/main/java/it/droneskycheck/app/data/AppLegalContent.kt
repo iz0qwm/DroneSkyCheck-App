@@ -93,11 +93,12 @@ object AppReleaseNotes {
         versionName = "3.4",
         versionCode = 24,
         title = "Cosa c'e di nuovo in Drone Sky Check 3.4",
-        intro = "Questa versione migliora la lettura dei dettagli aeronautici nelle aree ENR e NOTAM.",
+        intro = "Questa versione migliora la lettura dei dettagli aeronautici e la gestione dei risultati gia verificati.",
         highlights = listOf(
             "Riorganizzata la sezione ENR con riquadri piu chiari, titoli evidenziati e fonte ufficiale separata.",
             "Ridotte le informazioni duplicate nei dettagli delle zone, soprattutto tra orari, note e testo ufficiale.",
-            "Aggiunti dettagli temporali grafici anche nei NOTAM, con barre orarie e calendario compatto della validita."
+            "Aggiunti dettagli temporali grafici anche nei NOTAM, con barre orarie e calendario compatto della validita.",
+            "Quando la verifica online non riesce, l'app puo mostrare l'ultimo risultato memorizzato per lo stesso punto, sempre indicato come non aggiornato."
         )
     )
 }

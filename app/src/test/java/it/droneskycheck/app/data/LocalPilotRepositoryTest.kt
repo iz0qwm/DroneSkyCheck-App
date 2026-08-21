@@ -176,6 +176,7 @@ internal class FakeLocalPilotDao : LocalPilotDao {
     private val certificates = linkedMapOf<String, PilotCertificateEntity>()
     private val drones = linkedMapOf<String, LocalDroneEntity>()
     private val drafts = linkedMapOf<String, AuthorizationDraftEntity>()
+    private val cachedZoneAnalyses = linkedMapOf<String, CachedZoneAnalysisEntity>()
 
     override suspend fun getProfileEntity(id: String): PilotProfileEntity? =
         profile?.takeIf { it.id == id }
@@ -238,5 +239,24 @@ internal class FakeLocalPilotDao : LocalPilotDao {
 
     override suspend fun deleteAuthorizationDraftById(id: String) {
         drafts.remove(id)
+    }
+
+    override suspend fun getCachedZoneAnalysis(
+        normalizedLat: String,
+        normalizedLon: String
+    ): CachedZoneAnalysisEntity? =
+        cachedZoneAnalyses["$normalizedLat,$normalizedLon"]
+
+    override suspend fun upsertCachedZoneAnalysis(entity: CachedZoneAnalysisEntity) {
+        cachedZoneAnalyses[entity.id] = entity
+    }
+
+    override suspend fun trimCachedZoneAnalyses(keep: Int) {
+        val keepIds = cachedZoneAnalyses.values
+            .sortedByDescending { it.analyzedAtUtc }
+            .take(keep)
+            .map { it.id }
+            .toSet()
+        cachedZoneAnalyses.keys.retainAll(keepIds)
     }
 }

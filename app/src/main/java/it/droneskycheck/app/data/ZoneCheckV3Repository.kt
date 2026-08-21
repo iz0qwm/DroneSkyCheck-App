@@ -1,10 +1,15 @@
 package it.droneskycheck.app.data
 
+import java.io.IOException
 import java.net.HttpURLConnection
+import java.net.SocketTimeoutException
 import java.net.URL
 import java.net.URLEncoder
+import java.time.Clock
 import org.json.JSONArray
+import org.json.JSONException
 import org.json.JSONObject
+import kotlinx.coroutines.runBlocking
 
 private const val ZoneCheckParserLogTag = "DscZoneCheckV3"
 
@@ -14,12 +19,106 @@ interface ZoneCheckV3Client {
 
 class ZoneCheckV3Repository(
     private val endpointUrl: String = DscApiConfig.ZoneCheckV3Url,
-    private val apiKey: String = DscApiConfig.ApiKey
+    private val apiKey: String = DscApiConfig.ApiKey,
+    private val cacheStore: CachedZoneAnalysisStore? = null,
+    private val clock: Clock = Clock.systemUTC(),
+    private val httpClient: ZoneCheckV3HttpClient = UrlConnectionZoneCheckV3HttpClient()
 ) : ZoneCheckV3Client {
     override fun check(lat: Double, lon: Double): ZoneCheckV3Response {
+        if (!lat.isFinite() || !lon.isFinite()) {
+            throw ZoneCheckV3RepositoryError.InvalidCoordinates
+        }
+
         val url = URL(
             "$endpointUrl?lat=${encode(lat)}&lon=${encode(lon)}"
         )
+
+        return try {
+            val httpResponse = httpClient.get(url, apiKey)
+
+            if (httpResponse.statusCode !in 200..299) {
+                throw ZoneCheckV3RepositoryError.HttpError(httpResponse.statusCode)
+            }
+
+            val response = parseOnlineResponse(httpResponse.body)
+            saveSuccessfulResponse(lat, lon, httpResponse.body, response)
+            response
+        } catch (error: ZoneCheckV3RepositoryError) {
+            cachedFallbackOrThrow(lat, lon, error)
+        }
+    }
+
+    private fun encode(value: Double): String =
+        URLEncoder.encode(value.toString(), Charsets.UTF_8.name())
+
+    private fun parseOnlineResponse(body: String): ZoneCheckV3Response =
+        try {
+            parseZoneCheckV3Response(JSONObject(body))
+        } catch (error: JSONException) {
+            throw ZoneCheckV3RepositoryError.InvalidJson(error.message)
+        } catch (error: RuntimeException) {
+            throw ZoneCheckV3RepositoryError.InvalidSchema(error.message)
+        }
+
+    private fun saveSuccessfulResponse(
+        lat: Double,
+        lon: Double,
+        body: String,
+        response: ZoneCheckV3Response
+    ) {
+        val store = cacheStore ?: return
+        runCatching {
+            runBlocking {
+                store.upsert(
+                    lat = lat,
+                    lon = lon,
+                    analyzedAtUtc = clock.millis(),
+                    responseJson = body,
+                    response = response
+                )
+            }
+        }.onFailure { error ->
+            DscLogger.warn(ZoneCheckParserLogTag, "zoneCheckV3 local cache save failed", error)
+        }
+    }
+
+    private fun cachedFallbackOrThrow(
+        lat: Double,
+        lon: Double,
+        error: ZoneCheckV3RepositoryError
+    ): ZoneCheckV3Response {
+        val store = cacheStore
+        if (store == null || !error.canUseOfflineCache()) throw error
+
+        val cached = runCatching {
+            runBlocking { store.get(lat, lon) }
+        }.onFailure { cacheError ->
+            DscLogger.warn(ZoneCheckParserLogTag, "zoneCheckV3 local cache lookup failed", cacheError)
+        }.getOrNull() ?: throw error
+
+        return runCatching {
+            parseCachedZoneAnalysisResponse(cached, error.toOfflineFallbackReason())
+        }.onFailure { cacheError ->
+            DscLogger.warn(ZoneCheckParserLogTag, "zoneCheckV3 local cache parse failed", cacheError)
+        }.getOrNull() ?: throw error
+    }
+
+    private companion object {
+        const val TimeoutMillis = 8_000
+    }
+}
+
+interface ZoneCheckV3HttpClient {
+    fun get(url: URL, apiKey: String): ZoneCheckV3HttpResponse
+}
+
+data class ZoneCheckV3HttpResponse(
+    val statusCode: Int,
+    val body: String
+)
+
+class UrlConnectionZoneCheckV3HttpClient : ZoneCheckV3HttpClient {
+    override fun get(url: URL, apiKey: String): ZoneCheckV3HttpResponse {
         val connection = (url.openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = TimeoutMillis
@@ -35,25 +134,52 @@ class ZoneCheckV3Repository(
             } else {
                 connection.errorStream
             }
-            val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-
-            if (statusCode !in 200..299) {
-                throw IllegalStateException("zoneCheckV3 HTTP $statusCode")
-            }
-
-            parseZoneCheckV3Response(JSONObject(body))
+            ZoneCheckV3HttpResponse(
+                statusCode = statusCode,
+                body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            )
+        } catch (error: SocketTimeoutException) {
+            throw ZoneCheckV3RepositoryError.Timeout(error.message)
+        } catch (error: IOException) {
+            throw ZoneCheckV3RepositoryError.Network(error.message)
         } finally {
             connection.disconnect()
         }
     }
 
-    private fun encode(value: Double): String =
-        URLEncoder.encode(value.toString(), Charsets.UTF_8.name())
-
     private companion object {
         const val TimeoutMillis = 8_000
     }
 }
+
+sealed class ZoneCheckV3RepositoryError(message: String?) : Exception(message) {
+    object InvalidCoordinates : ZoneCheckV3RepositoryError("Invalid coordinates")
+    data class HttpError(val statusCode: Int) : ZoneCheckV3RepositoryError("zoneCheckV3 HTTP $statusCode")
+    data class Timeout(override val message: String?) : ZoneCheckV3RepositoryError(message ?: "zoneCheckV3 timeout")
+    data class Network(override val message: String?) : ZoneCheckV3RepositoryError(message ?: "zoneCheckV3 network error")
+    data class InvalidJson(override val message: String?) : ZoneCheckV3RepositoryError(message ?: "Invalid zoneCheckV3 JSON")
+    data class InvalidSchema(override val message: String?) : ZoneCheckV3RepositoryError(message ?: "Invalid zoneCheckV3 schema")
+}
+
+private fun ZoneCheckV3RepositoryError.canUseOfflineCache(): Boolean =
+    when (this) {
+        is ZoneCheckV3RepositoryError.Network,
+        is ZoneCheckV3RepositoryError.Timeout -> true
+        is ZoneCheckV3RepositoryError.HttpError -> statusCode >= 500
+        ZoneCheckV3RepositoryError.InvalidCoordinates,
+        is ZoneCheckV3RepositoryError.InvalidJson,
+        is ZoneCheckV3RepositoryError.InvalidSchema -> false
+    }
+
+private fun ZoneCheckV3RepositoryError.toOfflineFallbackReason(): ZoneCheckOfflineFallbackReason =
+    when (this) {
+        is ZoneCheckV3RepositoryError.Network -> ZoneCheckOfflineFallbackReason.NETWORK_FAILURE
+        is ZoneCheckV3RepositoryError.Timeout -> ZoneCheckOfflineFallbackReason.TIMEOUT
+        is ZoneCheckV3RepositoryError.HttpError -> ZoneCheckOfflineFallbackReason.SERVER_UNAVAILABLE
+        ZoneCheckV3RepositoryError.InvalidCoordinates,
+        is ZoneCheckV3RepositoryError.InvalidJson,
+        is ZoneCheckV3RepositoryError.InvalidSchema -> error("Unsupported offline fallback reason")
+    }
 
 internal fun parseZoneCheckV3Response(json: JSONObject): ZoneCheckV3Response {
     val verdict = json.optJSONObject("verdict") ?: JSONObject()

@@ -172,12 +172,14 @@ import it.droneskycheck.app.data.OfficialInfo
 import it.droneskycheck.app.data.PeriodicNoticeLinks
 import it.droneskycheck.app.data.PeriodicNoticePolicy
 import it.droneskycheck.app.data.PeriodicNoticePreferencesRepository
+import it.droneskycheck.app.data.RoomCachedZoneAnalysisStore
 import it.droneskycheck.app.data.SupInfo
 import it.droneskycheck.app.data.TemporalBarEntry
 import it.droneskycheck.app.data.TemporalBarSegment
 import it.droneskycheck.app.data.UasDatasetUpdatesRepository
 import it.droneskycheck.app.data.UasGeographicalZoneInfo
 import it.droneskycheck.app.data.ValidityInfo
+import it.droneskycheck.app.data.ZoneCheckOfflineFallbackReason
 import it.droneskycheck.app.data.ZoneCheckV3Response
 import it.droneskycheck.app.data.ZoneInfo
 import it.droneskycheck.app.data.ZoneCheckV3Repository
@@ -3362,6 +3364,12 @@ private fun ZoneBottomSheet(
             }
 
             verdict?.let { response ->
+                response.offlineCache?.let { cacheInfo ->
+                    OfflineCachedResultBanner(
+                        analyzedAtUtcMillis = cacheInfo.analyzedAtUtcMillis,
+                        reason = cacheInfo.reason
+                    )
+                }
                 VerdictBadge(response)
                 response.verdict.explanation
                     .takeUnless { it.isBlank() || it == verdictHeader(response) }
@@ -5053,8 +5061,11 @@ private fun ZoneInfoCard(
 
             if (expanded) {
                 TemporalDetailsPanel(zone)
-                ZoneNarrativeSection(zone)
-                if (!zone.hasNotamDetailsForUi()) {
+                ZoneNarrativeSection(
+                    zone = zone,
+                    includeDescription = zone.enr?.hasContent() != true
+                )
+                if (!zone.hasNotamDetailsForUi() && zone.enr?.hasContent() != true) {
                     OfficialSection(zone.official)
                 }
                 NotamSection(
@@ -5359,9 +5370,12 @@ private fun temporalStateColor(active: Boolean?): Color =
     }
 
 @Composable
-private fun ZoneNarrativeSection(zone: ZoneInfo) {
+private fun ZoneNarrativeSection(
+    zone: ZoneInfo,
+    includeDescription: Boolean = true
+) {
     val narrative = zone.info
-    val description = zone.primaryDescription()
+    val description = if (includeDescription) zone.primaryDescription() else null
     if (description.isNullOrBlank() &&
         narrative?.explanation.isNullOrBlank() &&
         narrative?.operationalMeaning.isNullOrBlank()
@@ -5958,11 +5972,10 @@ private fun EnrSummaryPanel(enr: EnrInfo) {
         .distinctBy { it.normalizedDetailText() }
         .joinToString(" - ")
         .ifBlank { "Informazioni ENR" }
-    val description = enr.description.usableMultilineUserText()
 
     DetailPanel(
         title = title,
-        subtitle = description,
+        subtitle = null,
         accentColor = EnrAccentColor
     )
 }
@@ -6264,6 +6277,68 @@ private fun RowScope.ZoneDetailTile(
 }
 
 @Composable
+private fun OfflineCachedResultBanner(
+    analyzedAtUtcMillis: Long,
+    reason: ZoneCheckOfflineFallbackReason
+) {
+    val lastCheckText = remember(analyzedAtUtcMillis) {
+        Instant.ofEpochMilli(analyzedAtUtcMillis)
+            .atZone(ZoneId.systemDefault())
+            .format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm", Locale.ITALY))
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.tertiaryContainer,
+        contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.35f))
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Info,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Text(
+                    text = "Risultato memorizzato",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Text(
+                text = "Ultima verifica: $lastCheckText",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium
+            )
+            Text(
+                text = offlineFallbackReasonText(reason),
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Text(
+                text = "Questo risultato non e' una verifica aggiornata. NOTAM, SUP e condizioni temporanee potrebbero essere cambiati.",
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+    }
+}
+
+private fun offlineFallbackReasonText(reason: ZoneCheckOfflineFallbackReason): String =
+    when (reason) {
+        ZoneCheckOfflineFallbackReason.NETWORK_FAILURE -> "Nessuna connessione disponibile."
+        ZoneCheckOfflineFallbackReason.TIMEOUT -> "Impossibile aggiornare i dati in questo momento."
+        ZoneCheckOfflineFallbackReason.SERVER_UNAVAILABLE ->
+            "Servizio Drone Sky Check temporaneamente non disponibile."
+    }
+
+@Composable
 private fun VerdictBadge(response: ZoneCheckV3Response) {
     val altitude = response.verdict.maxAltitudeMetersAgl
     val badgeColor = dscAltitudeColor(altitude)
@@ -6555,14 +6630,8 @@ private fun Boolean?.authorizationRequiredText(): String? =
 
 private fun EnrInfo.officialSourceText(): String? {
     val officialText = official?.sourceText.cleanOfficialSourceText()
-    val descriptionText = description.cleanOfficialSourceText()
-        ?.takeUnless { it.isEquivalentTo(officialText) || officialText.containsEquivalent(it) }
-    val rawSchedule = (schedule?.raw ?: validity?.schedule)
-        .cleanOfficialSourceText()
-        ?.takeUnless { it.isEquivalentTo(schedule?.human) }
-        ?.takeUnless { officialText.containsEquivalent(it) || descriptionText.containsEquivalent(it) }
 
-    return listOfNotNull(descriptionText, officialText, rawSchedule)
+    return listOfNotNull(officialText)
         .distinctBy { it.normalizedOfficialText() }
         .joinToString(separator = "\n\n")
         .ifBlank { null }
@@ -7447,6 +7516,12 @@ private fun Double.formatOneDecimal(): String =
 
 private fun verdictBadgeTitle(response: ZoneCheckV3Response): String =
     when {
+        response.offlineCache != null &&
+            (response.verdict.maxAltitudeMetersAgl <= 0 ||
+                response.verdict.status in setOf("NO_FLY", "PROHIBITED", "NOT_ALLOWED")) ->
+            "VERDETTO MEMORIZZATO: NON CONSENTITO"
+        response.offlineCache != null ->
+            "VERDETTO MEMORIZZATO"
         response.verdict.maxAltitudeMetersAgl <= 0 ||
             response.verdict.status in setOf("NO_FLY", "PROHIBITED", "NOT_ALLOWED") ->
             "ORA NON PUOI VOLARE QUI"
@@ -8265,7 +8340,9 @@ private class MapViewModelFactory(
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(MapViewModel::class.java)) {
             return MapViewModel(
-                zoneCheckRepository = ZoneCheckV3Repository(),
+                zoneCheckRepository = ZoneCheckV3Repository(
+                    cacheStore = RoomCachedZoneAnalysisStore(context)
+                ),
                 legalTimelineRepository = LegalTimelineRepository(),
                 weatherForecastRepository = WeatherForecastRepository(),
                 nearbyMetarRepository = it.droneskycheck.app.data.weather.NearbyMetarRepository(
