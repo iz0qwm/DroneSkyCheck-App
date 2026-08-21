@@ -186,6 +186,8 @@ data class NotamInfo(
     val schedule: ScheduleInfo?,
     val official: OfficialInfo?,
     val validity: ValidityInfo?,
+    val weekSchedule: List<TemporalBarEntry> = emptyList(),
+    val daySchedule: List<Boolean?> = emptyList(),
     val blockers: List<Issue> = emptyList(),
     val warnings: List<Issue> = emptyList()
 )

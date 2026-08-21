@@ -92,8 +92,8 @@ internal fun ZoneInfo.temporalDetailsPresentation(): TemporalDetailsPresentation
         validity = sourceValidity?.validityRangeLabel(),
         nextActivation = sourceValidity?.nextActivation.formatUtcDateForUi(),
         explanation = sourceValidity?.explanation.cleanItalianUiTextOrNull(),
-        weekSchedule = enr?.weekSchedule.orEmpty(),
-        daySchedule = enr?.daySchedule.orEmpty()
+        weekSchedule = enr?.weekSchedule?.takeIf { it.isNotEmpty() } ?: notam?.weekSchedule.orEmpty(),
+        daySchedule = enr?.daySchedule?.takeIf { it.isNotEmpty() } ?: notam?.daySchedule.orEmpty()
     )
 }
 
@@ -211,7 +211,10 @@ private fun ScheduleInfo.readableSchedule(): String? =
         ?: raw.cleanItalianUiTextOrNull()
 
 private fun NotamInfo.hasTemporalContent(): Boolean =
-    validity != null || schedule?.hasAnyScheduleText() == true
+    validity != null ||
+        schedule?.hasAnyScheduleText() == true ||
+        weekSchedule.isNotEmpty() ||
+        daySchedule.isNotEmpty()
 
 private fun ValidityInfo.hasTemporalContentForUi(): Boolean =
     activeNow != null ||

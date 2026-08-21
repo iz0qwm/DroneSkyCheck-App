@@ -90,16 +90,14 @@ object AppExternalLinks {
 object AppReleaseNotes {
     // When versionName changes, reset this section for the new version and collect only that version's changes.
     val Current = ReleaseNotes(
-        versionName = "3.3",
-        versionCode = 23,
-        title = "Cosa c'e di nuovo in Drone Sky Check 3.3",
-        intro = "Questa versione include anche le novita preparate per la 3.2, che non e stata pubblicata come versione ufficiale.",
+        versionName = "3.4",
+        versionCode = 24,
+        title = "Cosa c'e di nuovo in Drone Sky Check 3.4",
+        intro = "Questa versione migliora la lettura dei dettagli aeronautici nelle aree ENR e NOTAM.",
         highlights = listOf(
-            "Nuova sezione Prima di volare con percorso essenziale per chi inizia a usare un drone.",
-            "Nuova sezione Mondo droni con news, video e approfondimenti selezionati.",
-            "Migliorata la lettura dei dettagli ENR 5.5.x nelle zone ATM09, con orari HJ e fonte ufficiale dove disponibili.",
-            "Ripristinata la visualizzazione dei dettagli temporali e dei dettagli ENR per aree come Salentina, Ceraso/Altamura e Capua.",
-            "Per aree ENR senza orario pubblicato, come Falcone Lavello, l'app mostra i dettagli ufficiali senza inventare una finestra temporale."
+            "Riorganizzata la sezione ENR con riquadri piu chiari, titoli evidenziati e fonte ufficiale separata.",
+            "Ridotte le informazioni duplicate nei dettagli delle zone, soprattutto tra orari, note e testo ufficiale.",
+            "Aggiunti dettagli temporali grafici anche nei NOTAM, con barre orarie e calendario compatto della validita."
         )
     )
 }

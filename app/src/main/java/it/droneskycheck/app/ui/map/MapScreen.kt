@@ -174,6 +174,7 @@ import it.droneskycheck.app.data.PeriodicNoticePolicy
 import it.droneskycheck.app.data.PeriodicNoticePreferencesRepository
 import it.droneskycheck.app.data.SupInfo
 import it.droneskycheck.app.data.TemporalBarEntry
+import it.droneskycheck.app.data.TemporalBarSegment
 import it.droneskycheck.app.data.UasDatasetUpdatesRepository
 import it.droneskycheck.app.data.UasGeographicalZoneInfo
 import it.droneskycheck.app.data.ValidityInfo
@@ -261,6 +262,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
+import java.time.YearMonth
 import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
@@ -5028,7 +5030,9 @@ private fun ZoneInfoCard(
             }
 
             ZonePrimaryStatusCard(zone)
-            ActivityScheduleHighlight(zone)
+            if (!expanded) {
+                ActivityScheduleHighlight(zone)
+            }
 
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -5050,7 +5054,9 @@ private fun ZoneInfoCard(
             if (expanded) {
                 TemporalDetailsPanel(zone)
                 ZoneNarrativeSection(zone)
-                OfficialSection(zone.official)
+                if (!zone.hasNotamDetailsForUi()) {
+                    OfficialSection(zone.official)
+                }
                 NotamSection(
                     notams = zone.notams,
                     onHelpClick = { onContextualHelpRequested("notam") }
@@ -5160,23 +5166,35 @@ private fun ActivityScheduleHighlight(zone: ZoneInfo) {
 @Composable
 private fun TemporalDetailsPanel(zone: ZoneInfo) {
     val details = zone.temporalDetailsPresentation()
-    if (!details.hasContent) return
+    val notam = zone.notams.firstOrNull { it.hasUsefulContent() && it.hasTemporalContentForDetails() }
+    if (!details.hasContent && notam == null) return
 
     var expanded by remember(zone.id, zone.name) { mutableStateOf(false) }
+    val notamPresentation = notam?.presentation()
+    val weekSchedule = details.weekSchedule.ifEmpty { notam?.weekScheduleForUi().orEmpty() }
+    val daySchedule = details.daySchedule.ifEmpty { notam?.dayScheduleForUi().orEmpty() }
 
     OfficialAccordion(
         title = "Dettagli temporali",
         expanded = expanded,
         onToggle = { expanded = !expanded }
     ) {
-        TemporalWeekScheduleBar(details.weekSchedule)
-        TemporalDayScheduleBar(details.daySchedule)
-        ZoneOptionalDetail("Stato attuale", details.status)
-        ZoneOptionalDetail("Orari di attività", details.activitySchedule)
-        ZoneOptionalDetail("Dato originale", details.originalSchedule)
-        ZoneOptionalDetail("Validità", details.validity)
-        ZoneOptionalDetail("Prossima attivazione", details.nextActivation)
-        ZoneOptionalDetail("Nota", details.explanation)
+        TemporalWeekScheduleBar(weekSchedule)
+        TemporalDayScheduleBar(daySchedule)
+        ZoneDetailGrid(
+            items = distinctDetailItems(
+                "Stato attuale" to details.status,
+                "Orari di attività" to details.activitySchedule,
+                "Dato originale" to details.originalSchedule,
+                "Validità" to details.validity,
+                "Prossima attivazione" to details.nextActivation,
+                "Nota" to details.explanation
+            ),
+            accentColor = TemporalAccentColor
+        )
+        if (notam != null && notamPresentation != null) {
+            NotamTemporalDetailCard(notam, notamPresentation)
+        }
     }
 }
 
@@ -5523,19 +5541,24 @@ private fun NotamSection(
             if (index > 0) HorizontalDivider()
             val presentation = notam.presentation()
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(
-                    text = presentation.code,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold
-                )
+                if (presentation.code.isNotBlank()) {
+                    Text(
+                        text = presentation.code,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
                 NotamSummaryCard(presentation)
-                ZoneOptionalDetail("FIR", notam.fir)
-                ZoneOptionalDetail("Località", notam.location)
-                ZoneOptionalDetail("Zona", notam.zoneReference)
-                ZoneOptionalDetail("Motivo del NOTAM", presentation.reasonText)
-                ZoneOptionalDetail("Orari", presentation.activitySchedule)
-                ZoneOptionalDetail("Validità", presentation.validity)
-                ZoneOptionalDetail("Stato operativo", presentation.operationalStatus)
+                ZoneDetailGrid(
+                    items = distinctDetailItems(
+                        "FIR" to notam.fir,
+                        "Località" to notam.location,
+                        "Zona" to notam.zoneReference,
+                        "Motivo" to presentation.reasonText,
+                        "Effetto operativo" to presentation.operationalStatus
+                    ),
+                    accentColor = NotamAccentColor
+                )
                 OfficialSection(
                     official = presentation.official,
                     title = "Testo NOTAM ufficiale",
@@ -5628,7 +5651,7 @@ private fun NotamSummaryCard(presentation: NotamPresentation) {
     val containerColor = if (isManual) {
         MaterialTheme.colorScheme.errorContainer
     } else {
-        MaterialTheme.colorScheme.surfaceContainerLow
+        NotamAccentColor.copy(alpha = 0.12f)
     }
     val contentColor = if (isManual) {
         MaterialTheme.colorScheme.onErrorContainer
@@ -5640,7 +5663,8 @@ private fun NotamSummaryCard(presentation: NotamPresentation) {
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.small,
         color = containerColor,
-        contentColor = contentColor
+        contentColor = contentColor,
+        border = BorderStroke(1.dp, NotamAccentColor.copy(alpha = 0.42f))
     ) {
         Column(
             modifier = Modifier.padding(12.dp),
@@ -5656,6 +5680,205 @@ private fun NotamSummaryCard(presentation: NotamPresentation) {
                 style = MaterialTheme.typography.bodyMedium
             )
         }
+    }
+}
+
+@Composable
+private fun NotamTemporalDetailCard(
+    notam: NotamInfo,
+    presentation: NotamPresentation
+) {
+    val startsAt = notam.validity?.validFrom.formatNotamUtcDate()
+    val endsAt = notam.validity?.validTo.formatNotamUtcDate()
+    val items = distinctDetailItems(
+        "Stato" to notam.validity?.statusLabel(),
+        "Orari" to presentation.activitySchedule,
+        "Prossima attivazione" to notam.validity?.nextActivation.formatNotamUtcDate(),
+        "Nota" to notam.validity?.explanation
+    )
+    if (startsAt == null && endsAt == null && items.isEmpty()) return
+
+    DetailPanel(
+        title = "Dettagli temporali NOTAM",
+        subtitle = null,
+        accentColor = NotamAccentColor
+    ) {
+        NotamValidityRange(startsAt = startsAt, endsAt = endsAt)
+        NotamValidityCalendar(notam)
+        items.forEach { item ->
+            NotamTemporalPlainDetail(item)
+        }
+    }
+}
+
+@Composable
+private fun NotamValidityRange(
+    startsAt: String?,
+    endsAt: String?
+) {
+    if (startsAt == null && endsAt == null) return
+
+    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = "PARTE",
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                color = NotamAccentColor
+            )
+            Text(
+                text = "TERMINA",
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                color = NotamAccentColor
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = startsAt ?: "-",
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = endsAt ?: "-",
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+    }
+}
+
+@Composable
+private fun NotamValidityCalendar(notam: NotamInfo) {
+    val range = notam.validity?.calendarDateRange() ?: return
+    val months = remember(range) { range.monthsInRange() }
+    if (months.isEmpty()) return
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = "Calendario validità",
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+            color = NotamAccentColor
+        )
+        months.forEach { month ->
+            NotamValidityMonth(
+                month = month,
+                activeRange = range
+            )
+        }
+    }
+}
+
+@Composable
+private fun NotamValidityMonth(
+    month: YearMonth,
+    activeRange: ClosedRange<LocalDate>
+) {
+    val monthTitle = remember(month) {
+        DateTimeFormatter.ofPattern("MMMM yyyy", Locale.ITALY)
+            .format(month.atDay(1))
+            .replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ITALY) else it.toString() }
+    }
+    val firstOffset = month.atDay(1).dayOfWeek.value - 1
+    val cells = remember(month) {
+        List(firstOffset) { null } + (1..month.lengthOfMonth()).map { month.atDay(it) }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            text = monthTitle,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            listOf("L", "M", "M", "G", "V", "S", "D").forEach { label ->
+                Text(
+                    text = label,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        cells.chunked(7).forEach { week ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+                (week + List(7 - week.size) { null }).forEach { day ->
+                    NotamCalendarDayCell(
+                        day = day,
+                        active = day != null && day >= activeRange.start && day <= activeRange.endInclusive,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NotamCalendarDayCell(
+    day: LocalDate?,
+    active: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val color = when {
+        day == null -> Color.Transparent
+        active -> NotamAccentColor.copy(alpha = 0.88f)
+        else -> MaterialTheme.colorScheme.surfaceContainerLow
+    }
+    val contentColor = when {
+        day == null -> Color.Transparent
+        active -> Color.White
+        else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+    }
+
+    Surface(
+        modifier = modifier.height(24.dp),
+        shape = MaterialTheme.shapes.extraSmall,
+        color = color,
+        contentColor = contentColor
+    ) {
+        Box(
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = day?.dayOfMonth?.toString().orEmpty(),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = if (active) FontWeight.Bold else FontWeight.Normal
+            )
+        }
+    }
+}
+
+@Composable
+private fun NotamTemporalPlainDetail(item: ZoneDetailItem) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            text = item.label,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+            color = NotamAccentColor
+        )
+        Text(
+            text = item.value,
+            style = MaterialTheme.typography.bodyMedium
+        )
     }
 }
 
@@ -5687,21 +5910,38 @@ private fun EnrSection(
         title = "ENR",
         onHelpClick = onHelpClick
     ) {
-        ZoneOptionalDetail("Nome", enr.name)
-        ZoneOptionalDetail("Riferimento", enr.classification)
-        ZoneOptionalDetail("Stato", enr.validity?.statusLabel())
-        ZoneOptionalDetail("Orari di attività", enr.schedule?.human ?: enr.validity?.schedule)
-        ZoneOptionalDetail("Limiti", enr.limitText.usableUserText())
-        ZoneOptionalDetail("Note", enr.notes.usableUserText())
-        ZoneOptionalDetail("Attivazione", enr.activationType?.toUserText())
-        ZoneOptionalDetail("Operazioni", enr.operationSummary())
-        ZoneOptionalDetail("Attestato di competenza minimo richiesto", enr.requiredLicense.formatRequiredLicense())
-        ZoneOptionalDetail("Autorizzazione", enr.authorizationRequiredText())
-        ZoneOptionalDetail("Spiegazione", enr.explanation.distinctFrom(enr.schedule?.human))
-        ZoneOptionalDetail("Significato operativo", enr.operationalMeaning)
+        EnrSummaryPanel(enr)
+        ZoneDetailGrid(
+            items = distinctDetailItems(
+                "Nome" to enr.name,
+                "Riferimento" to enr.classification,
+                "Stato" to enr.validity?.statusLabel(),
+                "Limiti" to enr.limitText.usableUserText(),
+                "Attivazione" to enr.activationType?.toUserText(),
+                "Operazioni" to enr.operationSummary(),
+                "Attestato minimo" to enr.requiredLicense.formatRequiredLicense(),
+                "Autorizzazione" to enr.authorizationRequiredText()
+            ),
+            accentColor = EnrAccentColor
+        )
+        DetailTextBlock(
+            title = "Note ENR",
+            text = enr.notes.usableMultilineUserText(),
+            accentColor = EnrAccentColor
+        )
+        DetailTextBlock(
+            title = "Spiegazione",
+            text = enr.explanation.distinctFrom(enr.schedule?.human),
+            accentColor = EnrAccentColor
+        )
+        DetailTextBlock(
+            title = "Significato operativo",
+            text = enr.operationalMeaning,
+            accentColor = EnrAccentColor
+        )
         OfficialSection(
             official = enr.official,
-            title = "Dettagli ufficiali",
+            title = "Fonte ufficiale ENR",
             compactUntilOpened = true,
             openLabel = "Apri dettagli ufficiali",
             closeLabel = "Chiudi dettagli ufficiali",
@@ -5710,6 +5950,21 @@ private fun EnrSection(
             includeFields = false
         )
     }
+}
+
+@Composable
+private fun EnrSummaryPanel(enr: EnrInfo) {
+    val title = listOfNotNull(enr.code, enr.classification)
+        .distinctBy { it.normalizedDetailText() }
+        .joinToString(" - ")
+        .ifBlank { "Informazioni ENR" }
+    val description = enr.description.usableMultilineUserText()
+
+    DetailPanel(
+        title = title,
+        subtitle = description,
+        accentColor = EnrAccentColor
+    )
 }
 
 @Composable
@@ -5880,6 +6135,130 @@ private fun KeyValueList(items: List<KeyValueInfo>) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         items.forEach { item ->
             ZoneDetail(label = item.key, value = item.value)
+        }
+    }
+}
+
+private data class ZoneDetailItem(
+    val label: String,
+    val value: String
+)
+
+private fun distinctDetailItems(vararg candidates: Pair<String, String?>): List<ZoneDetailItem> {
+    val seen = mutableSetOf<String>()
+    return candidates.mapNotNull { (label, rawValue) ->
+        val value = rawValue.usableMultilineUserText() ?: return@mapNotNull null
+        val normalized = value.normalizedDetailText()
+        if (normalized.isBlank() || !seen.add(normalized)) return@mapNotNull null
+        ZoneDetailItem(label = label, value = value)
+    }
+}
+
+@Composable
+private fun DetailPanel(
+    title: String,
+    subtitle: String?,
+    accentColor: Color,
+    content: @Composable ColumnScope.() -> Unit = {}
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.small,
+        color = accentColor.copy(alpha = 0.10f),
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.36f))
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(7.dp)
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = accentColor
+            )
+            if (!subtitle.isNullOrBlank()) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            content()
+        }
+    }
+}
+
+@Composable
+private fun DetailTextBlock(
+    title: String,
+    text: String?,
+    accentColor: Color
+) {
+    if (text.isNullOrBlank()) return
+    DetailPanel(
+        title = title,
+        subtitle = text,
+        accentColor = accentColor
+    )
+}
+
+@Composable
+private fun ZoneDetailGrid(
+    items: List<ZoneDetailItem>,
+    accentColor: Color
+) {
+    if (items.isEmpty()) return
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        items.chunked(2).forEach { rowItems ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                rowItems.forEach { item ->
+                    ZoneDetailTile(
+                        item = item,
+                        accentColor = accentColor,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                if (rowItems.size == 1) {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RowScope.ZoneDetailTile(
+    item: ZoneDetailItem,
+    accentColor: Color,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.heightIn(min = 72.dp),
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.24f))
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            Text(
+                text = item.label,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                color = accentColor
+            )
+            Text(
+                text = item.value,
+                style = MaterialTheme.typography.bodyMedium
+            )
         }
     }
 }
@@ -6289,6 +6668,17 @@ private fun String?.normalizedOfficialText(): String =
         .trim()
         .lowercase()
         .replace(Regex("\\s+"), " ")
+
+private fun String?.normalizedDetailText(): String =
+    orEmpty()
+        .toUserText()
+        .replace(Regex("\\s+"), " ")
+        .trim()
+        .lowercase(Locale.ROOT)
+        .replace(Regex("""\b(utc|zulu)\b"""), "")
+        .replace(Regex("""[^a-z0-9àèéìòù]+"""), " ")
+        .replace(Regex("\\s+"), " ")
+        .trim()
 
 private fun List<Issue>.joinIssues(): String =
     joinToString(separator = "\n") { issue ->
@@ -7162,6 +7552,103 @@ private fun ZoneInfo.isInactiveNow(): Boolean =
     operationalStatus in setOf("ENR_INACTIVE_NOW", "NOTAM_INACTIVE_NOW", "SUP_INACTIVE_NOW", "INACTIVE_NOW") ||
         activeNow == false
 
+private fun ZoneInfo.hasNotamDetailsForUi(): Boolean =
+    notams.any { it.hasUsefulContent() }
+
+private fun NotamInfo.hasTemporalContentForDetails(): Boolean =
+    schedule?.hasContent() == true ||
+        validity?.hasContent() == true
+
+private fun NotamInfo.weekScheduleForUi(): List<TemporalBarEntry> {
+    val scheduleText = notamScheduleSourceText()
+    val activeDays = scheduleText.activeWeekDays()
+    val segments = scheduleText.timeSegmentsForUi()
+    val fallbackActive = validity?.activeNow
+
+    return (0 until 7).map { dayIndex ->
+        val activeForDay = activeDays?.contains(dayIndex)
+        when {
+            activeForDay == true && segments.isNotEmpty() ->
+                TemporalBarEntry(active = true, activeRatio = null, segments = segments)
+            activeForDay == true ->
+                TemporalBarEntry(active = true, activeRatio = 1f)
+            activeForDay == false ->
+                TemporalBarEntry(active = false, activeRatio = 0f)
+            fallbackActive != null ->
+                TemporalBarEntry(active = fallbackActive, activeRatio = if (fallbackActive) 1f else 0f)
+            else ->
+                TemporalBarEntry(active = null)
+        }
+    }
+}
+
+private fun NotamInfo.dayScheduleForUi(): List<Boolean?> {
+    val segments = notamScheduleSourceText().timeSegmentsForUi()
+    val fallbackActive = validity?.activeNow
+
+    return when {
+        segments.isNotEmpty() -> (0 until 24).map { hour ->
+            val start = hour / 24f
+            val end = (hour + 1) / 24f
+            segments.any { it.start < end && it.end > start }
+        }
+        fallbackActive != null -> List(24) { fallbackActive }
+        else -> List(24) { null }
+    }
+}
+
+private fun NotamInfo.notamScheduleSourceText(): String =
+    listOfNotNull(
+        schedule?.raw,
+        schedule?.human,
+        validity?.schedule,
+        validity?.interpretedSchedule
+    )
+        .joinToString(" ")
+        .uppercase(Locale.ROOT)
+
+private fun String.activeWeekDays(): Set<Int>? {
+    if (isBlank()) return null
+    val days = mutableSetOf<Int>()
+    NotamDayRanges.forEach { (pattern, range) ->
+        if (Regex(pattern).containsMatchIn(this)) days += range
+    }
+    NotamDayTokens.forEachIndexed { index, token ->
+        if (Regex("""\b$token\b""").containsMatchIn(this)) days += index
+    }
+
+    return when {
+        Regex("""\b(DAILY|DLY|EVERY DAY)\b""").containsMatchIn(this) -> (0..6).toSet()
+        days.isNotEmpty() -> days
+        timeSegmentsForUi().isNotEmpty() || Regex("""\bH24\b""").containsMatchIn(this) -> (0..6).toSet()
+        else -> null
+    }
+}
+
+private fun String.timeSegmentsForUi(): List<TemporalBarSegment> {
+    if (isBlank()) return emptyList()
+    if (Regex("""\bH24\b|\b0000\s*-\s*2?400\b|\b0000\s*-\s*2359\b""").containsMatchIn(this)) {
+        return listOf(TemporalBarSegment(start = 0f, end = 1f))
+    }
+
+    return Regex("""\b(\d{2})(\d{2})\s*-\s*(\d{2})(\d{2})\b""")
+        .findAll(this)
+        .mapNotNull { match ->
+            val start = match.groupValues[1].toIntOrNull()?.times(60)
+                ?.plus(match.groupValues[2].toIntOrNull() ?: return@mapNotNull null)
+                ?: return@mapNotNull null
+            val endHour = match.groupValues[3].toIntOrNull() ?: return@mapNotNull null
+            val endMinute = match.groupValues[4].toIntOrNull() ?: return@mapNotNull null
+            val end = if (endHour >= 24) 24 * 60 else endHour * 60 + endMinute
+            if (start !in 0 until 24 * 60 || end <= start) return@mapNotNull null
+            TemporalBarSegment(
+                start = (start / (24f * 60f)).coerceIn(0f, 1f),
+                end = (end / (24f * 60f)).coerceIn(0f, 1f)
+            )
+        }
+        .toList()
+}
+
 private fun NotamInfo.hasUsefulContent(): Boolean =
     !code.isNullOrBlank() &&
         (
@@ -7495,23 +7982,61 @@ private fun AuthorityInfo?.formatRequestContacts(): String? {
 }
 
 private fun String?.formatNotamUtcDate(): String? {
+    val instant = parseNotamUtcInstant()
+    if (instant != null) return NotamUtcFormatter.format(instant)
+    return this?.takeIf { it.isNotBlank() }?.trim()
+}
+
+private fun String?.parseNotamUtcInstant(): Instant? {
     if (isNullOrBlank()) return null
     val value = trim()
 
     runCatching {
-        return NotamUtcFormatter.format(Instant.parse(value))
+        return Instant.parse(value)
     }
 
     val compact = Regex("""^(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$""").matchEntire(value)
-        ?: return value
-    val date = LocalDateTime.of(
+        ?: return null
+    return LocalDateTime.of(
         2000 + compact.groupValues[1].toInt(),
         compact.groupValues[2].toInt(),
         compact.groupValues[3].toInt(),
         compact.groupValues[4].toInt(),
         compact.groupValues[5].toInt()
-    )
-    return NotamUtcFormatter.format(date.atOffset(ZoneOffset.UTC))
+    ).toInstant(ZoneOffset.UTC)
+}
+
+private fun ValidityInfo.calendarDateRange(): ClosedRange<LocalDate>? {
+    val fromOffset = validFrom.parseNotamUtcInstant()?.atOffset(ZoneOffset.UTC)
+    val toOffset = validTo.parseNotamUtcInstant()?.atOffset(ZoneOffset.UTC)
+    if (fromOffset == null && toOffset == null) return null
+
+    val start = fromOffset?.toLocalDate() ?: toOffset?.toLocalDate() ?: return null
+    val rawEnd = toOffset?.toLocalDate() ?: fromOffset?.toLocalDate() ?: start
+    val end = if (
+        toOffset != null &&
+        toOffset.toLocalTime() == LocalTime.MIDNIGHT &&
+        rawEnd > start
+    ) {
+        rawEnd.minusDays(1)
+    } else {
+        rawEnd
+    }
+
+    return start..end.coerceAtLeast(start)
+}
+
+private fun ClosedRange<LocalDate>.monthsInRange(): List<YearMonth> {
+    val months = mutableListOf<YearMonth>()
+    var cursor = YearMonth.from(start)
+    val last = YearMonth.from(endInclusive)
+
+    while (!cursor.isAfter(last)) {
+        months += cursor
+        cursor = cursor.plusMonths(1)
+    }
+
+    return months
 }
 
 private fun String?.toItalianNotamSchedule(): String? {
@@ -7778,6 +8303,17 @@ private val InactiveZonePillColor = Color(46, 125, 50)
 private val TemporalActiveColor = Color(198, 40, 40)
 private val TemporalInactiveColor = Color(46, 125, 50)
 private val TemporalUnknownColor = Color(144, 164, 174)
+private val TemporalAccentColor = Color(0xFF006D77)
+private val EnrAccentColor = Color(0xFF2E7D32)
+private val NotamAccentColor = Color(0xFFC2410C)
+private val NotamDayTokens = listOf("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN")
+private val NotamDayRanges = listOf(
+    """\bMON\s*-\s*FRI\b""" to (0..4),
+    """\bMON\s*-\s*THU\b""" to (0..3),
+    """\bMON\s*-\s*SAT\b""" to (0..5),
+    """\bTUE\s*-\s*FRI\b""" to (1..4),
+    """\bSAT\s*-\s*SUN\b""" to (5..6)
+)
 private const val CoordinateDecimals = 5
 private const val TrafficAlertPulseCount = 4
 private const val TrafficAlertPulseGapMillis = 180L

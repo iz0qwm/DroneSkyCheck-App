@@ -210,6 +210,8 @@ private fun JSONObject.toNotamInfo(): NotamInfo =
         official = (optJSONObject("official") ?: optJSONObject("raw"))?.toOfficialInfo()
             ?: toOfficialInfoFromInlineFields(),
         validity = optJSONObject("validity")?.toValidityInfo() ?: toValidityInfo(),
+        weekSchedule = optArray("weekSchedule").toTemporalBarEntries(),
+        daySchedule = optArray("daySchedule").toNullableBooleanList(),
         blockers = optArray("blockers").toIssueList(),
         warnings = optArray("warnings").toIssueList()
     )
