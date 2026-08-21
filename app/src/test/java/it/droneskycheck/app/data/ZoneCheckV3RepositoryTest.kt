@@ -263,6 +263,222 @@ class ZoneCheckV3RepositoryTest {
     }
 
     @Test
+    fun parserReadsSalentinaEnr55DetailsFromAppContract() {
+        val response = parseZoneCheckV3Response(overlapJson(
+            status = "NO_FLY",
+            limit = 0,
+            zones = """
+              {
+                "identity": {
+                  "id": "A541658",
+                  "name": "LIBUSALENT_SALENTINA PENINSULA AREA"
+                },
+                "classification": {
+                  "type": "ATM09_OTHER",
+                  "family": "ENR"
+                },
+                "uasLimit": { "metersAgl": 0 },
+                "validity": { "activeNow": null },
+                "temporalDetails": {
+                  "source": "ENR",
+                  "activeNow": true,
+                  "rawSchedule": "HJ",
+                  "scheduleHuman": "Da mezz'ora prima dell'alba a mezz'ora dopo il tramonto",
+                  "explanation": "Zona ENR attiva secondo orario HJ.",
+                  "weekSchedule": [true, true, true, true, true, true, true],
+                  "daySchedule": [true, true, true]
+                },
+                "officialDetails": {
+                  "source": "ENR",
+                  "sourceText": "SALENTINA PENINSULA AREA - Orari raw: HJ",
+                  "sourceReference": "ENR 5.5.4"
+                },
+                "enrDetails": {
+                  "present": true,
+                  "source": "ENR",
+                  "code": "ENR 5.5.4",
+                  "name": "SALENTINA PENINSULA AREA",
+                  "classification": "ENR 5.5.4",
+                  "schedule": {
+                    "raw": "HJ",
+                    "human": "Da mezz'ora prima dell'alba a mezz'ora dopo il tramonto",
+                    "activeNow": true,
+                    "explanation": "Zona ENR attiva secondo orario HJ."
+                  },
+                  "official": {
+                    "sourceText": "SALENTINA PENINSULA AREA - Orari raw: HJ",
+                    "sourceReference": "ENR 5.5.4"
+                  }
+                }
+              }
+            """.trimIndent()
+        ))
+
+        val zone = response.zones.single()
+
+        assertEquals("SALENTINA PENINSULA AREA", zone.enr?.name)
+        assertEquals("ENR 5.5.4", zone.enr?.code)
+        assertEquals("HJ", zone.enr?.schedule?.raw)
+        assertEquals("Da mezz'ora prima dell'alba a mezz'ora dopo il tramonto", zone.enr?.schedule?.human)
+        assertEquals(true, zone.enr?.schedule?.activeNow)
+        assertEquals(true, zone.activeNow)
+        assertEquals("HJ", zone.validity?.schedule)
+        assertEquals("Da mezz'ora prima dell'alba a mezz'ora dopo il tramonto", zone.validity?.interpretedSchedule)
+        assertEquals("SALENTINA PENINSULA AREA - Orari raw: HJ", zone.official?.sourceText)
+        assertEquals(7, zone.enr?.weekSchedule?.size)
+        assertEquals(3, zone.enr?.daySchedule?.size)
+    }
+
+    @Test
+    fun parserReadsEnr55HjDetailsForPrefixedAtm09Areas() {
+        val cases = listOf(
+            "LIBUCERASO_CERASO/ALTAMURA AREA" to "CERASO/ALTAMURA AREA",
+            "LIRUCAPUA_EST CAPUA AREA" to "EST CAPUA AREA"
+        )
+
+        cases.forEach { (featureName, enrName) ->
+            val response = parseZoneCheckV3Response(overlapJson(
+                status = "NO_FLY",
+                limit = 0,
+                zones = """
+                  {
+                    "identity": { "id": "$featureName", "name": "$featureName" },
+                    "classification": { "type": "ATM09_OTHER", "family": "ENR" },
+                    "validity": { "activeNow": null },
+                    "temporalDetails": {
+                      "source": "ENR",
+                      "activeNow": true,
+                      "rawSchedule": "HJ",
+                      "scheduleHuman": "Da mezz'ora prima dell'alba a mezz'ora dopo il tramonto"
+                    },
+                    "officialDetails": {
+                      "sourceText": "$enrName - Orari raw: HJ",
+                      "sourceReference": "ENR 5.5.4"
+                    },
+                    "enrDetails": {
+                      "present": true,
+                      "code": "ENR 5.5.4",
+                      "name": "$enrName",
+                      "classification": "ENR 5.5.4",
+                      "schedule": {
+                        "raw": "HJ",
+                        "human": "Da mezz'ora prima dell'alba a mezz'ora dopo il tramonto",
+                        "activeNow": true
+                      }
+                    }
+                  }
+                """.trimIndent()
+            ))
+
+            val zone = response.zones.single()
+
+            assertEquals(featureName, zone.name)
+            assertEquals(enrName, zone.enr?.name)
+            assertEquals("HJ", zone.enr?.schedule?.raw)
+            assertEquals(true, zone.activeNow)
+            assertEquals("HJ", zone.validity?.schedule)
+            assertEquals("$enrName - Orari raw: HJ", zone.official?.sourceText)
+        }
+    }
+
+    @Test
+    fun parserReadsFalconeEnr55DetailsWithoutInventingSchedule() {
+        val response = parseZoneCheckV3Response(overlapJson(
+            status = "LIMITED",
+            limit = 120,
+            zones = """
+              {
+                "identity": {
+                  "id": "A541629",
+                  "name": "LIFALCONE_FALCONE LAVELLO AREA"
+                },
+                "classification": { "type": "ATM09_OTHER", "family": "ENR" },
+                "validity": { "activeNow": null },
+                "temporalDetails": {
+                  "source": "ENR",
+                  "activeNow": null,
+                  "rawSchedule": null,
+                  "scheduleHuman": null,
+                  "explanation": "ENR 5.5: orario non pubblicato nella riga sorgente"
+                },
+                "officialDetails": {
+                  "sourceText": "Falcone Lavello Area Circular area centered on 41 deg 06 min 17 sec N 015 deg 52 min 33 sec E.",
+                  "sourceReference": "ENR 5.5.4"
+                },
+                "enrDetails": {
+                  "present": true,
+                  "code": "FALCONE LAVELLO AREA",
+                  "name": "FALCONE LAVELLO AREA",
+                  "classification": "ENR 5.5.4",
+                  "schedule": {
+                    "raw": null,
+                    "human": null,
+                    "activeNow": null,
+                    "explanation": "ENR 5.5: orario non pubblicato nella riga sorgente"
+                  },
+                  "official": {
+                    "sourceText": "Falcone Lavello Area Circular area centered on 41 deg 06 min 17 sec N 015 deg 52 min 33 sec E.",
+                    "sourceReference": "ENR 5.5.4"
+                  }
+                }
+              }
+            """.trimIndent()
+        ))
+
+        val zone = response.zones.single()
+
+        assertEquals("FALCONE LAVELLO AREA", zone.enr?.name)
+        assertEquals(null, zone.enr?.schedule?.raw)
+        assertEquals("ENR 5.5: orario non pubblicato nella riga sorgente", zone.enr?.schedule?.explanation)
+        assertEquals(null, zone.activeNow)
+        assertEquals("ENR 5.5: orario non pubblicato nella riga sorgente", zone.validity?.explanation)
+        assertTrue(zone.official?.sourceText?.contains("Falcone Lavello Area") == true)
+    }
+
+    @Test
+    fun parserDoesNotTreatAtm09MetadataAsEnrDetails() {
+        val response = parseZoneCheckV3Response(overlapJson(
+            status = "LIMITED",
+            limit = 45,
+            zones = """
+              {
+                "identity": {
+                  "id": "A538247",
+                  "name": "LIBC CROTONE 17/35"
+                },
+                "classification": {
+                  "type": "ATM09_OTHER",
+                  "family": "OTHER",
+                  "restriction": "REQ_AUTHORISATION"
+                },
+                "uasLimit": { "metersAgl": 45 },
+                "aip": {
+                  "code": null,
+                  "inferred": false
+                },
+                "enr": {
+                  "hasEnr": false,
+                  "enrichment": null
+                },
+                "details": {
+                  "enr": {
+                    "type": "ATM09_OTHER",
+                    "family": "OTHER",
+                    "restriction": "REQ_AUTHORISATION"
+                  }
+                }
+              }
+            """.trimIndent()
+        ))
+
+        val zone = response.zones.single()
+
+        assertEquals("ATM09_OTHER", zone.type)
+        assertEquals("OTHER", zone.family)
+        assertEquals(null, zone.enr)
+    }
+
+    @Test
     fun parserPromotesEnrichedEnrDescriptionToZoneDetails() {
         val description = "Proibito tutto il traffico aereo al di sotto di 2500 ft AMSL."
         val response = parseZoneCheckV3Response(overlapJson(

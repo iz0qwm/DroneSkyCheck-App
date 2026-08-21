@@ -5664,7 +5664,24 @@ private fun EnrSection(
     enr: EnrInfo?,
     onHelpClick: () -> Unit
 ) {
-    if (enr == null || !enr.hasContent()) return
+    if (enr == null) return
+
+    LaunchedEffect(
+        enr.name,
+        enr.code,
+        enr.classification,
+        enr.schedule?.raw,
+        enr.hasContent()
+    ) {
+        DscLogger.debug(
+            ZoneCheckUiLogTag,
+            "ENR UI render candidate hasContent=${enr.hasContent()} " +
+                "name='${enr.name.orEmpty()}' code='${enr.code.orEmpty()}' " +
+                "classification='${enr.classification.orEmpty()}' scheduleRaw='${enr.schedule?.raw.orEmpty()}'"
+        )
+    }
+
+    if (!enr.hasContent()) return
 
     ZoneSection(
         title = "ENR",
@@ -7767,6 +7784,7 @@ private const val TrafficAlertPulseGapMillis = 180L
 private const val TrafficAlertToneDurationMillis = 220
 private const val TrafficAlertToneVolume = 60
 private const val PeriodicNoticeLogTag = "DscPeriodicNotice"
+private const val ZoneCheckUiLogTag = "DscZoneCheckV3"
 private const val PeriodicNoticeUiSettlingMillis = 700L
 private const val BeginnerGuideStartupSettlingMillis = 500L
 private const val EnvironmentalProtectedAreaInfoText =

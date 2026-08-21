@@ -321,6 +321,49 @@ class ZonePresentationTest {
     }
 
     @Test
+    fun temporalDetailsUseEnrValidityWhenParentValidityIsEmpty() {
+        val details = zone(
+            activeNow = true,
+            validity = ValidityInfo(
+                activeNow = null,
+                validFrom = null,
+                validTo = null,
+                schedule = null,
+                interpretedSchedule = null,
+                nextActivation = null,
+                explanation = null,
+                future = null,
+                expired = null
+            ),
+            enr = enr(
+                schedule = ScheduleInfo(
+                    raw = "HJ",
+                    human = "Da mezz'ora prima dell'alba a mezz'ora dopo il tramonto",
+                    activeNow = true,
+                    explanation = "Zona ENR attiva secondo orario HJ."
+                ),
+                validity = ValidityInfo(
+                    activeNow = true,
+                    validFrom = null,
+                    validTo = null,
+                    schedule = "HJ",
+                    interpretedSchedule = "Da mezz'ora prima dell'alba a mezz'ora dopo il tramonto",
+                    nextActivation = null,
+                    explanation = "Zona ENR attiva secondo orario HJ.",
+                    future = null,
+                    expired = null
+                )
+            )
+        ).temporalDetailsPresentation()
+
+        assertTrue(details.hasContent)
+        assertEquals("Attiva ora", details.status)
+        assertEquals("da alba a tramonto", details.activitySchedule)
+        assertEquals("HJ", details.originalSchedule)
+        assertEquals("Zona ENR attiva secondo orario HJ.", details.explanation)
+    }
+
+    @Test
     fun informationalNotamUsesSingleHumanExplanation() {
         val official = OfficialInfo(
             sourceText = "W1234/26 NOTAMN Q) LIXX/QXXXX A) LIXX E) TESTO ORIGINALE",
@@ -447,6 +490,7 @@ class ZonePresentationTest {
 
     private fun enr(
         schedule: ScheduleInfo? = null,
+        validity: ValidityInfo? = null,
         weekSchedule: List<TemporalBarEntry> = emptyList(),
         daySchedule: List<Boolean?> = emptyList()
     ): EnrInfo =
@@ -465,7 +509,7 @@ class ZonePresentationTest {
             schedule = schedule,
             authority = null,
             official = null,
-            validity = null,
+            validity = validity,
             explanation = null,
             operationalMeaning = null,
             weekSchedule = weekSchedule,

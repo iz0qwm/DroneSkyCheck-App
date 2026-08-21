@@ -6,6 +6,8 @@ import java.net.URLEncoder
 import org.json.JSONArray
 import org.json.JSONObject
 
+private const val ZoneCheckParserLogTag = "DscZoneCheckV3"
+
 interface ZoneCheckV3Client {
     fun check(lat: Double, lon: Double): ZoneCheckV3Response
 }
@@ -101,27 +103,52 @@ internal fun parseZoneCheckV3Response(json: JSONObject): ZoneCheckV3Response {
 
 private fun JSONObject.toZoneInfo(): ZoneInfo {
     val identity = optJSONObject("identity")
+    val zoneName = identity?.optFirstString("name", "title")
+        ?: optFirstString("name", "title", "zoneName")
     val classificationObject = optJSONObject("classification")
     val uasLimit = optJSONObject("uasLimit")
     val info = optJSONObject("info")
     val authority = optJSONObject("authority")
-    val validity = optJSONObject("validity")?.toValidityInfo()
     val authorization = optJSONObject("authorization").toAuthorizationInfo()
+    val details = optJSONObject("details")
+    val temporalDetailsObject = optJSONObject("temporalDetails") ?: details?.optJSONObject("temporal")
+    val officialDetailsObject = optJSONObject("officialDetails") ?: details?.optJSONObject("official")
+    val enrDetailsObject = optJSONObject("enrDetails") ?: details?.optJSONObject("enr")
+    val validity = listOfNotNull(
+        optJSONObject("validity")?.toValidityInfo(),
+        temporalDetailsObject?.toValidityInfo()
+    ).firstOrNull { it.hasParserContent() }
     val enrichedObject = optJSONObject("enriched") ?: optJSONObject("enrichedData")
     val sup = optJSONObject("sup")?.toSupInfo()
     val uasGeographicalZone = optJSONObject("uasGeographicalZone")?.toUasGeographicalZoneInfo()
-    val enr = optJSONObject("enr")?.toEnrInfo()
-        ?: enrichedObject?.takeIf { it.hasInlineEnrContent() }?.toEnrInfo()
-        ?: takeIf { hasInlineEnrContent() }?.toEnrInfo()
+    val enrCandidates = listOfNotNull(
+        optJSONObject("enr")?.let { EnrJsonCandidate("enr", it) },
+        enrDetailsObject?.let { EnrJsonCandidate("enrDetails", it) },
+        enrichedObject?.takeIf { it.hasInlineEnrContent() }?.let { EnrJsonCandidate("enriched", it) },
+        takeIf { hasInlineEnrContent() }?.let { EnrJsonCandidate("zoneInline", it) }
+    )
+    enrCandidates.forEach { candidate ->
+        candidate.json.logEnrCandidate(zoneName, candidate.source)
+    }
+    val enr = enrCandidates.map { it.json }.filter { it.isPotentialEnrObject() }.firstNotNullOfOrNull { candidate ->
+        candidate.toEnrInfo(temporalDetailsObject).takeIf { it.hasParserContent() }
+    }
+    DscLogger.debug(
+        ZoneCheckParserLogTag,
+        "ENR parsed zone='${zoneName.orEmpty()}' result=${enr != null} " +
+            "name='${enr?.name.orEmpty()}' classification='${enr?.classification.orEmpty()}' " +
+            "scheduleRaw='${enr?.schedule?.raw.orEmpty()}'"
+    )
     val official = (optJSONObject("official") ?: optJSONObject("source") ?: optJSONObject("raw"))
         ?.toOfficialInfo()
         ?: toOfficialInfoFromInlineFields()
+        ?: officialDetailsObject?.toOfficialInfo()
+        ?: enr?.official
 
     return ZoneInfo(
         id = identity?.optFirstString("id", "identifier", "zoneId")
             ?: optFirstString("id", "identifier", "zoneId"),
-        name = identity?.optFirstString("name", "title")
-            ?: optFirstString("name", "title", "zoneName"),
+        name = zoneName,
         code = identity?.optFirstString("code", "ref", "reference")
             ?: optFirstString("code", "ref", "reference"),
         family = classificationObject?.optFirstString("family")
@@ -155,10 +182,17 @@ private fun JSONObject.toZoneInfo(): ZoneInfo {
             ?: authorization?.derivedRequired()
             ?: authority?.optFirstBoolean("authorizationRequired", "required")
             ?: optFirstBoolean("authorizationRequired"),
-        activeNow = validity?.activeNow ?: optFirstBoolean("activeNow"),
+        activeNow = validity?.activeNow
+            ?: temporalDetailsObject?.optFirstBoolean("activeNow")
+            ?: optFirstBoolean("activeNow"),
         isVerdictSource = optFirstBoolean("isVerdictSource", "responsibleForVerdict", "limiting")
     )
 }
+
+private data class EnrJsonCandidate(
+    val source: String,
+    val json: JSONObject
+)
 
 private fun JSONObject.toNotamInfo(): NotamInfo =
     NotamInfo(
@@ -180,10 +214,11 @@ private fun JSONObject.toNotamInfo(): NotamInfo =
         warnings = optArray("warnings").toIssueList()
     )
 
-private fun JSONObject.toEnrInfo(): EnrInfo {
+private fun JSONObject.toEnrInfo(temporalDetails: JSONObject? = null): EnrInfo {
     val enrichment = optJSONObject("enrichment")
-    val classification = optFirstString("classification", "type")
-        ?: enrichment?.optFirstString("classification", "type")
+    val classification = optFirstString("classification")
+        ?: enrichment?.optFirstString("classification")
+        ?: optFirstString("enrType")?.let { "ENR $it" }
         ?: enrichment?.optFirstString("enrType")?.let { "ENR $it" }
 
     return EnrInfo(
@@ -201,24 +236,88 @@ private fun JSONObject.toEnrInfo(): EnrInfo {
         operationCategory = optFirstString("operationCategory") ?: enrichment?.optFirstString("operationCategory"),
         requiredLicense = optFirstString("requiredLicense") ?: enrichment?.optFirstString("requiredLicense"),
         authorizationRequired = optFirstBoolean("authorizationRequired") ?: enrichment?.optFirstBoolean("authorizationRequired"),
-        schedule = optJSONObject("schedule")?.toScheduleInfo() ?: enrichment?.optJSONObject("schedule")?.toScheduleInfo(),
+        schedule = optJSONObject("schedule")?.toScheduleInfo()
+            ?: enrichment?.optJSONObject("schedule")?.toScheduleInfo()
+            ?: temporalDetails?.toScheduleInfo()
+            ?: takeIf { optFirstString("rawSchedule", "scheduleRaw", "humanSchedule", "scheduleHuman") != null }
+                ?.toScheduleInfo(),
         authority = (optJSONObject("authority") ?: enrichment?.optJSONObject("authority"))?.toAuthorityInfo(),
         official = (optJSONObject("official") ?: optJSONObject("source"))?.toOfficialInfo()
             ?: toOfficialInfoFromInlineFields(),
         validity = optJSONObject("validity")?.toValidityInfo()
             ?: enrichment?.optJSONObject("validity")?.toValidityInfo()
+            ?: temporalDetails?.toValidityInfo()
             ?: toValidityInfo(),
         explanation = optFirstString("explanation") ?: enrichment?.optFirstString("explanation"),
         operationalMeaning = optFirstString("operationalMeaning", "meaning")
             ?: enrichment?.optFirstString("operationalMeaning", "meaning"),
-        weekSchedule = optArray("weekSchedule").toTemporalBarEntries(),
-        daySchedule = optArray("daySchedule").toNullableBooleanList()
+        weekSchedule = (optArray("weekSchedule") ?: temporalDetails?.optArray("weekSchedule")).toTemporalBarEntries(),
+        daySchedule = (optArray("daySchedule") ?: temporalDetails?.optArray("daySchedule")).toNullableBooleanList()
     )
 }
 
 private fun JSONObject.hasInlineEnrContent(): Boolean =
-    optFirstString("descrizione", "aip", "enrType", "enrRef") != null ||
-        optFirstString("sourceFile")?.contains("ENR", ignoreCase = true) == true
+    optCleanString("descrizione") != null ||
+        optCleanString("aip") != null ||
+        optCleanString("enrType") != null ||
+        optCleanString("enrRef") != null ||
+        optCleanString("sourceFile")?.contains("ENR", ignoreCase = true) == true
+
+private fun JSONObject.isPotentialEnrObject(): Boolean {
+    if (optFirstBoolean("hasEnr") == false || optFirstBoolean("present") == false) return false
+    if (optFirstBoolean("hasEnr") == true || optFirstBoolean("present") == true) return true
+    if (hasInlineEnrContent()) return true
+    if (optJSONObject("enrichment")?.hasInlineEnrContent() == true) return true
+    if (optFirstString("source").equals("ENR", ignoreCase = true)) return true
+    if (optFirstString("sourcePipeline")?.contains("ENR", ignoreCase = true) == true) return true
+    if (optFirstString("classification")?.contains("ENR", ignoreCase = true) == true) return true
+    if (optJSONObject("schedule") != null || optJSONObject("official") != null) {
+        return optFirstString("code", "reference", "aip", "enrRef") != null ||
+            optFirstString("name", "title") != null
+    }
+    return false
+}
+
+private fun JSONObject.logEnrCandidate(zoneName: String?, source: String) {
+    DscLogger.debug(
+        ZoneCheckParserLogTag,
+        "ENR candidate zone='${zoneName.orEmpty()}' source=$source " +
+            "potential=${isPotentialEnrObject()} hasEnr=${optFirstBoolean("hasEnr")} " +
+            "present=${optFirstBoolean("present")} type='${optFirstString("type").orEmpty()}' " +
+            "family='${optFirstString("family").orEmpty()}' classification='${optFirstString("classification").orEmpty()}' " +
+            "sourceField='${optFirstString("source").orEmpty()}' sourcePipeline='${optFirstString("sourcePipeline").orEmpty()}' " +
+            "name='${optFirstString("name", "title").orEmpty()}' code='${optFirstString("code", "reference", "aip", "enrRef").orEmpty()}' " +
+            "keys=${keySummary()}"
+    )
+}
+
+private fun JSONObject.keySummary(): String =
+    buildList {
+        keys().forEachRemaining { add(it) }
+    }
+        .take(16)
+        .joinToString(prefix = "[", postfix = "]")
+
+private fun EnrInfo.hasParserContent(): Boolean =
+    !code.isNullOrBlank() ||
+        !name.isNullOrBlank() ||
+        !description.isNullOrBlank() ||
+        !limitText.isNullOrBlank() ||
+        !notes.isNullOrBlank() ||
+        !classification.isNullOrBlank() ||
+        !activationType.isNullOrBlank() ||
+        !operationMode.isNullOrBlank() ||
+        !operationCategory.isNullOrBlank() ||
+        !requiredLicense.isNullOrBlank() ||
+        authorizationRequired != null ||
+        schedule != null ||
+        authority != null ||
+        official != null ||
+        validity?.hasParserContent() == true ||
+        !explanation.isNullOrBlank() ||
+        !operationalMeaning.isNullOrBlank() ||
+        weekSchedule.isNotEmpty() ||
+        daySchedule.isNotEmpty()
 
 private fun JSONObject.toSupInfo(): SupInfo =
     SupInfo(
@@ -340,18 +439,34 @@ private fun JSONObject.toValidityInfo(): ValidityInfo =
         activeNow = optFirstBoolean("activeNow"),
         validFrom = optFirstString("validFrom", "from", "B"),
         validTo = optFirstString("validTo", "to", "C"),
-        schedule = optFirstString("schedule", "originalSchedule", "D"),
-        interpretedSchedule = optFirstString("interpretedSchedule", "scheduleExplanation"),
+        schedule = optFirstString("schedule", "originalSchedule", "rawSchedule", "scheduleRaw", "D"),
+        interpretedSchedule = optFirstString(
+            "interpretedSchedule",
+            "scheduleExplanation",
+            "scheduleHuman",
+            "humanSchedule"
+        ),
         nextActivation = optFirstString("nextActivation", "nextActiveAt", "nextActivationAt"),
         explanation = optFirstString("explanation", "stateExplanation"),
         future = optFirstBoolean("future", "isFuture"),
         expired = optFirstBoolean("expired", "isExpired")
     )
 
+private fun ValidityInfo.hasParserContent(): Boolean =
+    activeNow != null ||
+        !validFrom.isNullOrBlank() ||
+        !validTo.isNullOrBlank() ||
+        !schedule.isNullOrBlank() ||
+        !interpretedSchedule.isNullOrBlank() ||
+        !nextActivation.isNullOrBlank() ||
+        !explanation.isNullOrBlank() ||
+        future != null ||
+        expired != null
+
 private fun JSONObject.toScheduleInfo(): ScheduleInfo =
     ScheduleInfo(
-        raw = optFirstString("raw", "rawSchedule", "original"),
-        human = optFirstString("human", "scheduleHuman", "interpretedSchedule"),
+        raw = optFirstString("raw", "rawSchedule", "scheduleRaw", "original", "schedule"),
+        human = optFirstString("human", "scheduleHuman", "humanSchedule", "interpretedSchedule"),
         activeNow = optFirstBoolean("activeNow"),
         explanation = optFirstString("explanation")
     )

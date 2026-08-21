@@ -75,7 +75,9 @@ internal fun ZoneInfo.primaryStatusPresentation(): ZoneStatusPresentation? {
 
 internal fun ZoneInfo.temporalDetailsPresentation(): TemporalDetailsPresentation {
     val notam = notams.firstOrNull { it.hasTemporalContent() }
-    val sourceValidity = validity ?: notam?.validity ?: enr?.validity ?: sup?.validity
+    val validityCandidates = listOf(validity, notam?.validity, enr?.validity, sup?.validity)
+    val sourceValidity = validityCandidates.firstOrNull { it?.hasTemporalContentForUi() == true }
+        ?: validityCandidates.firstNotNullOfOrNull { it }
     val schedule = bestSchedule(enr, notam, sup, sourceValidity)
     val interpreted = schedule?.readableSchedule()
         ?: sourceValidity?.interpretedSchedule
@@ -210,6 +212,17 @@ private fun ScheduleInfo.readableSchedule(): String? =
 
 private fun NotamInfo.hasTemporalContent(): Boolean =
     validity != null || schedule?.hasAnyScheduleText() == true
+
+private fun ValidityInfo.hasTemporalContentForUi(): Boolean =
+    activeNow != null ||
+        !validFrom.isNullOrBlank() ||
+        !validTo.isNullOrBlank() ||
+        !schedule.isNullOrBlank() ||
+        !interpretedSchedule.isNullOrBlank() ||
+        !nextActivation.isNullOrBlank() ||
+        !explanation.isNullOrBlank() ||
+        future != null ||
+        expired != null
 
 internal fun ValidityInfo.statusLabelForUi(): String? =
     when {
