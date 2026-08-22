@@ -220,12 +220,11 @@ abstract class LocalPilotDatabase : RoomDatabase() {
                     .addMigrations(Migration1To2)
                     .addMigrations(Migration2To3)
                     .addMigrations(Migration3To4)
-                    .fallbackToDestructiveMigration(false)
                     .build()
                     .also { instance = it }
             }
 
-        private val Migration1To2 = object : Migration(1, 2) {
+        val Migration1To2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
                     """
@@ -251,7 +250,7 @@ abstract class LocalPilotDatabase : RoomDatabase() {
             }
         }
 
-        private val Migration2To3 = object : Migration(2, 3) {
+        val Migration2To3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `local_drones` ADD COLUMN `manualMaxWindResistanceMs` REAL")
             }
