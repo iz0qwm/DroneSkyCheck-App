@@ -2,6 +2,7 @@ package it.droneskycheck.app.ui.map
 
 import it.droneskycheck.app.data.Baseline
 import it.droneskycheck.app.data.InMemoryMapPreferences
+import it.droneskycheck.app.data.Issue
 import it.droneskycheck.app.data.LegalTimelineClient
 import it.droneskycheck.app.data.LegalTimelineMeta
 import it.droneskycheck.app.data.LegalTimelineQuery
@@ -13,10 +14,14 @@ import it.droneskycheck.app.data.LegalTimelineWindow
 import it.droneskycheck.app.data.LocalDrone
 import it.droneskycheck.app.data.LocalPilotStore
 import it.droneskycheck.app.data.Meta
+import it.droneskycheck.app.data.NotamInfo
 import it.droneskycheck.app.data.Position
+import it.droneskycheck.app.data.ScheduleInfo
+import it.droneskycheck.app.data.ValidityInfo
 import it.droneskycheck.app.data.Verdict
 import it.droneskycheck.app.data.ZoneCheckV3Client
 import it.droneskycheck.app.data.ZoneCheckV3Response
+import it.droneskycheck.app.data.ZoneInfo
 import it.droneskycheck.app.data.drone.DroneCatalogMatchStatus
 import it.droneskycheck.app.data.drone.DroneOperationalLevel
 import it.droneskycheck.app.data.drone.DroneTechnicalCatalogClient
@@ -41,6 +46,12 @@ import it.droneskycheck.app.data.traffic.TrafficCacheInfo
 import it.droneskycheck.app.data.traffic.TrafficCenter
 import it.droneskycheck.app.data.traffic.TrafficAircraft
 import it.droneskycheck.app.data.traffic.TrafficAltitude
+import it.droneskycheck.app.data.traffic.TrafficHeatmapCacheInfo
+import it.droneskycheck.app.data.traffic.TrafficHeatmapCell
+import it.droneskycheck.app.data.traffic.TrafficHeatmapClient
+import it.droneskycheck.app.data.traffic.TrafficHeatmapMaxAgl
+import it.droneskycheck.app.data.traffic.TrafficHeatmapQuery
+import it.droneskycheck.app.data.traffic.TrafficHeatmapResponse
 import it.droneskycheck.app.data.traffic.TrafficIdentifiers
 import it.droneskycheck.app.data.traffic.TrafficMotion
 import it.droneskycheck.app.data.traffic.TrafficPosition
@@ -214,6 +225,40 @@ class MapViewModelTest {
         assertEquals(LegalTimelineState.AUTH_REQUIRED, technical.bestOpportunity?.legalState)
         assertFalse(technical.bestOpportunity?.reasons?.contains(FlightOpportunityReasonCode.LEGAL_OPEN) == true)
         assertTrue(technical.blockers.contains(FlightOpportunityReasonCode.AUTHORIZATION_REQUIRED))
+        scope.cancel()
+    }
+
+    @Test
+    fun activeHardNotamVerdictPreventsOpenOpportunityInsideCurrentNotamValidity() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val clock = Clock.fixed(Instant.parse("2026-08-23T16:30:00Z"), ZoneOffset.UTC)
+        val viewModel = viewModel(
+            scope = scope,
+            zoneCheck = FakeZoneCheckClient(activeHardNotamResponse()),
+            legal = FakeLegalTimelineClient(state = LegalTimelineState.AVAILABLE),
+            weather = FakeWeatherClient(
+                forecast = weatherForecast(
+                    start = Instant.parse("2026-08-23T17:00:00Z"),
+                    hours = 2
+                )
+            ),
+            preferences = InMemoryMapPreferences(),
+            pilotStore = FakePilotStore(
+                listOf(LocalDrone(id = "mini", manufacturer = "DJI", model = "Mini 3 Pro", manualMaxWindResistanceMs = 10.0, isSelected = true))
+            ),
+            clock = clock
+        )
+
+        waitUntil { viewModel.uiState.value.selectedDrone != null }
+        viewModel.onMapTapped(selection(40.85, 14.27))
+        waitUntil { viewModel.uiState.value.verdict?.verdict?.status == "NO_FLY" }
+        viewModel.onOperationalContextRequested()
+        waitUntil { viewModel.uiState.value.flightOpportunityResult != null }
+
+        val result = requireNotNull(viewModel.uiState.value.flightOpportunityResult)
+        assertEquals(FlightOpportunityStatus.NO_OPEN_WINDOW, result.status)
+        assertNull(result.bestOpportunity)
+        assertTrue(result.blockers.contains(FlightOpportunityReasonCode.LEGAL_UNAVAILABLE))
         scope.cancel()
     }
 
@@ -1583,25 +1628,170 @@ class MapViewModelTest {
         scope.cancel()
     }
 
+    @Test
+    fun trafficHeatmapLayerIsOffByDefaultAndDoesNotQueryOnCameraIdle() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val heatmap = FakeTrafficHeatmapClient()
+        val viewModel = viewModel(
+            scope = scope,
+            preferences = InMemoryMapPreferences(),
+            trafficHeatmap = heatmap
+        )
+
+        viewModel.onCameraIdle(centerItalyBounds())
+        delay(50)
+
+        assertFalse(viewModel.uiState.value.trafficHeatmap.enabled)
+        assertEquals(0, heatmap.calls)
+        scope.cancel()
+    }
+
+    @Test
+    fun trafficHeatmapEnablesWithDefaultBelow500AndQueriesViewport() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val heatmap = FakeTrafficHeatmapClient()
+        val viewModel = viewModel(
+            scope = scope,
+            preferences = InMemoryMapPreferences(),
+            trafficHeatmap = heatmap,
+            trafficHeatmapDebounceMillis = 0L
+        )
+
+        viewModel.onCameraIdle(centerItalyBounds())
+        viewModel.onTrafficHeatmapEnabledChanged(true)
+        waitUntil { heatmap.calls == 1 && !viewModel.uiState.value.trafficHeatmap.loading }
+
+        assertTrue(viewModel.uiState.value.trafficHeatmap.enabled)
+        assertEquals(TrafficHeatmapMaxAgl.Below500, viewModel.uiState.value.trafficHeatmap.maxAgl)
+        assertEquals(TrafficHeatmapMaxAgl.Below500, heatmap.lastMaxAgl)
+        assertEquals(30, heatmap.lastDays)
+        assertTrue((heatmap.lastRadiusKm ?: 0.0) <= 100.0)
+        assertEquals(1, viewModel.uiState.value.trafficHeatmap.cells.size)
+        scope.cancel()
+    }
+
+    @Test
+    fun trafficHeatmapPersistsAglFilterAndRedrawsWithoutTrafficAwarenessCoupling() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val preferences = InMemoryMapPreferences()
+        val heatmap = FakeTrafficHeatmapClient()
+        val traffic = FakeTrafficAwarenessClient()
+        val viewModel = viewModel(
+            scope = scope,
+            traffic = traffic,
+            preferences = preferences,
+            trafficHeatmap = heatmap,
+            trafficHeatmapDebounceMillis = 0L
+        )
+
+        viewModel.onCameraIdle(centerItalyBounds())
+        viewModel.onTrafficHeatmapEnabledChanged(true)
+        waitUntil { heatmap.calls == 1 && viewModel.uiState.value.trafficHeatmap.cells.isNotEmpty() }
+        viewModel.onTrafficHeatmapMaxAglChanged(TrafficHeatmapMaxAgl.Below120)
+
+        assertEquals(TrafficHeatmapMaxAgl.Below120, preferences.getTrafficHeatmapMaxAgl())
+        assertEquals(1, heatmap.calls)
+        assertFalse(viewModel.uiState.value.trafficAwareness.enabled)
+        assertEquals(0, traffic.calls)
+        scope.cancel()
+    }
+
+    @Test
+    fun trafficHeatmapGuardrailAvoidsQueryWhenViewportIsTooLargeForAllTraffic() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val heatmap = FakeTrafficHeatmapClient()
+        val viewModel = viewModel(
+            scope = scope,
+            preferences = InMemoryMapPreferences(
+                initialTrafficHeatmapMaxAgl = TrafficHeatmapMaxAgl.All
+            ),
+            trafficHeatmap = heatmap,
+            trafficHeatmapDebounceMillis = 0L
+        )
+
+        viewModel.onCameraIdle(largeViewportBounds())
+        viewModel.onTrafficHeatmapEnabledChanged(true)
+        delay(50)
+
+        assertEquals(0, heatmap.calls)
+        assertEquals(
+            "Ingrandisci la mappa per visualizzare il traffico osservato.",
+            viewModel.uiState.value.trafficHeatmap.error
+        )
+        scope.cancel()
+    }
+
+    @Test
+    fun trafficHeatmapErrorIsLocalToHistoricalLayer() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val heatmap = FakeTrafficHeatmapClient(
+            results = ArrayDeque(listOf(Result.failure(IllegalStateException("timeout"))))
+        )
+        val viewModel = viewModel(
+            scope = scope,
+            preferences = InMemoryMapPreferences(),
+            trafficHeatmap = heatmap,
+            trafficHeatmapDebounceMillis = 0L
+        )
+
+        viewModel.onCameraIdle(centerItalyBounds())
+        viewModel.onTrafficHeatmapEnabledChanged(true)
+        waitUntil { heatmap.calls == 1 && !viewModel.uiState.value.trafficHeatmap.loading }
+
+        assertEquals(
+            "Dati traffico storico temporaneamente non disponibili.",
+            viewModel.uiState.value.trafficHeatmap.error
+        )
+        assertFalse(viewModel.uiState.value.trafficAwareness.enabled)
+        scope.cancel()
+    }
+
+    @Test
+    fun trafficHeatmapIgnoresStaleRequests() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val heatmap = FakeTrafficHeatmapClient(
+            delayMillis = 80L
+        )
+        val viewModel = viewModel(
+            scope = scope,
+            preferences = InMemoryMapPreferences(),
+            trafficHeatmap = heatmap,
+            trafficHeatmapDebounceMillis = 0L
+        )
+
+        viewModel.onCameraIdle(centerItalyBounds(lat = 41.0, lon = 12.0))
+        viewModel.onTrafficHeatmapEnabledChanged(true)
+        viewModel.onCameraIdle(centerItalyBounds(lat = 42.0, lon = 13.0))
+        waitUntil { heatmap.calls >= 2 && !viewModel.uiState.value.trafficHeatmap.loading }
+
+        assertEquals(42.0, viewModel.uiState.value.trafficHeatmap.cells.single().lat, 0.0)
+        scope.cancel()
+    }
+
     private fun viewModel(
         scope: CoroutineScope,
+        zoneCheck: ZoneCheckV3Client = FakeZoneCheckClient(),
         legal: FakeLegalTimelineClient = FakeLegalTimelineClient(),
         weather: FakeWeatherClient = FakeWeatherClient(),
         metar: NearbyMetarClient = FakeNearbyMetarClient(),
         traffic: TrafficAwarenessClient = FakeTrafficAwarenessClient(),
+        trafficHeatmap: TrafficHeatmapClient = FakeTrafficHeatmapClient(),
         preferences: InMemoryMapPreferences,
         pilotStore: LocalPilotStore = FakePilotStore(),
         catalog: DroneTechnicalCatalogClient = InMemoryDroneTechnicalCatalogClient(),
         helpRepository: HelpManifestClient = InMemoryHelpManifestClient(),
         trafficPollingIntervalMillis: Long = 5_000L,
-        loadHelpOnInit: Boolean = false
+        trafficHeatmapDebounceMillis: Long = 350L,
+        loadHelpOnInit: Boolean = false,
+        clock: Clock = this.clock
     ): MapViewModel =
         MapViewModel(
-            zoneCheckRepository = FakeZoneCheckClient(),
+            zoneCheckRepository = zoneCheck,
             legalTimelineRepository = legal,
             weatherForecastRepository = weather,
             nearbyMetarRepository = metar,
             trafficAwarenessRepository = traffic,
+            trafficHeatmapRepository = trafficHeatmap,
             mapPreferences = preferences,
             helpRepository = helpRepository,
             helpPreferences = InMemoryHelpPreferences(),
@@ -1610,6 +1800,7 @@ class MapViewModelTest {
             clock = clock,
             timelineZoneId = ZoneId.of("Europe/Rome"),
             trafficAwarenessPollingIntervalMillis = trafficPollingIntervalMillis,
+            trafficHeatmapDebounceMillis = trafficHeatmapDebounceMillis,
             loadHelpOnInit = loadHelpOnInit,
             externalScope = scope
         )
@@ -1708,6 +1899,29 @@ class MapViewModelTest {
             zone = null
         )
 
+    private fun centerItalyBounds(
+        lat: Double = 42.0,
+        lon: Double = 12.5,
+        delta: Double = 0.25,
+        zoom: Double = 8.0
+    ): CameraBounds =
+        CameraBounds(
+            zoom = zoom,
+            north = lat + delta,
+            south = lat - delta,
+            east = lon + delta,
+            west = lon - delta
+        )
+
+    private fun largeViewportBounds(): CameraBounds =
+        CameraBounds(
+            zoom = 8.0,
+            north = 47.0,
+            south = 37.0,
+            east = 18.0,
+            west = 7.0
+        )
+
     private suspend fun waitUntil(predicate: () -> Boolean) {
         withTimeout(10_000) {
             while (!predicate()) {
@@ -1729,9 +1943,11 @@ private fun catalogClient(): DroneTechnicalCatalogClient =
         )
     )
 
-private class FakeZoneCheckClient : ZoneCheckV3Client {
+private class FakeZoneCheckClient(
+    private val response: ZoneCheckV3Response? = null
+) : ZoneCheckV3Client {
     override fun check(lat: Double, lon: Double): ZoneCheckV3Response =
-        ZoneCheckV3Response(
+        response ?: ZoneCheckV3Response(
             position = Position(lat, lon),
             verdict = Verdict(
                 status = "OPEN",
@@ -1752,6 +1968,115 @@ private class FakeZoneCheckClient : ZoneCheckV3Client {
             )
         )
 }
+
+private fun activeHardNotamResponse(): ZoneCheckV3Response =
+    ZoneCheckV3Response(
+        position = Position(40.85, 14.27),
+        verdict = Verdict(
+            status = "NO_FLY",
+            maxAltitudeMetersAgl = 0,
+            source = "NOTAM",
+            explanation = "NOTAM attivo bloccante"
+        ),
+        zones = listOf(
+            ZoneInfo(
+                id = "notam-w2604-area-3",
+                name = "NOTAM W2604/26 area 3",
+                family = "NOTAM",
+                type = "P_NOTAM",
+                limitMetersAgl = 0,
+                description = null,
+                validity = ValidityInfo(
+                    activeNow = true,
+                    validFrom = "2026-08-20T00:00:00Z",
+                    validTo = "2026-09-04T23:59:00Z",
+                    schedule = "H24",
+                    interpretedSchedule = "Sempre attivo",
+                    nextActivation = null,
+                    explanation = null,
+                    future = false,
+                    expired = false
+                ),
+                operationalStatus = "NOTAM_ACTIVE",
+                notams = listOf(
+                    NotamInfo(
+                        code = "W2604/26",
+                        fir = "LIRR",
+                        location = null,
+                        zoneReference = "area 3",
+                        activityType = null,
+                        severity = "HARD",
+                        summary = "NOTAM attivo",
+                        explanation = null,
+                        operationalMeaning = null,
+                        blockingReason = "ACTIVE_HARD_NOTAM",
+                        schedule = ScheduleInfo(
+                            raw = "H24",
+                            human = "Sempre attivo",
+                            activeNow = true,
+                            explanation = null
+                        ),
+                        official = null,
+                        validity = ValidityInfo(
+                            activeNow = true,
+                            validFrom = "2026-08-20T00:00:00Z",
+                            validTo = "2026-09-04T23:59:00Z",
+                            schedule = "H24",
+                            interpretedSchedule = "Sempre attivo",
+                            nextActivation = null,
+                            explanation = null,
+                            future = false,
+                            expired = false
+                        ),
+                        weekSchedule = emptyList(),
+                        daySchedule = List(24) { true },
+                        blockers = listOf(Issue(code = "ACTIVE_HARD_NOTAM", zoneName = "NOTAM W2604/26 area 3")),
+                        warnings = emptyList()
+                    )
+                ),
+                blockers = listOf(Issue(code = "ACTIVE_HARD_NOTAM", zoneName = "NOTAM W2604/26 area 3")),
+                warnings = emptyList(),
+                authorizationRequired = true,
+                activeNow = true,
+                isVerdictSource = true
+            ),
+            ZoneInfo(
+                id = "notam-w3741",
+                name = "NOTAM W3741/26",
+                family = "NOTAM",
+                type = "P_NOTAM",
+                limitMetersAgl = 0,
+                description = null,
+                validity = ValidityInfo(
+                    activeNow = false,
+                    validFrom = "2026-09-05T00:00:00Z",
+                    validTo = "2026-12-03T23:59:00Z",
+                    schedule = "H24",
+                    interpretedSchedule = "Sempre attivo",
+                    nextActivation = "2026-09-05T00:00:00Z",
+                    explanation = null,
+                    future = true,
+                    expired = false
+                ),
+                operationalStatus = "NOTAM_INACTIVE_NOW",
+                blockers = emptyList(),
+                warnings = emptyList(),
+                authorizationRequired = true,
+                activeNow = false,
+                isVerdictSource = false
+            )
+        ),
+        blockers = listOf(Issue(code = "ACTIVE_HARD_NOTAM", zoneName = "NOTAM W2604/26 area 3")),
+        warnings = emptyList(),
+        baseline = Baseline(
+            maxAltitudeMetersAgl = 120,
+            representedAsZone = false
+        ),
+        meta = Meta(
+            engine = "DSC",
+            version = "v3"
+        )
+    )
 
 private class FakeLegalTimelineClient(
     private val delaysByLatitude: Map<Double, Long> = emptyMap(),
@@ -1878,6 +2203,89 @@ private class FakeTrafficAwarenessClient(
         }
     }
 }
+
+private class FakeTrafficHeatmapClient(
+    private val delayMillis: Long = 0L,
+    private val results: ArrayDeque<Result<TrafficHeatmapResponse>> = ArrayDeque()
+) : TrafficHeatmapClient {
+    var calls: Int = 0
+        private set
+    var lastPoint: MapPoint? = null
+        private set
+    var lastRadiusKm: Double? = null
+        private set
+    var lastDays: Int? = null
+        private set
+    var lastMaxAgl: TrafficHeatmapMaxAgl? = null
+        private set
+
+    override suspend fun getTrafficHeatmap(
+        lat: Double,
+        lon: Double,
+        radiusKm: Double,
+        days: Int,
+        maxAgl: TrafficHeatmapMaxAgl
+    ): Result<TrafficHeatmapResponse> {
+        calls += 1
+        lastPoint = MapPoint(lat, lon)
+        lastRadiusKm = radiusKm
+        lastDays = days
+        lastMaxAgl = maxAgl
+        delay(delayMillis)
+        return if (results.isNotEmpty()) {
+            results.removeFirst()
+        } else {
+            Result.success(heatmapResponse(center = MapPoint(lat, lon)))
+        }
+    }
+}
+
+private fun heatmapResponse(
+    cellId: Int = 1,
+    center: MapPoint = MapPoint(42.0, 12.5),
+    cells: List<TrafficHeatmapCell>? = null
+): TrafficHeatmapResponse =
+    TrafficHeatmapResponse(
+        ok = true,
+        generatedAt = 1_800_000_000,
+        servedAt = 1_800_000_100,
+        dataAvailableFrom = null,
+        periodDays = 30,
+        query = TrafficHeatmapQuery(
+            lat = center.lat,
+            lon = center.lon,
+            radiusKm = 20.0,
+            days = 30,
+            maxAgl = TrafficHeatmapMaxAgl.Below500
+        ),
+        count = cells?.size ?: 1,
+        cells = cells ?: listOf(
+            TrafficHeatmapCell(
+                lat = center.lat,
+                lon = center.lon,
+                observations = 20 + cellId,
+                uniqueTargetBucketSum = 0,
+                sources = emptyMap(),
+                altitudeBands = emptyMap(),
+                estimatedAglBands = mapOf(
+                    "lt_50m" to 1,
+                    "50_120m" to 2,
+                    "120_300m" to 3,
+                    "300_500m" to 4,
+                    "unknown" to 5,
+                    "below_terrain_or_inconsistent" to 6
+                ),
+                maxAgl = TrafficHeatmapMaxAgl.Below500,
+                filteredObservations = 10
+            )
+        ),
+        cache = TrafficHeatmapCacheInfo(
+            hit = false,
+            ageMs = 0,
+            ttlMs = 600_000,
+            singleFlight = false
+        )
+    )
 
 private fun trafficResponse(
     count: Int = 1,

@@ -4,6 +4,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import it.droneskycheck.app.data.traffic.TrafficFeedType
+import it.droneskycheck.app.data.traffic.TrafficHeatmapMaxAgl
 
 class MapPreferencesRepositoryTest {
     @Test
@@ -79,5 +80,25 @@ class MapPreferencesRepositoryTest {
         preferences.setEnhancedZoneOutlinesEnabled(true)
 
         assertTrue(preferences.isEnhancedZoneOutlinesEnabled())
+    }
+
+    @Test
+    fun trafficHeatmapDefaultsToOffWithBelow500AglAndPersistsLocally() {
+        val preferences = InMemoryMapPreferences()
+
+        assertFalse(preferences.isTrafficHeatmapEnabled())
+        assertTrue(preferences.getTrafficHeatmapMaxAgl() == TrafficHeatmapMaxAgl.Below500)
+
+        preferences.setTrafficHeatmapEnabled(true)
+        preferences.setTrafficHeatmapMaxAgl(TrafficHeatmapMaxAgl.Below120)
+
+        assertTrue(preferences.isTrafficHeatmapEnabled())
+        assertTrue(preferences.getTrafficHeatmapMaxAgl() == TrafficHeatmapMaxAgl.Below120)
+    }
+
+    @Test
+    fun invalidTrafficHeatmapAglPreferenceFallsBackToBelow500() {
+        assertTrue(TrafficHeatmapMaxAgl.fromPreferenceValue("bad") == TrafficHeatmapMaxAgl.Below500)
+        assertTrue(TrafficHeatmapMaxAgl.fromPreferenceValue(null) == TrafficHeatmapMaxAgl.Below500)
     }
 }

@@ -84,6 +84,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -191,6 +192,9 @@ import it.droneskycheck.app.data.traffic.TrafficAwarenessRepository
 import it.droneskycheck.app.data.traffic.TrafficAwarenessState
 import it.droneskycheck.app.data.traffic.TrafficAssessment
 import it.droneskycheck.app.data.traffic.TrafficFeedType
+import it.droneskycheck.app.data.traffic.TrafficHeatmapCellDetail
+import it.droneskycheck.app.data.traffic.TrafficHeatmapMaxAgl
+import it.droneskycheck.app.data.traffic.TrafficHeatmapState
 import it.droneskycheck.app.data.traffic.TrafficTarget
 import it.droneskycheck.app.data.traffic.TrafficTargetKind
 import it.droneskycheck.app.ui.map.TrafficAttentionPresentation
@@ -601,6 +605,7 @@ fun MapScreen(
             authorizationAreaClosed = currentDraft?.operationData?.areaClosed == true,
             trafficAwareness = uiState.trafficAwareness,
             trafficAssessments = uiState.trafficVisualAssessments,
+            trafficHeatmap = uiState.trafficHeatmap,
             mapDarkeningEnabled = uiState.isMapDarkeningEnabled,
             enhancedZoneOutlinesEnabled = uiState.isEnhancedZoneOutlinesEnabled,
             userLocation = uiState.userLocation,
@@ -609,6 +614,7 @@ fun MapScreen(
             onUserLocationCentered = viewModel::onUserLocationCentered,
             onCameraFocusHandled = { pendingCameraFocusPoint = null },
             onTrafficTargetTapped = viewModel::onTrafficTargetSelected,
+            onTrafficHeatmapCellTapped = viewModel::onTrafficHeatmapCellSelected,
             onMapTapped = { selection ->
                 val draft = currentDraft
                 if (draft != null && draft.workflowStep != AuthorizationWorkflowSteps.Form) {
@@ -768,10 +774,20 @@ fun MapScreen(
         if (uiState.isLayerSheetVisible) {
             LayerVisibilityBottomSheet(
                 layerVisibility = uiState.layerVisibility,
+                trafficHeatmap = uiState.trafficHeatmap,
                 onVisibilityChanged = viewModel::onLayerCategoryVisibilityChanged,
+                onTrafficHeatmapEnabledChanged = viewModel::onTrafficHeatmapEnabledChanged,
+                onTrafficHeatmapMaxAglChanged = viewModel::onTrafficHeatmapMaxAglChanged,
                 onShowAll = viewModel::onShowAllLayerCategories,
                 onHideAll = viewModel::onHideAllLayerCategories,
                 onDismiss = viewModel::onLayerPanelDismissed
+            )
+        }
+
+        uiState.trafficHeatmap.selectedCell?.let { detail ->
+            TrafficHeatmapCellBottomSheet(
+                detail = detail,
+                onDismiss = viewModel::onTrafficHeatmapCellDismissed
             )
         }
 
@@ -2579,7 +2595,10 @@ private fun LocationControlBottomSheet(
 @Composable
 private fun LayerVisibilityBottomSheet(
     layerVisibility: Map<DscLayerCategory, Boolean>,
+    trafficHeatmap: TrafficHeatmapState,
     onVisibilityChanged: (DscLayerCategory, Boolean) -> Unit,
+    onTrafficHeatmapEnabledChanged: (Boolean) -> Unit,
+    onTrafficHeatmapMaxAglChanged: (TrafficHeatmapMaxAgl) -> Unit,
     onShowAll: () -> Unit,
     onHideAll: () -> Unit,
     onDismiss: () -> Unit
@@ -2628,6 +2647,14 @@ private fun LayerVisibilityBottomSheet(
                 }
             }
 
+            TrafficHeatmapLayerControls(
+                state = trafficHeatmap,
+                onEnabledChanged = onTrafficHeatmapEnabledChanged,
+                onMaxAglChanged = onTrafficHeatmapMaxAglChanged
+            )
+
+            HorizontalDivider()
+
             DscLayerCategory.entries.forEach { category ->
                 LayerVisibilityRow(
                     category = category,
@@ -2638,6 +2665,230 @@ private fun LayerVisibilityBottomSheet(
         }
     }
 }
+
+@Composable
+private fun TrafficHeatmapLayerControls(
+    state: TrafficHeatmapState,
+    onEnabledChanged: (Boolean) -> Unit,
+    onMaxAglChanged: (TrafficHeatmapMaxAgl) -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 64.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(14.dp)
+                    .background(color = Color(0xFFA967FF), shape = CircleShape)
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Traffico aereo osservato",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "Densita storica, non traffico live",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Switch(
+                checked = state.enabled,
+                onCheckedChange = onEnabledChanged
+            )
+        }
+
+        if (state.enabled) {
+            Text(
+                text = "AGL stimato",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            TrafficHeatmapAglChipRows(
+                selected = state.maxAgl,
+                onSelected = onMaxAglChanged
+            )
+            Text(
+                text = "L'altezza AGL e stimata rispetto al terreno tramite modello digitale di elevazione.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            state.error?.let { message ->
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.tertiary
+                )
+            }
+            if (state.loading) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Text(
+                        text = "Caricamento traffico osservato...",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TrafficHeatmapAglChipRows(
+    selected: TrafficHeatmapMaxAgl,
+    onSelected: (TrafficHeatmapMaxAgl) -> Unit
+) {
+    val options = TrafficHeatmapMaxAgl.entries
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            options.take(3).forEach { option ->
+                TrafficHeatmapAglChip(option, selected, onSelected)
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            options.drop(3).forEach { option ->
+                TrafficHeatmapAglChip(option, selected, onSelected)
+            }
+        }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun RowScope.TrafficHeatmapAglChip(
+    option: TrafficHeatmapMaxAgl,
+    selected: TrafficHeatmapMaxAgl,
+    onSelected: (TrafficHeatmapMaxAgl) -> Unit
+) {
+    FilterChip(
+        selected = option == selected,
+        onClick = { onSelected(option) },
+        label = {
+            Text(
+                text = option.shortLabel,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        },
+        modifier = Modifier.weight(1f)
+    )
+}
+
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun TrafficHeatmapCellBottomSheet(
+    detail: TrafficHeatmapCellDetail,
+    onDismiss: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 24.dp, top = 8.dp, end = 24.dp, bottom = 36.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = "Traffico aereo osservato",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = "Periodo: ultimi ${detail.periodDays} giorni",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "AGL stimato: ${detail.maxAgl.detailLabel}",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium
+            )
+            Text(
+                text = "Osservazioni: ${detail.filteredObservations}",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            TrafficHeatmapBandRows(detail)
+            if (detail.unknownAgl > 0 || detail.inconsistentAgl > 0) {
+                HorizontalDivider()
+                Text(
+                    text = "Escluse dal filtro",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (detail.unknownAgl > 0) {
+                    TrafficHeatmapDetailRow("AGL non determinabile", detail.unknownAgl)
+                }
+                if (detail.inconsistentAgl > 0) {
+                    TrafficHeatmapDetailRow("Dato AGL incoerente", detail.inconsistentAgl)
+                }
+            }
+            Text(
+                text = "I dati rappresentano traffico osservato e non comprendono necessariamente tutti gli aeromobili presenti.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun TrafficHeatmapBandRows(detail: TrafficHeatmapCellDetail) {
+    TrafficHeatmapVisibleBandLabels.forEach { (band, label) ->
+        val value = detail.estimatedAglBands[band] ?: 0
+        if (value > 0 && (detail.maxAgl == TrafficHeatmapMaxAgl.All || band in detail.maxAgl.includedBands.orEmpty())) {
+            TrafficHeatmapDetailRow(label, value)
+        }
+    }
+}
+
+@Composable
+private fun TrafficHeatmapDetailRow(label: String, value: Int) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = value.toString(),
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium
+        )
+    }
+}
+
+private val TrafficHeatmapVisibleBandLabels = linkedMapOf(
+    "lt_50m" to "< 50 m",
+    "50_120m" to "50-120 m",
+    "120_300m" to "120-300 m",
+    "300_500m" to "300-500 m",
+    "500_1000m" to "500-1000 m",
+    "gt_1000m" to "> 1000 m"
+)
 
 @Composable
 private fun LayerVisibilityRow(

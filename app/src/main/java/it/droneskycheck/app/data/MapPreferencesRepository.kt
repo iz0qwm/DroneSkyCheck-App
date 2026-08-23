@@ -2,6 +2,7 @@ package it.droneskycheck.app.data
 
 import android.content.Context
 import it.droneskycheck.app.data.traffic.TrafficFeedType
+import it.droneskycheck.app.data.traffic.TrafficHeatmapMaxAgl
 
 interface MapPreferences {
     fun isWeatherAnalysisEnabled(): Boolean
@@ -26,6 +27,10 @@ interface MapPreferences {
     fun setTrafficAwarenessPositionLocked(locked: Boolean)
     fun isTrafficFeedEnabled(type: TrafficFeedType): Boolean
     fun setTrafficFeedEnabled(type: TrafficFeedType, enabled: Boolean)
+    fun isTrafficHeatmapEnabled(): Boolean
+    fun setTrafficHeatmapEnabled(enabled: Boolean)
+    fun getTrafficHeatmapMaxAgl(): TrafficHeatmapMaxAgl
+    fun setTrafficHeatmapMaxAgl(maxAgl: TrafficHeatmapMaxAgl)
 }
 
 class MapPreferencesRepository(
@@ -132,6 +137,24 @@ class MapPreferencesRepository(
             .apply()
     }
 
+    override fun isTrafficHeatmapEnabled(): Boolean =
+        preferences.getBoolean(KeyTrafficHeatmapEnabled, false)
+
+    override fun setTrafficHeatmapEnabled(enabled: Boolean) {
+        preferences.edit()
+            .putBoolean(KeyTrafficHeatmapEnabled, enabled)
+            .apply()
+    }
+
+    override fun getTrafficHeatmapMaxAgl(): TrafficHeatmapMaxAgl =
+        TrafficHeatmapMaxAgl.fromPreferenceValue(preferences.getString(KeyTrafficHeatmapMaxAgl, null))
+
+    override fun setTrafficHeatmapMaxAgl(maxAgl: TrafficHeatmapMaxAgl) {
+        preferences.edit()
+            .putString(KeyTrafficHeatmapMaxAgl, maxAgl.preferenceValue)
+            .apply()
+    }
+
     private companion object {
         const val PreferencesName = "dsc_map_preferences"
         const val KeyWeatherAnalysisEnabled = "weather_analysis_enabled"
@@ -144,6 +167,8 @@ class MapPreferencesRepository(
         const val KeyTrafficAlertVibrationEnabled = "traffic_alert_vibration_enabled"
         const val KeyHighAltitudeTrafficAlertEnabled = "traffic_alert_high_altitude_enabled"
         const val KeyTrafficAwarenessPositionLocked = "traffic_awareness_position_locked"
+        const val KeyTrafficHeatmapEnabled = "traffic_heatmap_enabled"
+        const val KeyTrafficHeatmapMaxAgl = "traffic_heatmap_max_agl"
     }
 }
 
@@ -158,7 +183,9 @@ class InMemoryMapPreferences(
     initialTrafficAlertVibrationEnabled: Boolean = true,
     initialHighAltitudeTrafficAlertEnabled: Boolean = false,
     initialTrafficAwarenessPositionLocked: Boolean = false,
-    initialTrafficFeedEnabled: Map<TrafficFeedType, Boolean> = TrafficFeedType.filterableTypes.associateWith { true }
+    initialTrafficFeedEnabled: Map<TrafficFeedType, Boolean> = TrafficFeedType.filterableTypes.associateWith { true },
+    initialTrafficHeatmapEnabled: Boolean = false,
+    initialTrafficHeatmapMaxAgl: TrafficHeatmapMaxAgl = TrafficHeatmapMaxAgl.Default
 ) : MapPreferences {
     private var weatherAnalysisEnabled = initialWeatherAnalysisEnabled
     private var largeTextEnabled = initialLargeTextEnabled
@@ -171,6 +198,8 @@ class InMemoryMapPreferences(
     private var highAltitudeTrafficAlertEnabled = initialHighAltitudeTrafficAlertEnabled
     private var trafficAwarenessPositionLocked = initialTrafficAwarenessPositionLocked
     private var trafficFeedEnabled = initialTrafficFeedEnabled.toMutableMap()
+    private var trafficHeatmapEnabled = initialTrafficHeatmapEnabled
+    private var trafficHeatmapMaxAgl = initialTrafficHeatmapMaxAgl
 
     override fun isWeatherAnalysisEnabled(): Boolean = weatherAnalysisEnabled
 
@@ -237,6 +266,18 @@ class InMemoryMapPreferences(
 
     override fun setTrafficFeedEnabled(type: TrafficFeedType, enabled: Boolean) {
         trafficFeedEnabled[type] = enabled
+    }
+
+    override fun isTrafficHeatmapEnabled(): Boolean = trafficHeatmapEnabled
+
+    override fun setTrafficHeatmapEnabled(enabled: Boolean) {
+        trafficHeatmapEnabled = enabled
+    }
+
+    override fun getTrafficHeatmapMaxAgl(): TrafficHeatmapMaxAgl = trafficHeatmapMaxAgl
+
+    override fun setTrafficHeatmapMaxAgl(maxAgl: TrafficHeatmapMaxAgl) {
+        trafficHeatmapMaxAgl = maxAgl
     }
 }
 

@@ -17,7 +17,9 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
@@ -32,7 +34,11 @@ import it.droneskycheck.app.data.traffic.TrafficAwarenessDefaults
 import it.droneskycheck.app.data.traffic.TrafficAwarenessLogTag
 import it.droneskycheck.app.data.traffic.TrafficAwarenessState
 import it.droneskycheck.app.data.traffic.TrafficAssessment
+import it.droneskycheck.app.data.traffic.TrafficHeatmapCellDetail
+import it.droneskycheck.app.data.traffic.TrafficHeatmapState
 import it.droneskycheck.app.data.traffic.coarseTraffic
+import it.droneskycheck.app.data.traffic.trafficHeatmapCellDetailFromFeature
+import it.droneskycheck.app.data.traffic.trafficHeatmapCellsToFeatureCollection
 import it.droneskycheck.app.ui.map.CameraBounds
 import it.droneskycheck.app.ui.map.DemoZone
 import it.droneskycheck.app.ui.map.MapPoint
@@ -87,6 +93,7 @@ fun DroneSkyMapView(
     authorizationAreaClosed: Boolean,
     trafficAwareness: TrafficAwarenessState,
     trafficAssessments: Map<String, TrafficAssessment>,
+    trafficHeatmap: TrafficHeatmapState,
     mapDarkeningEnabled: Boolean,
     enhancedZoneOutlinesEnabled: Boolean,
     userLocation: UserLocation?,
@@ -95,6 +102,7 @@ fun DroneSkyMapView(
     onUserLocationCentered: () -> Unit,
     onCameraFocusHandled: () -> Unit,
     onTrafficTargetTapped: (String) -> Unit,
+    onTrafficHeatmapCellTapped: (TrafficHeatmapCellDetail) -> Unit,
     onMapTapped: (MapTapSelection) -> Unit,
     onCameraIdle: (CameraBounds) -> Unit,
     onMapDataDegraded: () -> Unit,
@@ -102,6 +110,8 @@ fun DroneSkyMapView(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val currentTrafficHeatmap by rememberUpdatedState(trafficHeatmap)
+    val currentTrafficHeatmapCellTapped by rememberUpdatedState(onTrafficHeatmapCellTapped)
     val radarLabelOverlay = remember {
         TrafficRadarLabelOverlay(context).apply {
             layoutParams = FrameLayout.LayoutParams(
@@ -129,6 +139,13 @@ fun DroneSkyMapView(
                     loadedStaticLayerCollections,
                     visibleLayerCategories,
                     onTrafficTargetTapped,
+                    { feature ->
+                        trafficHeatmapCellDetailFromFeature(
+                            feature = feature,
+                            fallbackMaxAgl = currentTrafficHeatmap.maxAgl,
+                            periodDays = currentTrafficHeatmap.periodDays
+                        )?.let(currentTrafficHeatmapCellTapped)
+                    },
                     onMapTapped,
                     onCameraIdle,
                     onMapDataDegraded,
@@ -199,6 +216,7 @@ fun DroneSkyMapView(
             mapView.getMapAsync { map ->
                 map.getStyle { style ->
                     addTrafficAwarenessLayers(style)
+                    addTrafficHeatmapLayer(style)
                     addMapDarkeningLayer(style)
                     updateMapDarkening(style, mapDarkeningEnabled)
                     updateZoneOutlines(style, enhancedZoneOutlinesEnabled)
@@ -235,6 +253,7 @@ fun DroneSkyMapView(
                         trafficAssessments,
                         radarLabelOverlay
                     )
+                    updateTrafficHeatmap(style, trafficHeatmap)
                     if (shouldCenterOnUserLocation && userLocation != null) {
                         centerOnUserLocation(map, userLocation)
                         onUserLocationCentered()
@@ -259,6 +278,7 @@ private fun configureMap(
     loadedStaticLayerCollections: MutableMap<String, FeatureCollection>,
     visibleLayerCategories: Set<DscLayerCategory>,
     onTrafficTargetTapped: (String) -> Unit,
+    onTrafficHeatmapFeatureTapped: (Feature) -> Unit,
     onMapTapped: (MapTapSelection) -> Unit,
     onCameraIdle: (CameraBounds) -> Unit,
     onMapDataDegraded: () -> Unit,
@@ -283,6 +303,7 @@ private fun configureMap(
         )
         addDscLayers(it)
         addTrafficAwarenessLayers(it)
+        addTrafficHeatmapLayer(it)
         addMapDarkeningLayer(it)
         updateMapDarkening(it, mapDarkeningEnabled)
         updateZoneOutlines(it, enhancedZoneOutlinesEnabled)
@@ -332,11 +353,31 @@ private fun configureMap(
                 .distinctBy { zone -> zone.identityKey() }
             val selectedZone = zones.firstOrNull()
 
+            if (selectedZone != null) {
+                onMapTapped(
+                    MapTapSelection(
+                        point = MapPoint(lat = latLng.latitude, lon = latLng.longitude),
+                        zone = selectedZone,
+                        zones = zones
+                    )
+                )
+                return@addOnMapClickListener true
+            }
+
+            val heatmapFeature = map.queryRenderedFeatures(
+                touchAreaForLatLng(map, latLng, touchDensity),
+                MapLayerIds.TRAFFIC_HEATMAP_LAYER_ID
+            ).firstOrNull()
+            if (heatmapFeature != null) {
+                onTrafficHeatmapFeatureTapped(heatmapFeature)
+                return@addOnMapClickListener true
+            }
+
             onMapTapped(
                 MapTapSelection(
                     point = MapPoint(lat = latLng.latitude, lon = latLng.longitude),
-                    zone = selectedZone,
-                    zones = zones
+                    zone = null,
+                    zones = emptyList()
                 )
             )
             true
@@ -641,6 +682,44 @@ private fun addTrafficAwarenessLayers(style: Style) {
                 "glyph=${style.getLayer(MapLayerIds.TRAFFIC_AWARENESS_GLYPH_LAYER_ID) != null}"
         )
     }
+}
+
+private fun addTrafficHeatmapLayer(style: Style) {
+    style.addGeoJsonSourceIfMissing(
+        MapLayerIds.TRAFFIC_HEATMAP_SOURCE_ID,
+        emptyTrafficFeatureCollection()
+    )
+    style.addLayerBelowIfMissing(
+        MapLayerIds.TRAFFIC_HEATMAP_LAYER_ID,
+        CircleLayer(
+            MapLayerIds.TRAFFIC_HEATMAP_LAYER_ID,
+            MapLayerIds.TRAFFIC_HEATMAP_SOURCE_ID
+        ).withProperties(
+            circleRadius(trafficHeatmapRadiusExpression()),
+            circleColor(trafficHeatmapColorExpression()),
+            circleOpacity(0.42f),
+            circleBlur(0.72f),
+            circleStrokeWidth(0.0f),
+            visibility(Property.NONE)
+        ),
+        MapLayerIds.STATIC_LAYERS.first().fillLayerId
+    )
+}
+
+private fun updateTrafficHeatmap(style: Style, trafficHeatmap: TrafficHeatmapState) {
+    addTrafficHeatmapLayer(style)
+    val featureCollection = if (trafficHeatmap.enabled) {
+        trafficHeatmapCellsToFeatureCollection(
+            cells = trafficHeatmap.cells,
+            maxAgl = trafficHeatmap.maxAgl
+        )
+    } else {
+        emptyTrafficFeatureCollection()
+    }
+    style.setGeoJsonSourceIfAvailable(MapLayerIds.TRAFFIC_HEATMAP_SOURCE_ID, featureCollection)
+    style.getLayer(MapLayerIds.TRAFFIC_HEATMAP_LAYER_ID)?.setProperties(
+        visibility(if (trafficHeatmap.enabled) Property.VISIBLE else Property.NONE)
+    )
 }
 
 private fun addMapDarkeningLayer(style: Style) {
@@ -1441,6 +1520,30 @@ private fun trafficVectorColorExpression(): Expression =
         Expression.literal(TRAFFIC_AWARENESS_COLOR)
     )
 
+private fun trafficHeatmapColorExpression(): Expression =
+    Expression.interpolate(
+        Expression.linear(),
+        Expression.get("weight"),
+        Expression.literal(1.0),
+        Expression.literal(TRAFFIC_HEATMAP_LOW_COLOR),
+        Expression.literal(3.0),
+        Expression.literal(TRAFFIC_HEATMAP_MID_COLOR),
+        Expression.literal(5.0),
+        Expression.literal(TRAFFIC_HEATMAP_HIGH_COLOR)
+    )
+
+private fun trafficHeatmapRadiusExpression(): Expression =
+    Expression.interpolate(
+        Expression.linear(),
+        Expression.get("weight"),
+        Expression.literal(1.0),
+        Expression.literal(18.0f),
+        Expression.literal(3.0),
+        Expression.literal(30.0f),
+        Expression.literal(5.0),
+        Expression.literal(44.0f)
+    )
+
 private fun trafficSymbolLayerIds(): Array<String> =
     listOf(
         MapLayerIds.TRAFFIC_AWARENESS_MARKER_LAYER_ID,
@@ -1497,6 +1600,9 @@ private const val TRAFFIC_ALTITUDE_VERY_LOW_COLOR = "#FFC928"
 private const val TRAFFIC_ALTITUDE_LOW_COLOR = "#32D4E8"
 private const val TRAFFIC_ALTITUDE_HIGH_COLOR = "#8FA9C4"
 private const val TRAFFIC_AWARENESS_ATTENTION_COLOR = "#f9ab00"
+private const val TRAFFIC_HEATMAP_LOW_COLOR = "#4AA3FF"
+private const val TRAFFIC_HEATMAP_MID_COLOR = "#A967FF"
+private const val TRAFFIC_HEATMAP_HIGH_COLOR = "#FFC457"
 private const val TRAFFIC_ATTENTION_PULSE_DURATION_MS = 1_100L
 private const val TRAFFIC_ATTENTION_PULSE_FRAME_MS = 90L
 private const val TRAFFIC_ATTENTION_PULSE_MIN_RADIUS = 18.0f

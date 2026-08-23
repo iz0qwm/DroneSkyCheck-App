@@ -78,6 +78,23 @@ class FlightOpportunityEngineTest {
     }
 
     @Test
+    fun closedOverlappingSegmentRemovesConflictingOpenWindow() {
+        val result = engine.evaluate(
+            input(
+                legalSegments = listOf(
+                    segment("2026-08-14T06:00:00Z", "2026-08-14T09:00:00Z", LegalTimelineState.AVAILABLE),
+                    segment("2026-08-14T06:00:00Z", "2026-08-14T09:00:00Z", LegalTimelineState.UNAVAILABLE, maxAltitudeAgl = 0)
+                ),
+                weatherSlots = listOf(slot("2026-08-14T06:00:00Z", "2026-08-14T09:00:00Z"))
+            )
+        )
+
+        assertEquals(FlightOpportunityStatus.NO_OPEN_WINDOW, result.status)
+        assertNull(result.bestOpportunity)
+        assertTrue(result.blockers.contains(FlightOpportunityReasonCode.LEGAL_UNAVAILABLE))
+    }
+
+    @Test
     fun authRequiredCanProduceTechnicalPlanningWindowWithoutLegalOpenReason() {
         val result = engine.evaluate(
             input(

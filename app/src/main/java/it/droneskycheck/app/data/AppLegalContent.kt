@@ -93,10 +93,12 @@ object AppReleaseNotes {
         versionName = "3.6",
         versionCode = 26,
         title = "Cosa c'e di nuovo in Drone Sky Check 3.6",
-        intro = "Questa versione introduce nuove funzioni per gestire meglio i dati locali e l'avvio della posizione.",
+        intro = "Questa versione introduce nuove funzioni per gestire meglio i dati locali e corregge una valutazione delle opportunita di volo OPEN con NOTAM attivi.",
         highlights = listOf(
+            "Correzione delle finestre OPEN quando un NOTAM bloccante e' gia attivo nel periodo analizzato.",
             "Nuova preferenza per la posizione automatica all'apertura dell'app.",
-            "Esportazione e ripristino dei dati locali del profilo."
+            "Esportazione e ripristino dei dati locali del profilo.",
+            "Nuovo layer del traffico aereo osservato con filtro per altezza AGL stimata."
         )
     )
 }

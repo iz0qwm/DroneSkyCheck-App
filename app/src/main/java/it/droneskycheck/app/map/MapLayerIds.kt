@@ -17,6 +17,8 @@ object MapLayerIds {
     const val TRAFFIC_AWARENESS_RADIUS_SOURCE_ID = "traffic-awareness-radius-source"
     const val TRAFFIC_AWARENESS_RADIUS_FILL_LAYER_ID = "traffic-awareness-radius-fill-layer"
     const val TRAFFIC_AWARENESS_RADIUS_LINE_LAYER_ID = "traffic-awareness-radius-line-layer"
+    const val TRAFFIC_HEATMAP_SOURCE_ID = "traffic-observed-heatmap-source"
+    const val TRAFFIC_HEATMAP_LAYER_ID = "traffic-observed-heatmap-layer"
 
     val STATIC_LAYERS = listOf(
         DscMapLayer(

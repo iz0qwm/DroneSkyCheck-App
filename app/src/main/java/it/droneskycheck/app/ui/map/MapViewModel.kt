@@ -5,16 +5,23 @@ import androidx.lifecycle.viewModelScope
 import it.droneskycheck.app.data.InMemoryMapPreferences
 import it.droneskycheck.app.data.InMemoryLocalPilotStore
 import it.droneskycheck.app.data.LegalTimelineClient
+import it.droneskycheck.app.data.LegalTimelineContributor
 import it.droneskycheck.app.data.LegalTimelineRepository
 import it.droneskycheck.app.data.DscLogger
 import it.droneskycheck.app.data.LegalTimelineRepositoryError
 import it.droneskycheck.app.data.LegalTimelineResponse
+import it.droneskycheck.app.data.LegalTimelineSegment
+import it.droneskycheck.app.data.LegalTimelineState
 import it.droneskycheck.app.data.LocalDrone
 import it.droneskycheck.app.data.LocalPilotStore
 import it.droneskycheck.app.data.MapPreferences
+import it.droneskycheck.app.data.NotamInfo
+import it.droneskycheck.app.data.TemporalBarEntry
 import it.droneskycheck.app.data.UasDatasetUpdatesRepository
 import it.droneskycheck.app.data.ZoneCheckV3Client
 import it.droneskycheck.app.data.ZoneCheckV3Repository
+import it.droneskycheck.app.data.ZoneCheckV3Response
+import it.droneskycheck.app.data.ZoneInfo
 import it.droneskycheck.app.data.filterableTypes
 import it.droneskycheck.app.data.drone.DroneOperationalAssessmentEngine
 import it.droneskycheck.app.data.drone.DroneOperationalLevel
@@ -66,12 +73,20 @@ import it.droneskycheck.app.data.traffic.TrafficAlertEvent
 import it.droneskycheck.app.data.traffic.TrafficAssessment
 import it.droneskycheck.app.data.traffic.TrafficAwarenessResponse
 import it.droneskycheck.app.data.traffic.TrafficFeedType
+import it.droneskycheck.app.data.traffic.TrafficHeatmapCell
+import it.droneskycheck.app.data.traffic.TrafficHeatmapClient
+import it.droneskycheck.app.data.traffic.TrafficHeatmapDefaults
+import it.droneskycheck.app.data.traffic.TrafficHeatmapLogTag
+import it.droneskycheck.app.data.traffic.TrafficHeatmapMaxAgl
+import it.droneskycheck.app.data.traffic.TrafficHeatmapRepository
+import it.droneskycheck.app.data.traffic.TrafficHeatmapCellDetail
 import it.droneskycheck.app.data.traffic.TrafficRelevance
 import it.droneskycheck.app.data.traffic.TrafficRelevanceEngine
 import it.droneskycheck.app.data.traffic.TrafficTarget
 import it.droneskycheck.app.data.traffic.TrafficTargetKind
 import it.droneskycheck.app.data.traffic.TrafficTime
 import it.droneskycheck.app.data.traffic.coarseTraffic
+import it.droneskycheck.app.data.traffic.toTrafficHeatmapDiagnosticReason
 import it.droneskycheck.app.data.traffic.toTrafficAwarenessDiagnosticReason
 import it.droneskycheck.app.data.traffic.trafficFeedType
 import it.droneskycheck.app.data.traffic.trafficTargetKind
@@ -80,6 +95,7 @@ import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
+import java.util.LinkedHashMap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -100,6 +116,7 @@ class MapViewModel(
     private val weatherForecastRepository: WeatherForecastClient = WeatherForecastRepository(),
     private val nearbyMetarRepository: NearbyMetarClient = NearbyMetarRepository(),
     private val trafficAwarenessRepository: TrafficAwarenessClient = TrafficAwarenessRepository(),
+    private val trafficHeatmapRepository: TrafficHeatmapClient = TrafficHeatmapRepository(),
     private val weatherAssessmentEngine: WeatherAssessmentEngine = WeatherAssessmentEngine(),
     private val droneAssessmentEngine: DroneOperationalAssessmentEngine = DroneOperationalAssessmentEngine(),
     private val flightOpportunityEngine: FlightOpportunityEngine = FlightOpportunityEngine(),
@@ -114,6 +131,7 @@ class MapViewModel(
     private val timelineZoneId: ZoneId = ZoneId.systemDefault(),
     private val trafficAwarenessPollingIntervalMillis: Long = TrafficAwarenessDefaults.PollingIntervalMillis,
     private val trafficAwarenessRadiusKm: Double = TrafficAwarenessDefaults.DefaultRadiusKm,
+    private val trafficHeatmapDebounceMillis: Long = TrafficHeatmapDefaults.DebounceMillis,
     private val loadHelpOnInit: Boolean = true,
     externalScope: CoroutineScope? = null
 ) : ViewModel() {
@@ -138,8 +156,14 @@ class MapViewModel(
     private var legalTimelineJob: Job? = null
     private var weatherJob: Job? = null
     private var trafficAwarenessJob: Job? = null
+    private var trafficHeatmapJob: Job? = null
+    private var trafficHeatmapRequestId = 0L
     private var mapStatusMessageJob: Job? = null
     private var latestUnfilteredTrafficAwarenessResponse: TrafficAwarenessResponse? = null
+    private val trafficHeatmapCache = object : LinkedHashMap<TrafficHeatmapCacheKey, List<TrafficHeatmapCell>>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<TrafficHeatmapCacheKey, List<TrafficHeatmapCell>>?): Boolean =
+            size > TrafficHeatmapDefaults.CacheMaxEntries
+    }
     private var lastLegalTimelineRequest: LegalTimelineRequestKey? = null
     private var catalogResolver: DroneTechnicalCatalogResolver = DroneTechnicalCatalogResolver.empty()
     private var analyzeNextUserLocation = false
@@ -149,6 +173,7 @@ class MapViewModel(
     init {
         loadAccessibilityPreferences()
         loadTrafficAlertPreferences()
+        loadTrafficHeatmapPreferences()
         if (loadHelpOnInit) loadHelpManifest()
         loadUasDatasetUpdates(showRefreshing = false)
         loadDroneCatalogAndFleet()
@@ -666,6 +691,11 @@ class MapViewModel(
                     verdictError = null,
                     mapStatusMessage = null
                 )
+                _uiState.value = _uiState.value.withFlightOpportunity(
+                    timeline = _uiState.value.legalTimeline,
+                    forecast = _uiState.value.weatherForecast,
+                    selectedDrone = _uiState.value.selectedDrone
+                )
             }.onFailure {
                 if (!isCurrentSelection(requestId, point)) return@onFailure
                 _uiState.value = _uiState.value.copy(
@@ -1120,6 +1150,15 @@ class MapViewModel(
         )
     }
 
+    private fun loadTrafficHeatmapPreferences() {
+        _uiState.value = _uiState.value.copy(
+            trafficHeatmap = _uiState.value.trafficHeatmap.copy(
+                enabled = mapPreferences.isTrafficHeatmapEnabled(),
+                maxAgl = mapPreferences.getTrafficHeatmapMaxAgl()
+            )
+        )
+    }
+
     private fun refreshTrafficPresentationForCurrentSnapshot() {
         val state = _uiState.value
         val point = state.trafficAwarenessCenter ?: state.selectedPoint ?: return
@@ -1398,9 +1437,17 @@ class MapViewModel(
                 to = timeline.segments.maxOfOrNull { it.to } ?: forecast.hours.maxOfOrNull { it.instant } ?: now
             )
         }.orEmpty()
+        val legalSegments = timeline.segments.withActiveHardNotamGuards(
+            verdict = verdict,
+            now = now,
+            fallbackTo = timeline.window.to
+                ?: timeline.segments.maxOfOrNull { it.to }
+                ?: forecast.hours.maxOfOrNull { it.instant }
+                ?: now
+        )
         val result = flightOpportunityEngine.evaluate(
             FlightOpportunityInput(
-                legalSegments = timeline.segments,
+                legalSegments = legalSegments,
                 weatherSlots = forecast.toFlightOpportunityWeatherSlots(
                     now = now,
                     selectedDrone = selectedDrone
@@ -1413,7 +1460,7 @@ class MapViewModel(
             )
         )
         val resultWithDroneAdvice = result.withDroneRecommendation(
-            timeline = timeline,
+            legalSegments = legalSegments,
             forecast = forecast,
             now = now,
             zoneId = zoneId,
@@ -1428,7 +1475,7 @@ class MapViewModel(
     }
 
     private fun FlightOpportunityResult.withDroneRecommendation(
-        timeline: LegalTimelineResponse,
+        legalSegments: List<LegalTimelineSegment>,
         forecast: WeatherForecast,
         now: Instant,
         zoneId: ZoneId,
@@ -1448,7 +1495,7 @@ class MapViewModel(
             )
             val evaluated = flightOpportunityEngine.evaluate(
                 FlightOpportunityInput(
-                    legalSegments = timeline.segments,
+                    legalSegments = legalSegments,
                     weatherSlots = weatherSlots,
                     zoneId = zoneId,
                     now = now,
@@ -1519,6 +1566,180 @@ class MapViewModel(
             )
         )
     }
+
+    private fun List<LegalTimelineSegment>.withActiveHardNotamGuards(
+        verdict: ZoneCheckV3Response?,
+        now: Instant,
+        fallbackTo: Instant
+    ): List<LegalTimelineSegment> {
+        val guards = verdict.activeHardNotamGuardSegments(now, fallbackTo)
+        return if (guards.isEmpty()) this else this + guards
+    }
+
+    private fun ZoneCheckV3Response?.activeHardNotamGuardSegments(
+        now: Instant,
+        fallbackTo: Instant
+    ): List<LegalTimelineSegment> {
+        val response = this ?: return emptyList()
+        if (!response.verdict.status.equals("NO_FLY", ignoreCase = true)) return emptyList()
+
+        val responseHasHardNotam = response.blockers.hasHardNotamBlocker() ||
+            response.verdict.source.equals("NOTAM", ignoreCase = true)
+
+        return response.zones.flatMap { zone ->
+            val notamSegments = zone.notams.mapNotNull { notam ->
+                notam.toActiveHardNotamGuardSegment(zone, now, fallbackTo)
+            }
+            notamSegments.ifEmpty {
+                zone.toActiveHardNotamGuardSegment(responseHasHardNotam, now, fallbackTo)?.let(::listOf).orEmpty()
+            }
+        }.distinctBy { "${it.from}|${it.to}|${it.contributors.firstOrNull()?.designator.orEmpty()}" }
+    }
+
+    private fun NotamInfo.toActiveHardNotamGuardSegment(
+        zone: ZoneInfo,
+        now: Instant,
+        fallbackTo: Instant
+    ): LegalTimelineSegment? {
+        if (!hasHardBlockingEffect()) return null
+        if (!isActiveNow(zone)) return null
+        if (!hasContinuousActivation()) return null
+
+        val from = validity?.validFrom.toInstantOrNull() ?: zone.validity?.validFrom.toInstantOrNull() ?: now
+        val to = validity?.validTo.toInstantOrNull() ?: zone.validity?.validTo.toInstantOrNull() ?: fallbackTo
+        if (!to.isAfter(now) || !to.isAfter(from)) return null
+
+        return activeHardNotamSegment(
+            from = from,
+            to = to,
+            designator = code ?: zone.name,
+            reasonCodes = (blockers.mapNotNull { it.code } + blockingReason + "ACTIVE_HARD_NOTAM")
+                .filterNotNull()
+                .distinct()
+        )
+    }
+
+    private fun ZoneInfo.toActiveHardNotamGuardSegment(
+        responseHasHardNotam: Boolean,
+        now: Instant,
+        fallbackTo: Instant
+    ): LegalTimelineSegment? {
+        if (!isNotamZone()) return null
+        if (!responseHasHardNotam && !blockers.hasHardNotamBlocker()) return null
+        if (!isActiveNow()) return null
+        if (!validity.hasContinuousActivation()) return null
+
+        val from = validity?.validFrom.toInstantOrNull() ?: now
+        val to = validity?.validTo.toInstantOrNull() ?: fallbackTo
+        if (!to.isAfter(now) || !to.isAfter(from)) return null
+
+        return activeHardNotamSegment(
+            from = from,
+            to = to,
+            designator = name,
+            reasonCodes = (blockers.mapNotNull { it.code } + "ACTIVE_HARD_NOTAM").distinct()
+        )
+    }
+
+    private fun activeHardNotamSegment(
+        from: Instant,
+        to: Instant,
+        designator: String?,
+        reasonCodes: List<String>
+    ): LegalTimelineSegment =
+        LegalTimelineSegment(
+            from = from,
+            to = to,
+            state = LegalTimelineState.UNAVAILABLE,
+            rawState = LegalTimelineState.UNAVAILABLE.name,
+            maxAltitudeAgl = 0,
+            authorization = null,
+            contributors = listOf(
+                LegalTimelineContributor(
+                    id = designator?.let { "NOTAM:$it:VERDICT_GUARD" },
+                    sourceType = "NOTAM",
+                    designator = designator,
+                    role = listOf("ACTIVE", "APPLIED_EFFECT"),
+                    temporalPolicy = "SCHEDULED",
+                    operationalRelevance = "OPERATIONAL",
+                    maxAltitudeAgl = 0,
+                    reasonCodes = reasonCodes,
+                    warnings = emptyList()
+                )
+            ),
+            warnings = emptyList(),
+            confidence = "HIGH",
+            reasonCodes = reasonCodes
+        )
+
+    private fun NotamInfo.hasHardBlockingEffect(): Boolean =
+        blockingReason.equals("ACTIVE_HARD_NOTAM", ignoreCase = true) ||
+            severity.equals("HARD", ignoreCase = true) ||
+            severity.equals("BLOCKER", ignoreCase = true) ||
+            blockers.hasHardNotamBlocker()
+
+    private fun NotamInfo.isActiveNow(zone: ZoneInfo): Boolean =
+        validity?.activeNow == true ||
+            schedule?.activeNow == true ||
+            zone.validity?.activeNow == true ||
+            zone.activeNow == true ||
+            zone.operationalStatus.equals("NOTAM_ACTIVE", ignoreCase = true) ||
+            zone.operationalStatus.equals("ACTIVE_HARD_NOTAM", ignoreCase = true)
+
+    private fun ZoneInfo.isActiveNow(): Boolean =
+        validity?.activeNow == true ||
+            activeNow == true ||
+            operationalStatus.equals("NOTAM_ACTIVE", ignoreCase = true) ||
+            operationalStatus.equals("ACTIVE_HARD_NOTAM", ignoreCase = true)
+
+    private fun NotamInfo.hasContinuousActivation(): Boolean =
+        daySchedule.isFullDayActive() ||
+            weekSchedule.isFullWeekActive() ||
+            schedule.hasContinuousActivation() ||
+            validity.hasContinuousActivation()
+
+    private fun it.droneskycheck.app.data.ValidityInfo?.hasContinuousActivation(): Boolean {
+        val scheduleText = listOfNotNull(this?.schedule, this?.interpretedSchedule)
+            .joinToString(" ")
+        return scheduleText.isBlank() || scheduleText.isContinuousScheduleText()
+    }
+
+    private fun it.droneskycheck.app.data.ScheduleInfo?.hasContinuousActivation(): Boolean {
+        val scheduleText = listOfNotNull(this?.raw, this?.human)
+            .joinToString(" ")
+        return scheduleText.isBlank() || scheduleText.isContinuousScheduleText()
+    }
+
+    private fun String.isContinuousScheduleText(): Boolean {
+        val normalized = uppercase()
+        return "H24" in normalized ||
+            "24H" in normalized ||
+            "24 H" in normalized ||
+            "CONTINU" in normalized ||
+            "SEMPRE" in normalized ||
+            "ALWAYS" in normalized
+    }
+
+    private fun List<Boolean?>.isFullDayActive(): Boolean =
+        isNotEmpty() && all { it == true }
+
+    private fun List<TemporalBarEntry>.isFullWeekActive(): Boolean =
+        isNotEmpty() && all { entry ->
+            entry.activeRatio?.let { it >= 0.99f } == true ||
+                entry.segments.any { it.start <= 0.01f && it.end >= 0.99f } ||
+                entry.active == true && entry.segments.isEmpty() && entry.activeRatio == null
+        }
+
+    private fun ZoneInfo.isNotamZone(): Boolean =
+        type.equals("P_NOTAM", ignoreCase = true) ||
+            family.equals("NOTAM", ignoreCase = true) ||
+            name?.contains("NOTAM", ignoreCase = true) == true
+
+    private fun List<it.droneskycheck.app.data.Issue>.hasHardNotamBlocker(): Boolean =
+        any { it.code.equals("ACTIVE_HARD_NOTAM", ignoreCase = true) }
+
+    private fun String?.toInstantOrNull(): Instant? =
+        this?.let { runCatching { Instant.parse(it) }.getOrNull() }
 
     private fun FlightOpportunityDroneCandidate.isUsableRecommendation(): Boolean =
         compatibility == DroneWindowCompatibility.USABLE ||
@@ -1737,6 +1958,7 @@ class MapViewModel(
 
     fun onCameraIdle(bounds: CameraBounds) {
         _uiState.value = _uiState.value.copy(cameraBounds = bounds)
+        scheduleTrafficHeatmapLoad(bounds)
     }
 
     fun onLayerPanelRequested() {
@@ -1763,6 +1985,150 @@ class MapViewModel(
         _uiState.value = _uiState.value.copy(
             layerVisibility = DscLayerCategory.entries.associateWith { false }
         )
+    }
+
+    fun onTrafficHeatmapEnabledChanged(enabled: Boolean) {
+        mapPreferences.setTrafficHeatmapEnabled(enabled)
+        trafficHeatmapRequestId += 1
+        if (!enabled) {
+            trafficHeatmapJob?.cancel()
+            trafficHeatmapJob = null
+            _uiState.value = _uiState.value.copy(
+                trafficHeatmap = _uiState.value.trafficHeatmap.copy(
+                    enabled = false,
+                    loading = false,
+                    cells = emptyList(),
+                    error = null,
+                    selectedCell = null
+                )
+            )
+            return
+        }
+
+        _uiState.value = _uiState.value.copy(
+            trafficHeatmap = _uiState.value.trafficHeatmap.copy(
+                enabled = true,
+                error = null,
+                selectedCell = null
+            )
+        )
+        scheduleTrafficHeatmapLoad(_uiState.value.cameraBounds, immediate = true)
+    }
+
+    fun onTrafficHeatmapMaxAglChanged(maxAgl: TrafficHeatmapMaxAgl) {
+        trafficHeatmapRequestId += 1
+        mapPreferences.setTrafficHeatmapMaxAgl(maxAgl)
+        val current = _uiState.value.trafficHeatmap
+        _uiState.value = _uiState.value.copy(
+            trafficHeatmap = current.copy(
+                maxAgl = maxAgl,
+                loading = if (current.cells.isNotEmpty()) false else current.loading,
+                error = null,
+                selectedCell = null
+            )
+        )
+        if (current.enabled && current.cells.isEmpty()) {
+            scheduleTrafficHeatmapLoad(_uiState.value.cameraBounds, immediate = true)
+        }
+    }
+
+    fun onTrafficHeatmapCellSelected(detail: TrafficHeatmapCellDetail) {
+        _uiState.value = _uiState.value.copy(
+            trafficHeatmap = _uiState.value.trafficHeatmap.copy(selectedCell = detail)
+        )
+    }
+
+    fun onTrafficHeatmapCellDismissed() {
+        _uiState.value = _uiState.value.copy(
+            trafficHeatmap = _uiState.value.trafficHeatmap.copy(selectedCell = null)
+        )
+    }
+
+    private fun scheduleTrafficHeatmapLoad(
+        bounds: CameraBounds?,
+        immediate: Boolean = false
+    ) {
+        val state = _uiState.value.trafficHeatmap
+        if (!state.enabled) return
+        val request = bounds?.toTrafficHeatmapViewportRequest(state.maxAgl)
+        if (request == null) {
+            trafficHeatmapJob?.cancel()
+            _uiState.value = _uiState.value.copy(
+                trafficHeatmap = state.copy(
+                    loading = false,
+                    cells = emptyList(),
+                    error = TrafficHeatmapZoomHint,
+                    selectedCell = null
+                )
+            )
+            return
+        }
+
+        val cacheKey = request.toCacheKey(state.maxAgl, TrafficHeatmapDefaults.DefaultDays)
+        trafficHeatmapCache[cacheKey]?.let { cachedCells ->
+            trafficHeatmapJob?.cancel()
+            _uiState.value = _uiState.value.copy(
+                trafficHeatmap = state.copy(
+                    loading = false,
+                    cells = cachedCells,
+                    periodDays = TrafficHeatmapDefaults.DefaultDays,
+                    error = if (cachedCells.isEmpty()) TrafficHeatmapEmptyHint else null,
+                    lastUpdatedAt = clock.millis()
+                )
+            )
+            return
+        }
+
+        val requestId = ++trafficHeatmapRequestId
+        trafficHeatmapJob?.cancel()
+        trafficHeatmapJob = scope.launch {
+            if (!immediate) delay(trafficHeatmapDebounceMillis)
+            if (requestId != trafficHeatmapRequestId || !_uiState.value.trafficHeatmap.enabled) return@launch
+            _uiState.value = _uiState.value.copy(
+                trafficHeatmap = _uiState.value.trafficHeatmap.copy(
+                    loading = true,
+                    error = null
+                )
+            )
+
+            val result = withContext(Dispatchers.IO) {
+                trafficHeatmapRepository.getTrafficHeatmap(
+                    lat = request.center.lat,
+                    lon = request.center.lon,
+                    radiusKm = request.radiusKm,
+                    days = TrafficHeatmapDefaults.DefaultDays,
+                    maxAgl = state.maxAgl
+                )
+            }
+
+            if (requestId != trafficHeatmapRequestId || !_uiState.value.trafficHeatmap.enabled) return@launch
+            result.onSuccess { response ->
+                val cells = response.cells
+                trafficHeatmapCache[cacheKey] = cells
+                _uiState.value = _uiState.value.copy(
+                    trafficHeatmap = _uiState.value.trafficHeatmap.copy(
+                        loading = false,
+                        cells = cells,
+                        periodDays = response.periodDays,
+                        error = if (cells.isEmpty()) TrafficHeatmapEmptyHint else null,
+                        lastUpdatedAt = clock.millis(),
+                        selectedCell = null
+                    )
+                )
+            }.onFailure { error ->
+                DscLogger.warn(
+                    TrafficHeatmapLogTag,
+                    "state error reason=${error.toTrafficHeatmapDiagnosticReason()}",
+                    error
+                )
+                _uiState.value = _uiState.value.copy(
+                    trafficHeatmap = _uiState.value.trafficHeatmap.copy(
+                        loading = false,
+                        error = TrafficHeatmapUnavailableHint
+                    )
+                )
+            }
+        }
     }
 
     fun onLocationPermissionExplanationRequested() {
@@ -1889,12 +2255,16 @@ class MapViewModel(
         const val LogTag = "DscMapViewModel"
         const val CachedMapDataMessage = "Dati mappa salvati"
         const val SelectPointMessage = "Seleziona un punto sulla mappa"
+        const val TrafficHeatmapZoomHint = "Ingrandisci la mappa per visualizzare il traffico osservato."
+        const val TrafficHeatmapEmptyHint = "Nessun dato storico disponibile per l'area visualizzata."
+        const val TrafficHeatmapUnavailableHint = "Dati traffico storico temporaneamente non disponibili."
         const val StatusMessageMillis = 8_000L
         const val MaxHelpTourSteps = 7
     }
 
     override fun onCleared() {
         trafficAwarenessJob?.cancel()
+        trafficHeatmapJob?.cancel()
         mapStatusMessageJob?.cancel()
         super.onCleared()
     }
@@ -1940,6 +2310,75 @@ private fun CameraBounds.centerPoint(): MapPoint? {
     return MapPoint(lat = lat, lon = lon)
         .takeIf { it.lat.isFinite() && it.lon.isFinite() }
 }
+
+private fun CameraBounds.toTrafficHeatmapViewportRequest(maxAgl: TrafficHeatmapMaxAgl): TrafficHeatmapViewportRequest? {
+    if (!zoom.isFinite() || zoom < maxAgl.minZoom) return null
+    val center = centerPoint() ?: return null
+    val radiusKm = viewportRadiusKm(center)
+    if (!radiusKm.isFinite() || radiusKm <= 0.0) return null
+    val requestRadiusKm = when {
+        radiusKm <= TrafficHeatmapDefaults.MaxRadiusKm -> kotlin.math.ceil(radiusKm).coerceAtLeast(1.0)
+        maxAgl in CenteredMaxRadiusTrafficHeatmapFilters -> TrafficHeatmapDefaults.MaxRadiusKm
+        else -> return null
+    }
+    return TrafficHeatmapViewportRequest(center = center, radiusKm = requestRadiusKm)
+}
+
+private fun CameraBounds.viewportRadiusKm(center: MapPoint): Double {
+    val corners = listOf(
+        MapPoint(north, east),
+        MapPoint(north, west),
+        MapPoint(south, east),
+        MapPoint(south, west)
+    )
+    return corners.maxOf { corner -> center.distanceKmTo(corner) } * TrafficHeatmapViewportMargin
+}
+
+private fun MapPoint.distanceKmTo(other: MapPoint): Double {
+    val earthRadiusKm = 6371.0
+    val lat1 = Math.toRadians(lat)
+    val lat2 = Math.toRadians(other.lat)
+    val dLat = Math.toRadians(other.lat - lat)
+    val dLon = Math.toRadians(other.lon - lon)
+    val a = kotlin.math.sin(dLat / 2.0) * kotlin.math.sin(dLat / 2.0) +
+        kotlin.math.cos(lat1) * kotlin.math.cos(lat2) *
+        kotlin.math.sin(dLon / 2.0) * kotlin.math.sin(dLon / 2.0)
+    val c = 2.0 * kotlin.math.atan2(kotlin.math.sqrt(a), kotlin.math.sqrt(1.0 - a))
+    return earthRadiusKm * c
+}
+
+private fun TrafficHeatmapViewportRequest.toCacheKey(
+    maxAgl: TrafficHeatmapMaxAgl,
+    days: Int
+): TrafficHeatmapCacheKey =
+    TrafficHeatmapCacheKey(
+        latBucket = kotlin.math.round(center.lat * TrafficHeatmapCacheBucketFactor) / TrafficHeatmapCacheBucketFactor,
+        lonBucket = kotlin.math.round(center.lon * TrafficHeatmapCacheBucketFactor) / TrafficHeatmapCacheBucketFactor,
+        radiusKm = kotlin.math.ceil(radiusKm).toInt(),
+        days = days,
+        maxAgl = maxAgl.preferenceValue
+    )
+
+private data class TrafficHeatmapViewportRequest(
+    val center: MapPoint,
+    val radiusKm: Double
+)
+
+private data class TrafficHeatmapCacheKey(
+    val latBucket: Double,
+    val lonBucket: Double,
+    val radiusKm: Int,
+    val days: Int,
+    val maxAgl: String
+)
+
+private val CenteredMaxRadiusTrafficHeatmapFilters = setOf(
+    TrafficHeatmapMaxAgl.Below120,
+    TrafficHeatmapMaxAgl.Below300,
+    TrafficHeatmapMaxAgl.Below500
+)
+private const val TrafficHeatmapViewportMargin = 1.08
+private const val TrafficHeatmapCacheBucketFactor = 50.0
 
 private fun Throwable.toMapWeatherReason(): String =
     when (this) {

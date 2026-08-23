@@ -248,7 +248,10 @@ class FlightOpportunityEngine(
 
         val legalSegmentsInHorizon = input.legalSegments
             .filter { it.to.isAfter(horizonFrom) && it.from.isBefore(horizonTo) }
-        val openSegments = legalSegmentsInHorizon.filter { it.isOpenOpportunity }
+        val closedSegments = legalSegmentsInHorizon.filterNot { it.isOpenOpportunity }
+        val openSegments = legalSegmentsInHorizon
+            .filter { it.isOpenOpportunity }
+            .flatMap { it.withoutOverlaps(closedSegments, horizonFrom, horizonTo) }
         val legalBlockers = legalBlockers(input.legalSegments)
         val effectiveMode = if (openSegments.isNotEmpty()) {
             FlightOpportunityMode.OPEN
@@ -752,6 +755,35 @@ private fun lightReasonCodes(
 
 private val LegalTimelineSegment.isOpenOpportunity: Boolean
     get() = state == LegalTimelineState.AVAILABLE || state == LegalTimelineState.AVAILABLE_WITH_LIMIT
+
+private fun LegalTimelineSegment.withoutOverlaps(
+    blockers: List<LegalTimelineSegment>,
+    horizonFrom: Instant,
+    horizonTo: Instant
+): List<LegalTimelineSegment> {
+    var remaining = listOf(maxInstant(from, horizonFrom) to minInstant(to, horizonTo))
+    blockers
+        .filter { it.to.isAfter(from) && it.from.isBefore(to) }
+        .sortedBy { it.from }
+        .forEach { blocker ->
+            remaining = remaining.flatMap { (rangeFrom, rangeTo) ->
+                val blockFrom = maxInstant(blocker.from, rangeFrom)
+                val blockTo = minInstant(blocker.to, rangeTo)
+                if (!blockTo.isAfter(blockFrom)) {
+                    listOf(rangeFrom to rangeTo)
+                } else {
+                    listOfNotNull(
+                        (rangeFrom to blockFrom).takeIf { it.second.isAfter(it.first) },
+                        (blockTo to rangeTo).takeIf { it.second.isAfter(it.first) }
+                    )
+                }
+            }
+        }
+
+    return remaining.map { (rangeFrom, rangeTo) ->
+        copy(from = rangeFrom, to = rangeTo)
+    }
+}
 
 private val DayOfWeek.isWeekend: Boolean
     get() = this == DayOfWeek.SATURDAY || this == DayOfWeek.SUNDAY
