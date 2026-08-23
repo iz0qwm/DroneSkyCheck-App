@@ -571,6 +571,45 @@ class ZoneCheckV3RepositoryTest {
     }
 
     @Test
+    fun parserKeepsNestedEnrEnrichmentAuthorityWhenHasEnrIsFalse() {
+        val response = parseZoneCheckV3Response(overlapJson(
+            status = "NO_FLY",
+            limit = 0,
+            zones = """
+              {
+                "identity": { "id": "lip244", "name": "LI P244 - ROMA" },
+                "classification": { "type": "ATM09_PRISON", "family": "PROHIBITED" },
+                "authorization": {
+                  "applicability": "WHEN_ACTIVE",
+                  "resolutionStatus": "RESOLVED",
+                  "procedures": [{ "type": "ATM05", "version": 1, "label": "ATM05" }]
+                },
+                "enr": {
+                  "hasEnr": false,
+                  "enrichment": {
+                    "aip": "LI P244",
+                    "enrType": "5.1.1",
+                    "descrizione": "Proibito tutto il traffico aereo.",
+                    "operationMode": "OPEN",
+                    "operationCategory": "OPEN",
+                    "authorizationRequired": true,
+                    "authority": {
+                      "emails": ["protocollo.prefrm@pec.interno.it"],
+                      "note": "Prefettura di Roma"
+                    }
+                  }
+                }
+              }
+            """.trimIndent()
+        ))
+
+        val authority = response.zones.single().enr?.authority
+
+        assertEquals(listOf("protocollo.prefrm@pec.interno.it"), authority?.emails)
+        assertEquals("Prefettura di Roma", authority?.name)
+    }
+
+    @Test
     fun parserReadsUasGeographicalZoneEnrichedDescriptionAndAuthority() {
         val response = parseZoneCheckV3Response(overlapJson(
             status = "NO_FLY",

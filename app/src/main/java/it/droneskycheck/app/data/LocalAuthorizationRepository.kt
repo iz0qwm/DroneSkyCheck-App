@@ -109,10 +109,10 @@ class LocalAuthorizationRepository(
     }
 
     suspend fun getDraft(id: String): AuthorizationDraft? =
-        dao.getAuthorizationDraftEntity(id)?.toModel()
+        dao.getAuthorizationDraftEntity(id)?.refreshLocalPilotData()?.toModel()
 
     suspend fun getDrafts(): List<AuthorizationDraft> =
-        dao.getAuthorizationDraftEntities().map { it.toModel() }
+        dao.getAuthorizationDraftEntities().map { it.refreshLocalPilotData().toModel() }
 
     suspend fun getActiveDraft(): AuthorizationDraft? =
         getActiveDraftEntity()?.toModel()
@@ -304,20 +304,48 @@ class LocalAuthorizationRepository(
         current: AuthorizationDraftEntity,
         requestData: AuthorizationRequestData
     ): AuthorizationDraft {
-        val validation = AuthorizationDraftValidator.validate(current.procedureType, requestData)
-        val entity = current.copy(
-            status = validation.status,
-            requestDataJson = requestData.toJson(),
-            missingFieldsJson = validation.missingFields.toMissingFieldsJson(),
-            updatedAt = System.currentTimeMillis()
-        )
-        dao.upsertAuthorizationDraft(entity)
-        return entity.toModel()
+        return current.refreshLocalPilotData(
+            requestDataOverride = requestData,
+            forceSave = true
+        ).toModel()
     }
 
     private suspend fun getActiveDraftEntity(): AuthorizationDraftEntity? =
         dao.getAuthorizationDraftEntities()
             .firstOrNull { it.status == AuthorizationDraftStatuses.Draft || it.status == AuthorizationDraftStatuses.Ready }
+            ?.refreshLocalPilotData()
+
+    private suspend fun AuthorizationDraftEntity.refreshLocalPilotData(
+        requestDataOverride: AuthorizationRequestData? = null,
+        forceSave: Boolean = false
+    ): AuthorizationDraftEntity {
+        val snapshot = localPilotRepository.getSnapshot()
+        val previousRequestData = AuthorizationRequestData.fromJson(requestDataJson)
+        val baseRequestData = requestDataOverride ?: previousRequestData
+        val selectedDrone = snapshot.drones.firstOrNull { it.id == baseRequestData.selectedDroneId }
+            ?: snapshot.selectedDrone
+        val profileFields = buildProfileRequestFields(
+            procedureType = procedureType,
+            profile = snapshot.profile,
+            operator = snapshot.operator,
+            certificates = snapshot.certificates,
+            drone = selectedDrone
+        )
+        val requestData = baseRequestData.withProfileFields(profileFields)
+        val validation = AuthorizationDraftValidator.validate(procedureType, requestData)
+        val entity = copy(
+            status = validation.status,
+            pilotSnapshotJson = buildPilotSnapshot(snapshot.profile).toString(),
+            operatorSnapshotJson = buildOperatorSnapshot(snapshot.operator).toString(),
+            certificateSnapshotJson = buildCertificateSnapshot(snapshot.certificates).toString(),
+            droneSnapshotJson = buildDroneSnapshot(selectedDrone).toString(),
+            requestDataJson = requestData.toJson(),
+            missingFieldsJson = validation.missingFields.toMissingFieldsJson()
+        )
+        if (!forceSave && entity.hasSameStoredContent(this)) return this
+        return entity.copy(updatedAt = System.currentTimeMillis())
+            .also { dao.upsertAuthorizationDraft(it) }
+    }
 }
 
 private fun AuthorizationDraftEntity.matches(zone: ZoneInfo, procedureType: String): Boolean {
@@ -472,6 +500,76 @@ private fun buildInitialRequestData(
     )
 }
 
+private data class AuthorizationProfileRequestFields(
+    val requester: String,
+    val name: String,
+    val license: String,
+    val easaOperatorCode: String,
+    val phone: String,
+    val contactEmail: String,
+    val aircraftType: String,
+    val selectedDroneId: String
+)
+
+private fun buildProfileRequestFields(
+    procedureType: String,
+    profile: LocalPilotProfile?,
+    operator: LocalUasOperator?,
+    certificates: List<LocalPilotCertificate>,
+    drone: LocalDrone?
+): AuthorizationProfileRequestFields {
+    val name = profile?.displayName.orEmpty()
+    val license = selectCertificateLabel(certificates, procedureType)
+    val easa = operator?.easaOperatorCode.orEmpty()
+    val requester = listOfNotNull(
+        name.takeIf { it.isNotBlank() },
+        license.takeIf { it.isNotBlank() }?.let { "Att: $it" },
+        easa.takeIf { it.length > 3 }?.let { "EASA: $it" }
+    ).joinToString(" - ")
+    val aircraftType = drone?.let {
+        listOf(
+            it.displayName,
+            it.classLabel.takeIf(String::isNotBlank)?.let { classLabel -> "($classLabel)" }.orEmpty(),
+            droneSpecificLabels(it).takeIf { labels -> labels.isNotBlank() }?.let { labels -> "Specific: $labels" }.orEmpty()
+        ).filter { part -> part.isNotBlank() }.joinToString(" ")
+    }.orEmpty()
+
+    return AuthorizationProfileRequestFields(
+        requester = requester,
+        name = name,
+        license = license,
+        easaOperatorCode = easa,
+        phone = profile?.phone.orEmpty(),
+        contactEmail = operator?.pec.orEmpty(),
+        aircraftType = aircraftType,
+        selectedDroneId = drone?.id.orEmpty()
+    )
+}
+
+private fun AuthorizationRequestData.withProfileFields(
+    fields: AuthorizationProfileRequestFields
+): AuthorizationRequestData =
+    copy(
+        requester = fields.requester,
+        name = fields.name,
+        license = fields.license,
+        easaOperatorCode = fields.easaOperatorCode,
+        phone = fields.phone,
+        contactEmail = fields.contactEmail,
+        aircraftType = fields.aircraftType,
+        selectedDroneId = fields.selectedDroneId
+    )
+
+private fun AuthorizationDraftEntity.hasSameStoredContent(other: AuthorizationDraftEntity): Boolean =
+    status == other.status &&
+        operationDataJson == other.operationDataJson &&
+        pilotSnapshotJson == other.pilotSnapshotJson &&
+        operatorSnapshotJson == other.operatorSnapshotJson &&
+        certificateSnapshotJson == other.certificateSnapshotJson &&
+        droneSnapshotJson == other.droneSnapshotJson &&
+        requestDataJson == other.requestDataJson &&
+        missingFieldsJson == other.missingFieldsJson
+
 private fun buildZoneSnapshot(
     zone: ZoneInfo,
     procedureType: String,
@@ -508,13 +606,22 @@ private fun buildZoneSnapshot(
         )
 }
 
-private fun ZoneInfo.bestAuthority(): AuthorityInfo? =
-    listOfNotNull(authority, enr?.authority, sup?.authority, uasGeographicalZone?.authority)
-        .firstOrNull { it.hasUsableContact() }
-        ?: listOfNotNull(authority, enr?.authority, sup?.authority, uasGeographicalZone?.authority).firstOrNull()
+private fun ZoneInfo.bestAuthority(): AuthorityInfo? {
+    val authorities = listOfNotNull(authority, enr?.authority, sup?.authority, uasGeographicalZone?.authority)
+    return authorities.firstOrNull { it.hasEmailContact() }
+        ?: authorities.firstOrNull { it.hasDirectContact() }
+        ?: authorities.firstOrNull { it.hasUsableContact() }
+        ?: authorities.firstOrNull()
+}
 
 private fun AuthorityInfo.hasUsableContact(): Boolean =
     emails.isNotEmpty() || !contact.isNullOrBlank() || !name.isNullOrBlank() || !note.isNullOrBlank()
+
+private fun AuthorityInfo.hasEmailContact(): Boolean =
+    emails.isNotEmpty()
+
+private fun AuthorityInfo.hasDirectContact(): Boolean =
+    !contact.isNullOrBlank()
 
 private fun AuthorityInfo.displayContact(): String =
     emails.joinToString(", ").ifBlank { contact.orEmpty().takeUnless { it.isJsonObjectText() }.orEmpty() }

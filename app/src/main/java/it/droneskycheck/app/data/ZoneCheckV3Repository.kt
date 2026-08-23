@@ -392,14 +392,20 @@ private fun JSONObject.hasInlineEnrContent(): Boolean =
         optCleanString("sourceFile")?.contains("ENR", ignoreCase = true) == true
 
 private fun JSONObject.isPotentialEnrObject(): Boolean {
-    if (optFirstBoolean("hasEnr") == false || optFirstBoolean("present") == false) return false
     if (optFirstBoolean("hasEnr") == true || optFirstBoolean("present") == true) return true
     if (hasInlineEnrContent()) return true
     if (optJSONObject("enrichment")?.hasInlineEnrContent() == true) return true
+    if (optFirstBoolean("hasEnr") == false || optFirstBoolean("present") == false) return false
     if (optFirstString("source").equals("ENR", ignoreCase = true)) return true
     if (optFirstString("sourcePipeline")?.contains("ENR", ignoreCase = true) == true) return true
     if (optFirstString("classification")?.contains("ENR", ignoreCase = true) == true) return true
-    if (optJSONObject("schedule") != null || optJSONObject("official") != null) {
+    if (
+        optJSONObject("schedule") != null ||
+        optJSONObject("official") != null ||
+        optJSONObject("validity") != null ||
+        optFirstString("officialText", "sourceText", "rawText", "icaoText") != null ||
+        optArray("weekSchedule", "daySchedule") != null
+    ) {
         return optFirstString("code", "reference", "aip", "enrRef") != null ||
             optFirstString("name", "title") != null
     }

@@ -132,7 +132,7 @@ class LocalAuthorizationRepositoryTest {
     }
 
     @Test
-    fun changingProfileAfterCreationDoesNotAlterExistingSnapshot() = runBlocking {
+    fun changingProfileAfterCreationRefreshesExistingDraftSnapshot() = runBlocking {
         val dao = FakeLocalPilotDao()
         val pilotRepository = seedPilotWorkspace(dao)
         val repository = LocalAuthorizationRepository(dao, pilotRepository, testAirportRepository())
@@ -141,11 +141,12 @@ class LocalAuthorizationRepositoryTest {
         pilotRepository.saveProfile(LocalPilotProfile(firstName = "Nuovo", lastName = "Nome"))
         val reloadedDraft = repository.getDraft(draft.id)
 
-        assertEquals("Raffaello", JSONObject(reloadedDraft!!.pilotSnapshotJson).optString("firstName"))
+        assertEquals("Nuovo", JSONObject(reloadedDraft!!.pilotSnapshotJson).optString("firstName"))
+        assertEquals("Nuovo Nome", reloadedDraft.requestData.name)
     }
 
     @Test
-    fun requestDataIsEditableWithoutChangingSnapshot() = runBlocking {
+    fun profileDerivedRequestDataRefreshesWhenSavingDraft() = runBlocking {
         val repository = seededRepository()
         val draft = (repository.createDraftFromZone(atmZone("ATM05"), 41.9, 12.5) as CreateAuthorizationDraftResult.Created).draft
 
@@ -154,8 +155,57 @@ class LocalAuthorizationRepositoryTest {
             draft.requestData.copy(contactEmail = "pratica@pec.it")
         )
 
-        assertEquals("pratica@pec.it", updated?.requestData?.contactEmail)
+        assertEquals("raffa@pec.it", updated?.requestData?.contactEmail)
         assertEquals("raffa@pec.it", JSONObject(updated!!.operatorSnapshotJson).optString("pec"))
+    }
+
+    @Test
+    fun missingOperatorCodeIsSatisfiedAfterProfileUpdateWithoutRecreatingDraft() = runBlocking {
+        val dao = FakeLocalPilotDao()
+        val pilotRepository = seedPilotWorkspace(dao, operatorCode = "")
+        val repository = LocalAuthorizationRepository(dao, pilotRepository, testAirportRepository())
+        val draft = (repository.createDraftFromZone(atmZone("ATM05"), 41.9, 12.5) as CreateAuthorizationDraftResult.Created).draft
+
+        assertTrue(draft.missingFields.any { it.key == "operator.easaCode" })
+
+        pilotRepository.saveOperator(
+            LocalUasOperator(
+                name = "Raffaello Di Martino",
+                easaOperatorCode = "ITA1234567890",
+                pec = "raffa@pec.it",
+                insuranceCompany = "Assicurazione",
+                insurancePolicyNumber = "POL-1",
+                insuranceExpiresAt = "2030-12-31"
+            )
+        )
+        val refreshed = repository.getActiveDraft()
+
+        assertEquals(draft.id, refreshed?.id)
+        assertEquals("ITA1234567890", refreshed?.requestData?.easaOperatorCode)
+        assertEquals("ITA1234567890", JSONObject(refreshed!!.operatorSnapshotJson).optString("easaOperatorCode"))
+        assertFalse(refreshed.missingFields.any { it.key == "operator.easaCode" })
+    }
+
+    @Test
+    fun draftPrefersLIP244EnrAuthorityEmailOverPrimaryAuthorityWithoutEmail() = runBlocking {
+        val repository = seededRepository()
+        val zone = atmZone("ATM05").copy(
+            id = "lip244",
+            name = "LI P244",
+            authority = AuthorityInfo(
+                name = "Autorizzazione richiesta",
+                code = null,
+                contact = null,
+                source = "authorization"
+            ),
+            enr = enrWithAuthorityEmail("protocollo.prefrm@pec.interno.it", "Prefettura di Roma")
+        )
+
+        val draft = (repository.createDraftFromZone(zone, lat = 41.9, lon = 12.5) as CreateAuthorizationDraftResult.Created).draft
+        val authority = JSONObject(draft.zoneSnapshotJson).getJSONObject("authority")
+
+        assertEquals("protocollo.prefrm@pec.interno.it", authority.getJSONArray("emails").getString(0))
+        assertEquals("Prefettura di Roma", authority.getString("name"))
     }
 
     @Test
@@ -411,7 +461,8 @@ class LocalAuthorizationRepositoryTest {
 
     private suspend fun seedPilotWorkspace(
         dao: FakeLocalPilotDao,
-        certificateCategories: String = "A1_A3"
+        certificateCategories: String = "A1_A3",
+        operatorCode: String = "ITA1234567890"
     ): LocalPilotRepository {
         val pilotRepository = LocalPilotRepository(dao)
         pilotRepository.saveProfile(
@@ -434,7 +485,7 @@ class LocalAuthorizationRepositoryTest {
         pilotRepository.saveOperator(
             LocalUasOperator(
                 name = "Raffaello Di Martino",
-                easaOperatorCode = "ITA1234567890",
+                easaOperatorCode = operatorCode,
                 pec = "raffa@pec.it",
                 insuranceCompany = "Assicurazione",
                 insurancePolicyNumber = "POL-1",

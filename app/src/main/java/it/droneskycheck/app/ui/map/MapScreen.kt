@@ -320,6 +320,7 @@ fun MapScreen(
     var pendingCameraFocusPoint by remember { mutableStateOf<MapPoint?>(null) }
     var currentDraft by remember { mutableStateOf<AuthorizationDraft?>(null) }
     var isDraftSheetVisible by remember { mutableStateOf(false) }
+    var returnToDraftAfterProfile by remember { mutableStateOf(false) }
     var conflictingDraft by remember { mutableStateOf<AuthorizationDraft?>(null) }
     var pendingConflictZone by remember { mutableStateOf<ZoneInfo?>(null) }
     var draftError by remember { mutableStateOf<String?>(null) }
@@ -890,12 +891,20 @@ fun MapScreen(
                 onRefreshHelp = viewModel::refreshHelpManifestNow,
                 onRepeatTour = {
                     isPilotProfileSheetVisible = false
+                    returnToDraftAfterProfile = false
                     viewModel.onHelpTourProfileVisibilityChanged(false)
                     viewModel.requestHelpOnboardingReplay(profileSheetVisible = false)
                 },
                 onDismiss = {
                     isPilotProfileSheetVisible = false
                     viewModel.onHelpTourProfileVisibilityChanged(false)
+                    coroutineScope.launch {
+                        reloadActiveDraft()
+                        if (returnToDraftAfterProfile && currentDraft != null) {
+                            isDraftSheetVisible = true
+                        }
+                        returnToDraftAfterProfile = false
+                    }
                 }
             )
         }
@@ -943,6 +952,7 @@ fun MapScreen(
                 draft = draft,
                 onOpenProfile = {
                     isDraftSheetVisible = false
+                    returnToDraftAfterProfile = true
                     isPilotProfileSheetVisible = true
                     viewModel.onHelpTourProfileVisibilityChanged(true)
                 },
