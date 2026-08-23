@@ -43,6 +43,7 @@ data class MapUiState(
     val isLargeTextEnabled: Boolean = false,
     val isMapDarkeningEnabled: Boolean = false,
     val isEnhancedZoneOutlinesEnabled: Boolean = false,
+    val isAutomaticLocationEnabled: Boolean = false,
     val isWeatherAnalysisLoading: Boolean = false,
     val weatherForecast: WeatherForecast? = null,
     val weatherAssessment: WeatherAssessment? = null,

@@ -1084,6 +1084,11 @@ class MapViewModel(
         )
     }
 
+    fun onAutomaticLocationEnabledChanged(enabled: Boolean) {
+        mapPreferences.setAutomaticLocationEnabled(enabled)
+        _uiState.value = _uiState.value.copy(isAutomaticLocationEnabled = enabled)
+    }
+
     private fun trafficAwarenessStopReason(point: MapPoint): String =
         when {
             !_uiState.value.trafficAwareness.enabled -> "disabled"
@@ -1100,7 +1105,8 @@ class MapViewModel(
         _uiState.value = _uiState.value.copy(
             isLargeTextEnabled = mapPreferences.isLargeTextEnabled(),
             isMapDarkeningEnabled = mapDarkeningEnabled,
-            isEnhancedZoneOutlinesEnabled = enhancedZoneOutlinesEnabled
+            isEnhancedZoneOutlinesEnabled = enhancedZoneOutlinesEnabled,
+            isAutomaticLocationEnabled = mapPreferences.isAutomaticLocationEnabled()
         )
     }
 

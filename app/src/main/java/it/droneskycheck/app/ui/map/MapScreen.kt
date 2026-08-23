@@ -330,6 +330,7 @@ fun MapScreen(
     var isBeginnerStartupIntroVisible by remember { mutableStateOf(false) }
     var beginnerStartupIntroShownThisSession by remember { mutableStateOf(false) }
     var beginnerStartupEnabled by remember { mutableStateOf(true) }
+    var automaticLocationAttempted by remember { mutableStateOf(false) }
     val trafficAttention = trafficAttentionPresentation(
         targets = uiState.trafficAwareness.response?.traffic?.targets.orEmpty(),
         assessments = uiState.trafficAssessments
@@ -432,6 +433,30 @@ fun MapScreen(
                     Manifest.permission.ACCESS_COARSE_LOCATION
                 )
             viewModel.onLocationPermissionDenied(permanentlyDenied)
+        }
+    }
+
+    LaunchedEffect(
+        uiState.isAutomaticLocationEnabled,
+        uiState.isUserLocationEnabled,
+        permissionState.hasForegroundLocation,
+        isSettingsSheetVisible
+    ) {
+        if (
+            uiState.isAutomaticLocationEnabled &&
+            !automaticLocationAttempted &&
+            !uiState.isUserLocationEnabled &&
+            !isSettingsSheetVisible
+        ) {
+            automaticLocationAttempted = true
+            if (permissionState.hasForegroundLocation) {
+                viewModel.onLocationEnabled()
+            } else {
+                viewModel.onLocationPermissionExplanationRequested()
+            }
+        }
+        if (!uiState.isAutomaticLocationEnabled) {
+            automaticLocationAttempted = false
         }
     }
 
@@ -870,6 +895,8 @@ fun MapScreen(
                 onMapDarkeningEnabledChanged = viewModel::onMapDarkeningEnabledChanged,
                 enhancedZoneOutlinesEnabled = uiState.isEnhancedZoneOutlinesEnabled,
                 onEnhancedZoneOutlinesEnabledChanged = viewModel::onEnhancedZoneOutlinesEnabledChanged,
+                automaticLocationEnabled = uiState.isAutomaticLocationEnabled,
+                onAutomaticLocationEnabledChanged = viewModel::onAutomaticLocationEnabledChanged,
                 appThemeMode = appThemeMode,
                 onAppThemeModeChanged = onAppThemeModeChanged,
                 beginnerStartupEnabled = beginnerStartupEnabled,

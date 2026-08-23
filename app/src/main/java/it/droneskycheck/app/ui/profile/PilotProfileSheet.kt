@@ -50,6 +50,8 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.FlightTakeoff
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PhotoCamera
@@ -113,7 +115,12 @@ import androidx.core.graphics.createBitmap
 import androidx.core.net.toUri
 import it.droneskycheck.app.data.AuthorizationDraft
 import it.droneskycheck.app.data.AuthorizationDraftStatuses
+import it.droneskycheck.app.data.AppReleaseNotes
 import it.droneskycheck.app.data.DscLogger
+import it.droneskycheck.app.data.LocalProfileBackupExportResult
+import it.droneskycheck.app.data.LocalProfileBackupImportResult
+import it.droneskycheck.app.data.LocalProfileBackupRepository
+import it.droneskycheck.app.data.LocalProfileBackupSummary
 import it.droneskycheck.app.data.LocalAuthorizationRepository
 import it.droneskycheck.app.data.LocalDrone
 import it.droneskycheck.app.data.LocalOperatorTypes
@@ -122,6 +129,7 @@ import it.droneskycheck.app.data.LocalPilotProfile
 import it.droneskycheck.app.data.LocalPilotRepository
 import it.droneskycheck.app.data.LocalPilotSnapshot
 import it.droneskycheck.app.data.LocalUasOperator
+import it.droneskycheck.app.data.defaultFileName
 import it.droneskycheck.app.data.drone.DroneCatalogMatchStatus
 import it.droneskycheck.app.data.drone.DroneCatalogUpdateResult
 import it.droneskycheck.app.data.drone.DroneTechnicalCatalogRepository
@@ -340,6 +348,7 @@ fun PilotProfileSheet(
     val context = LocalContext.current
     val repository = remember(context) { LocalPilotRepository(context.applicationContext) }
     val authorizationRepository = remember(context) { LocalAuthorizationRepository(context.applicationContext) }
+    val backupRepository = remember(context) { LocalProfileBackupRepository(context.applicationContext) }
     val scope = rememberCoroutineScope()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var snapshot by remember { mutableStateOf(LocalPilotSnapshot()) }
@@ -355,6 +364,9 @@ fun PilotProfileSheet(
     var formErrors by rememberSaveable { mutableStateOf(emptyList<String>()) }
     var notice by rememberSaveable { mutableStateOf("") }
     var pendingDelete by remember { mutableStateOf<DeleteTarget?>(null) }
+    var pendingImportUri by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingImportSummary by remember { mutableStateOf<LocalProfileBackupSummary?>(null) }
+    var isBackupBusy by rememberSaveable { mutableStateOf(false) }
     var photoCropUri by rememberSaveable { mutableStateOf<String?>(null) }
     var personalExpanded by rememberSaveable { mutableStateOf(true) }
     var certificatesExpanded by rememberSaveable { mutableStateOf(true) }
@@ -389,6 +401,57 @@ fun PilotProfileSheet(
     LaunchedEffect(repository, authorizationRepository) {
         snapshot = repository.getSnapshot()
         drafts = authorizationRepository.getDrafts()
+    }
+
+    val exportBackupLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            isBackupBusy = true
+            val result = withContext(Dispatchers.IO) {
+                context.contentResolver.openOutputStream(uri)?.use { output ->
+                    backupRepository.exportBackup(
+                        output = output,
+                        appVersionName = AppReleaseNotes.Current.versionName,
+                        appVersionCode = AppReleaseNotes.Current.versionCode
+                    )
+                } ?: LocalProfileBackupExportResult.Error("Impossibile aprire il file scelto.")
+            }
+            notice = when (result) {
+                is LocalProfileBackupExportResult.Success -> "Backup esportato."
+                is LocalProfileBackupExportResult.Error -> result.message
+            }
+            isBackupBusy = false
+        }
+    }
+
+    val importBackupLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            isBackupBusy = true
+            val result = withContext(Dispatchers.IO) {
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    backupRepository.previewBackup(input)
+                } ?: LocalProfileBackupImportResult.Error("Impossibile aprire il backup selezionato.")
+            }
+            when (result) {
+                is LocalProfileBackupImportResult.Preview -> {
+                    pendingImportUri = uri.toString()
+                    pendingImportSummary = result.summary
+                    notice = ""
+                }
+                is LocalProfileBackupImportResult.Error -> {
+                    pendingImportUri = null
+                    pendingImportSummary = null
+                    notice = result.message
+                }
+                is LocalProfileBackupImportResult.Success -> Unit
+            }
+            isBackupBusy = false
+        }
     }
 
     val photoPicker = rememberLauncherForActivityResult(
@@ -446,6 +509,68 @@ fun PilotProfileSheet(
             },
             dismissButton = {
                 TextButton(onClick = { pendingDelete = null }) {
+                    Text("Annulla")
+                }
+            }
+        )
+    }
+
+    pendingImportSummary?.let { summary ->
+        AlertDialog(
+            onDismissRequest = {
+                if (!isBackupBusy) {
+                    pendingImportSummary = null
+                    pendingImportUri = null
+                }
+            },
+            title = { Text("Ripristinare il backup?") },
+            text = {
+                Text(
+                    "Il backup sostituira i dati locali del profilo su questo dispositivo.\n\n${summary.toUiText()}"
+                )
+            },
+            confirmButton = {
+                Button(
+                    enabled = !isBackupBusy,
+                    onClick = {
+                        val uri = pendingImportUri?.toUri() ?: return@Button
+                        scope.launch {
+                            isBackupBusy = true
+                            val result = withContext(Dispatchers.IO) {
+                                context.contentResolver.openInputStream(uri)?.use { input ->
+                                    backupRepository.importBackup(input)
+                                } ?: LocalProfileBackupImportResult.Error("Impossibile aprire il backup selezionato.")
+                            }
+                            when (result) {
+                                is LocalProfileBackupImportResult.Success -> {
+                                    snapshot = repository.getSnapshot()
+                                    drafts = authorizationRepository.getDrafts()
+                                    notice = "Backup importato. Dati locali ripristinati."
+                                    pendingImportSummary = null
+                                    pendingImportUri = null
+                                }
+                                is LocalProfileBackupImportResult.Error -> {
+                                    notice = result.message
+                                    pendingImportSummary = null
+                                    pendingImportUri = null
+                                }
+                                is LocalProfileBackupImportResult.Preview -> Unit
+                            }
+                            isBackupBusy = false
+                        }
+                    }
+                ) {
+                    Text("Ripristina")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !isBackupBusy,
+                    onClick = {
+                        pendingImportSummary = null
+                        pendingImportUri = null
+                    }
+                ) {
                     Text("Annulla")
                 }
             }
@@ -559,6 +684,7 @@ fun PilotProfileSheet(
                         ProfilePage.Dashboard -> ProfileDashboard(
                             snapshot = snapshot,
                             drafts = drafts,
+                            isBackupBusy = isBackupBusy,
                             onPickPhoto = {
                                 photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                             },
@@ -566,6 +692,8 @@ fun PilotProfileSheet(
                                 profileDraft = snapshot.profile ?: LocalPilotProfile()
                                 showEditor(ProfileEditor.Pilot)
                             },
+                            onExportBackup = { exportBackupLauncher.launch(defaultFileName()) },
+                            onImportBackup = { importBackupLauncher.launch(arrayOf("*/*")) },
                             onOpenPage = { page = it }
                         )
 
@@ -717,8 +845,11 @@ private fun ProfileNavigationBar(
 private fun ProfileDashboard(
     snapshot: LocalPilotSnapshot,
     drafts: List<AuthorizationDraft>,
+    isBackupBusy: Boolean,
     onPickPhoto: () -> Unit,
     onEditProfile: () -> Unit,
+    onExportBackup: () -> Unit,
+    onImportBackup: () -> Unit,
     onOpenPage: (ProfilePage) -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -770,6 +901,11 @@ private fun ProfileDashboard(
             contentDescription = "Apri richieste salvate",
             wide = true,
             onClick = { onOpenPage(ProfilePage.Requests) }
+        )
+        BackupProfileCard(
+            isBusy = isBackupBusy,
+            onExport = onExportBackup,
+            onImport = onImportBackup
         )
     }
 }
@@ -830,6 +966,76 @@ private fun ProfileDashboardCard(
                     maxLines = if (wide) 2 else 3,
                     overflow = TextOverflow.Ellipsis
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BackupProfileCard(
+    isBusy: Boolean,
+    onExport: () -> Unit,
+    onImport: () -> Unit
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        shape = RoundedCornerShape(20.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.Top
+            ) {
+                ProfileIconChip(icon = Icons.Default.FileDownload)
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "Backup del profilo",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "Esporta o ripristina i dati salvati localmente su questo dispositivo.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onImport,
+                    enabled = !isBusy,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.FileUpload,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Importa backup")
+                }
+                Button(
+                    onClick = onExport,
+                    enabled = !isBusy,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.FileDownload,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Esporta backup")
+                }
             }
         }
     }

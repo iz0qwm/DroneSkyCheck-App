@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.NewReleases
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.PlayArrow
@@ -107,6 +108,8 @@ fun SettingsSheet(
     onMapDarkeningEnabledChanged: (Boolean) -> Unit,
     enhancedZoneOutlinesEnabled: Boolean,
     onEnhancedZoneOutlinesEnabledChanged: (Boolean) -> Unit,
+    automaticLocationEnabled: Boolean,
+    onAutomaticLocationEnabledChanged: (Boolean) -> Unit,
     appThemeMode: AppThemeMode,
     onAppThemeModeChanged: (AppThemeMode) -> Unit,
     beginnerStartupEnabled: Boolean,
@@ -177,6 +180,8 @@ fun SettingsSheet(
                     onMapDarkeningEnabledChanged = onMapDarkeningEnabledChanged,
                     enhancedZoneOutlinesEnabled = enhancedZoneOutlinesEnabled,
                     onEnhancedZoneOutlinesEnabledChanged = onEnhancedZoneOutlinesEnabledChanged,
+                    automaticLocationEnabled = automaticLocationEnabled,
+                    onAutomaticLocationEnabledChanged = onAutomaticLocationEnabledChanged,
                     appThemeMode = appThemeMode,
                     onAppThemeModeChanged = onAppThemeModeChanged
                 )
@@ -272,8 +277,8 @@ private fun SettingsHome(
         HorizontalDivider()
         SettingsRow(
             icon = Icons.Default.PhoneAndroid,
-            title = "Schermo",
-            subtitle = "Testo, tema e visualizzazione",
+            title = "Schermo e posizione",
+            subtitle = "Testo, tema, mappa e posizione",
             onClick = onOpenDisplay
         )
         HorizontalDivider()
@@ -380,6 +385,8 @@ private fun DisplaySettingsPage(
     onMapDarkeningEnabledChanged: (Boolean) -> Unit,
     enhancedZoneOutlinesEnabled: Boolean,
     onEnhancedZoneOutlinesEnabledChanged: (Boolean) -> Unit,
+    automaticLocationEnabled: Boolean,
+    onAutomaticLocationEnabledChanged: (Boolean) -> Unit,
     appThemeMode: AppThemeMode,
     onAppThemeModeChanged: (AppThemeMode) -> Unit
 ) {
@@ -464,6 +471,35 @@ private fun DisplaySettingsPage(
             Switch(
                 checked = enhancedZoneOutlinesEnabled,
                 onCheckedChange = onEnhancedZoneOutlinesEnabledChanged
+            )
+        }
+    }
+
+    SettingsSection(title = "Posizione") {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 72.dp)
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            SettingsIcon(Icons.Default.MyLocation)
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    "Posizione automatica",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    "Attiva la posizione automaticamente quando apri Drone Sky Check.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(
+                checked = automaticLocationEnabled,
+                onCheckedChange = onAutomaticLocationEnabledChanged
             )
         }
     }
@@ -842,7 +878,7 @@ private fun SettingsPage.titleText(): String =
     when (this) {
         SettingsPage.Home -> "Impostazioni"
         SettingsPage.BeginnerGuide -> "Prima di volare"
-        SettingsPage.Display -> "Schermo"
+        SettingsPage.Display -> "Schermo e posizione"
         SettingsPage.DroneWorld -> "Mondo droni"
         SettingsPage.Legal -> "Legale e informazioni"
         SettingsPage.WhatsNew -> "Cosa c'e di nuovo"

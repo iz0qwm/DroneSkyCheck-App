@@ -133,6 +133,24 @@ class MapViewModelTest {
     }
 
     @Test
+    fun automaticLocationPreferenceIsLoadedAndPersisted() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val preferences = InMemoryMapPreferences(initialAutomaticLocationEnabled = true)
+        val viewModel = viewModel(
+            scope = scope,
+            preferences = preferences
+        )
+
+        assertTrue(viewModel.uiState.value.isAutomaticLocationEnabled)
+
+        viewModel.onAutomaticLocationEnabledChanged(false)
+
+        assertFalse(viewModel.uiState.value.isAutomaticLocationEnabled)
+        assertFalse(preferences.isAutomaticLocationEnabled())
+        scope.cancel()
+    }
+
+    @Test
     fun requestingOperationalContextStartsTimelineAndWeatherForSelectedPoint() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val weather = FakeWeatherClient(forecast = weatherForecast())

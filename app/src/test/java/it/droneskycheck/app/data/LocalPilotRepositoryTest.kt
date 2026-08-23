@@ -168,6 +168,37 @@ class LocalPilotRepositoryTest {
 
         assertNull(repository.getSelectedDrone())
     }
+
+    @Test
+    fun replaceLocalProfileDataClearsOldDataAndAvoidsDuplicates() = runBlocking {
+        val dao = FakeLocalPilotDao()
+        val repository = LocalPilotRepository(dao)
+        repository.saveProfile(LocalPilotProfile(firstName = "Vecchio"))
+        repository.saveCertificate(LocalPilotCertificate(categories = "A1_A3"))
+        repository.saveDrone(LocalDrone(manufacturer = "DJI", model = "Old", classLabel = "C0"))
+
+        val replacementProfile = PilotProfileEntity(firstName = "Nuovo")
+        val replacementCertificate = PilotCertificateEntity(id = "cert-new", categories = "A2")
+        val replacementDrone = LocalDroneEntity(id = "drone-new", manufacturer = "DJI", model = "New", classLabel = "C1")
+        dao.replaceLocalProfileData(
+            profile = replacementProfile,
+            certificates = listOf(replacementCertificate),
+            operator = null,
+            drones = listOf(replacementDrone),
+            authorizationDrafts = emptyList()
+        )
+        dao.replaceLocalProfileData(
+            profile = replacementProfile,
+            certificates = listOf(replacementCertificate),
+            operator = null,
+            drones = listOf(replacementDrone),
+            authorizationDrafts = emptyList()
+        )
+
+        assertEquals("Nuovo", repository.getProfile()?.firstName)
+        assertEquals(listOf("cert-new"), dao.getCertificateEntities().map { it.id })
+        assertEquals(listOf("drone-new"), dao.getDroneEntities().map { it.id })
+    }
 }
 
 internal class FakeLocalPilotDao : LocalPilotDao {
@@ -185,6 +216,10 @@ internal class FakeLocalPilotDao : LocalPilotDao {
         profile = entity
     }
 
+    override suspend fun clearProfiles() {
+        profile = null
+    }
+
     override suspend fun getCertificateEntities(): List<PilotCertificateEntity> =
         certificates.values.sortedWith(compareBy<PilotCertificateEntity> { it.expiryDate }.thenBy { it.createdAt })
 
@@ -192,8 +227,16 @@ internal class FakeLocalPilotDao : LocalPilotDao {
         certificates[entity.id] = entity
     }
 
+    override suspend fun upsertCertificates(entities: List<PilotCertificateEntity>) {
+        entities.forEach { upsertCertificate(it) }
+    }
+
     override suspend fun deleteCertificateById(id: String) {
         certificates.remove(id)
+    }
+
+    override suspend fun clearCertificates() {
+        certificates.clear()
     }
 
     override suspend fun getOperatorEntity(id: String): UasOperatorEntity? =
@@ -201,6 +244,10 @@ internal class FakeLocalPilotDao : LocalPilotDao {
 
     override suspend fun upsertOperator(entity: UasOperatorEntity) {
         operator = entity
+    }
+
+    override suspend fun clearOperators() {
+        operator = null
     }
 
     override suspend fun getDroneEntities(): List<LocalDroneEntity> =
@@ -215,8 +262,16 @@ internal class FakeLocalPilotDao : LocalPilotDao {
         drones[entity.id] = entity
     }
 
+    override suspend fun upsertDrones(entities: List<LocalDroneEntity>) {
+        entities.forEach { upsertDrone(it) }
+    }
+
     override suspend fun deleteDroneById(id: String) {
         drones.remove(id)
+    }
+
+    override suspend fun clearDrones() {
+        drones.clear()
     }
 
     override suspend fun clearSelectedDrone() {
@@ -237,8 +292,16 @@ internal class FakeLocalPilotDao : LocalPilotDao {
         drafts[entity.id] = entity
     }
 
+    override suspend fun upsertAuthorizationDrafts(entities: List<AuthorizationDraftEntity>) {
+        entities.forEach { upsertAuthorizationDraft(it) }
+    }
+
     override suspend fun deleteAuthorizationDraftById(id: String) {
         drafts.remove(id)
+    }
+
+    override suspend fun clearAuthorizationDrafts() {
+        drafts.clear()
     }
 
     override suspend fun getCachedZoneAnalysis(

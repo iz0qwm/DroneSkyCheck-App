@@ -10,6 +10,7 @@ import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.Transaction
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
@@ -121,20 +122,32 @@ interface LocalPilotDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertProfile(entity: PilotProfileEntity)
 
+    @Query("DELETE FROM pilot_profile")
+    suspend fun clearProfiles()
+
     @Query("SELECT * FROM pilot_certificates ORDER BY expiryDate ASC, createdAt ASC")
     suspend fun getCertificateEntities(): List<PilotCertificateEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertCertificate(entity: PilotCertificateEntity)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertCertificates(entities: List<PilotCertificateEntity>)
+
     @Query("DELETE FROM pilot_certificates WHERE id = :id")
     suspend fun deleteCertificateById(id: String)
+
+    @Query("DELETE FROM pilot_certificates")
+    suspend fun clearCertificates()
 
     @Query("SELECT * FROM uas_operator WHERE id = :id LIMIT 1")
     suspend fun getOperatorEntity(id: String = SingleOperatorId): UasOperatorEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertOperator(entity: UasOperatorEntity)
+
+    @Query("DELETE FROM uas_operator")
+    suspend fun clearOperators()
 
     @Query("SELECT * FROM local_drones WHERE status != 'deleted' ORDER BY isSelected DESC, manufacturer ASC, model ASC")
     suspend fun getDroneEntities(): List<LocalDroneEntity>
@@ -145,8 +158,14 @@ interface LocalPilotDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertDrone(entity: LocalDroneEntity)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertDrones(entities: List<LocalDroneEntity>)
+
     @Query("DELETE FROM local_drones WHERE id = :id")
     suspend fun deleteDroneById(id: String)
+
+    @Query("DELETE FROM local_drones")
+    suspend fun clearDrones()
 
     @Query("UPDATE local_drones SET isSelected = 0")
     suspend fun clearSelectedDrone()
@@ -163,8 +182,34 @@ interface LocalPilotDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAuthorizationDraft(entity: AuthorizationDraftEntity)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAuthorizationDrafts(entities: List<AuthorizationDraftEntity>)
+
     @Query("DELETE FROM authorization_drafts WHERE id = :id")
     suspend fun deleteAuthorizationDraftById(id: String)
+
+    @Query("DELETE FROM authorization_drafts")
+    suspend fun clearAuthorizationDrafts()
+
+    @Transaction
+    suspend fun replaceLocalProfileData(
+        profile: PilotProfileEntity?,
+        certificates: List<PilotCertificateEntity>,
+        operator: UasOperatorEntity?,
+        drones: List<LocalDroneEntity>,
+        authorizationDrafts: List<AuthorizationDraftEntity>
+    ) {
+        clearProfiles()
+        clearCertificates()
+        clearOperators()
+        clearDrones()
+        clearAuthorizationDrafts()
+        profile?.let { upsertProfile(it) }
+        upsertCertificates(certificates)
+        operator?.let { upsertOperator(it) }
+        upsertDrones(drones)
+        upsertAuthorizationDrafts(authorizationDrafts)
+    }
 
     @Query(
         """

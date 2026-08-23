@@ -203,8 +203,8 @@
     {
       "id": "map_display_settings",
       "title": "Impostazioni mappa",
-      "summary": "Tema, testo e preferenze visuali della mappa.",
-      "introduction": "Nella sezione Schermo puoi adattare la leggibilita dell'app e della mappa.",
+      "summary": "Tema, testo, posizione e preferenze visuali della mappa.",
+      "introduction": "Nella sezione Schermo e posizione puoi adattare la leggibilita dell'app, la mappa e l'avvio della posizione.",
       "order": 9,
       "blocks": [
         {
