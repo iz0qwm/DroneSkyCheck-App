@@ -602,8 +602,24 @@ private fun JSONObject.toScheduleInfo(): ScheduleInfo =
         raw = optFirstString("raw", "rawSchedule", "scheduleRaw", "original", "schedule"),
         human = optFirstString("human", "scheduleHuman", "humanSchedule", "interpretedSchedule"),
         activeNow = optFirstBoolean("activeNow"),
-        explanation = optFirstString("explanation")
+        explanation = optFirstString("explanation"),
+        calendarDays = optArray("calendarDays").toNotamCalendarDays()
     )
+
+private fun JSONArray?.toNotamCalendarDays(): List<NotamCalendarDay> =
+    this.toObjectList { value ->
+        NotamCalendarDay(
+            day = value.optFirstInt("day") ?: 0,
+            date = value.optFirstString("date"),
+            intervals = value.optArray("intervals").toObjectList { interval ->
+                NotamTimeInterval(
+                    start = interval.optFirstString("start"),
+                    end = interval.optFirstString("end")
+                )
+            }
+        )
+    }
+        .filter { it.day in 1..31 && it.intervals.isNotEmpty() }
 
 private fun JSONObject.toOfficialInfo(): OfficialInfo =
     OfficialInfo(

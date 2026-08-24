@@ -90,17 +90,13 @@ object AppExternalLinks {
 object AppReleaseNotes {
     // When versionName changes, reset this section for the new version and collect only that version's changes.
     val Current = ReleaseNotes(
-        versionName = "3.6",
-        versionCode = 26,
-        title = "Cosa c'e di nuovo in Drone Sky Check 3.6",
-        intro = "Questa versione introduce nuove funzioni per gestire meglio i dati locali e corregge una valutazione delle opportunita di volo OPEN con NOTAM attivi.",
+        versionName = "3.8",
+        versionCode = 28,
+        title = "Cosa c'e di nuovo in Drone Sky Check 3.8",
+        intro = "Questa versione migliora la lettura degli orari NOTAM quando il giorno del mese e associato a fasce orarie specifiche.",
         highlights = listOf(
-            "Le pratiche ATM aggiornano subito i dati del profilo quando torni dalla modifica.",
-            "Migliorata la lettura dei destinatari per l'invio delle richieste ATM dai dati aggiornati delle zone.",
-            "Correzione delle finestre OPEN quando un NOTAM bloccante e' gia attivo nel periodo analizzato.",
-            "Nuova preferenza per la posizione automatica all'apertura dell'app.",
-            "Esportazione e ripristino dei dati locali del profilo.",
-            "Nuovo layer del traffico aereo osservato con filtro per altezza AGL stimata."
+            "Gli orari di attivita dei NOTAM con giorni del mese mantengono ora l'associazione corretta tra data e fasce UTC.",
+            "La visualizzazione dei dettagli temporali dei NOTAM resta compatibile con le risposte backend precedenti."
         )
     )
 }

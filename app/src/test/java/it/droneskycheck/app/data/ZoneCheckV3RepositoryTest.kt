@@ -166,6 +166,67 @@ class ZoneCheckV3RepositoryTest {
     }
 
     @Test
+    fun parserReadsNotamCalendarDaysFromSchedule() {
+        val response = parseZoneCheckV3Response(
+            JSONObject(
+                """
+                {
+                  "position": { "lat": 41.0, "lon": 12.0 },
+                  "verdict": {
+                    "status": "NO_FLY",
+                    "maxAltitudeMetersAgl": 0,
+                    "source": "NOTAM",
+                    "explanation": "NOTAM attivo."
+                  },
+                  "zones": [
+                    {
+                      "identity": { "id": "notam-w3067", "name": "NOTAM W3067/26" },
+                      "classification": { "family": "NOTAM", "type": "P_NOTAM" },
+                      "notam": {
+                        "code": "W3067/26",
+                        "schedule": {
+                          "raw": "23 1900-2200, 24 1900-2100",
+                          "human": "23: dalle 19:00 alle 22:00 UTC; 24: dalle 19:00 alle 21:00 UTC",
+                          "activeNow": false,
+                          "calendarDays": [
+                            {
+                              "day": 23,
+                              "date": "2026-08-23",
+                              "intervals": [
+                                { "start": "19:00", "end": "22:00" }
+                              ]
+                            },
+                            {
+                              "day": 24,
+                              "date": "2026-08-24",
+                              "intervals": [
+                                { "start": "19:00", "end": "21:00" }
+                              ]
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ],
+                  "blockers": [],
+                  "warnings": [],
+                  "baseline": { "maxAltitudeMetersAgl": 120, "representedAsZone": false },
+                  "meta": { "engine": "DSC", "version": "v3" }
+                }
+                """.trimIndent()
+            )
+        )
+
+        val schedule = response.zones.single().notams.single().schedule
+
+        assertEquals("23 1900-2200, 24 1900-2100", schedule?.raw)
+        assertEquals(2, schedule?.calendarDays?.size)
+        assertEquals("2026-08-24", schedule?.calendarDays?.get(1)?.date)
+        assertEquals("19:00", schedule?.calendarDays?.get(1)?.intervals?.single()?.start)
+        assertEquals("21:00", schedule?.calendarDays?.get(1)?.intervals?.single()?.end)
+    }
+
+    @Test
     fun parserReadsNormalizedAppAuthorizationContract() {
         val response = parseZoneCheckV3Response(overlapJson(
             status = "NO_FLY",

@@ -2,6 +2,7 @@ package it.droneskycheck.app.ui.map
 
 import it.droneskycheck.app.data.AuthorizationInfo
 import it.droneskycheck.app.data.EnrInfo
+import it.droneskycheck.app.data.NotamCalendarDay
 import it.droneskycheck.app.data.NotamInfo
 import it.droneskycheck.app.data.ScheduleInfo
 import it.droneskycheck.app.data.SupInfo
@@ -9,6 +10,7 @@ import it.droneskycheck.app.data.TemporalBarEntry
 import it.droneskycheck.app.data.ValidityInfo
 import it.droneskycheck.app.data.ZoneInfo
 import java.time.Instant
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
@@ -203,12 +205,35 @@ private fun bestSchedule(
         }
 
 private fun ScheduleInfo.hasAnyScheduleText(): Boolean =
-    !raw.isNullOrBlank() || !human.isNullOrBlank()
+    !raw.isNullOrBlank() || !human.isNullOrBlank() || calendarDays.isNotEmpty()
 
 private fun ScheduleInfo.readableSchedule(): String? =
-    raw.toItalianScheduleText()
+    calendarDays.toItalianNotamCalendarSchedule()
+        ?: raw.toItalianScheduleText()
         ?: human.cleanItalianUiTextOrNull()
         ?: raw.cleanItalianUiTextOrNull()
+
+private fun List<NotamCalendarDay>.toItalianNotamCalendarSchedule(): String? =
+    takeIf { it.isNotEmpty() }
+        ?.mapNotNull { day ->
+            val intervals = day.intervals.mapNotNull { interval ->
+                val start = interval.start?.takeIf { it.matches(UtcHourMinuteRegex) } ?: return@mapNotNull null
+                val end = interval.end?.takeIf { it.matches(UtcHourMinuteRegex) } ?: return@mapNotNull null
+                "dalle $start alle $end UTC"
+            }
+            if (intervals.isEmpty()) return@mapNotNull null
+            "${day.notamCalendarDayLabel()}: ${intervals.joinToItalianScheduleList()}"
+        }
+        ?.takeIf { it.isNotEmpty() }
+        ?.joinToString("; ")
+
+private fun NotamCalendarDay.notamCalendarDayLabel(): String {
+    val parsedDate = date
+        ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+        ?: return "giorno ${day.toString().padStart(2, '0')}"
+    val month = MonthLabelsByNumber[parsedDate.monthValue] ?: return date
+    return "${parsedDate.dayOfMonth} $month ${parsedDate.year}"
+}
 
 private fun NotamInfo.hasTemporalContent(): Boolean =
     validity != null ||
@@ -526,6 +551,17 @@ private fun List<String>.joinToItalianList(): String? =
         ) + " e ${last().lowercase()}"
     }
 
+private fun List<String>.joinToItalianScheduleList(): String? =
+    when (size) {
+        0 -> null
+        1 -> first()
+        2 -> "${this[0]} e ${this[1]}"
+        else -> first() + drop(1).dropLast(1).joinToString(
+            prefix = ", ",
+            separator = ", "
+        ) + " e ${last()}"
+    }
+
 private fun String?.formatUtcDateForUi(): String? {
     if (isNullOrBlank()) return null
     val value = trim()
@@ -652,6 +688,7 @@ private val DayExpressionRegex = Regex("""\b(?:MON|TUE|WED|THU|FRI|SAT|SUN)(?:\s
 private val DayClauseRegex = Regex("""\b((?:MON|TUE|WED|THU|FRI|SAT|SUN)(?:\s*(?:-|,|\s)\s*(?:MON|TUE|WED|THU|FRI|SAT|SUN))*)\s*:""")
 private val StrictDayRangeRegex = Regex("""^(MON|TUE|WED|THU|FRI|SAT|SUN)\s*-\s*(MON|TUE|WED|THU|FRI|SAT|SUN)$""")
 private val TimeRangeRegex = Regex("""\b(\d{2})(\d{2})\s*-\s*(\d{2})(\d{2})\b""")
+private val UtcHourMinuteRegex = Regex("""^\d{2}:\d{2}$""")
 private val AeronauticalTimeRangeRegex = Regex("""\b(\d{4}|SR(?:[+-]\d+)?|SS(?:[+-]\d+)?|SUNRISE(?:[+-]\d+)?|SUNSET(?:[+-]\d+)?)\s*-\s*(\d{4}|SR(?:[+-]\d+)?|SS(?:[+-]\d+)?|SUNRISE(?:[+-]\d+)?|SUNSET(?:[+-]\d+)?)\b""")
 private val DelimitedScheduleClauseSeparatorRegex = Regex(""";\s*|,\s*(?=(?:MON|TUE|WED|THU|FRI|SAT|SUN)\b)""")
 private val FromToDayTimeRegex = Regex("""\b(?:DA|FROM)\s+(MON|TUE|WED|THU|FRI|SAT|SUN)\s+(\d{2})(\d{2})\s+(?:A|TO)\s+(MON|TUE|WED|THU|FRI|SAT|SUN)\s+(\d{2})(\d{2})\b""")
@@ -686,6 +723,20 @@ private val MonthLabels = mapOf(
     "NOV" to "novembre",
     "DEC" to "dicembre",
     "DIC" to "dicembre"
+)
+private val MonthLabelsByNumber = mapOf(
+    1 to "gennaio",
+    2 to "febbraio",
+    3 to "marzo",
+    4 to "aprile",
+    5 to "maggio",
+    6 to "giugno",
+    7 to "luglio",
+    8 to "agosto",
+    9 to "settembre",
+    10 to "ottobre",
+    11 to "novembre",
+    12 to "dicembre"
 )
 
 private val UiUtcFormatter: DateTimeFormatter =

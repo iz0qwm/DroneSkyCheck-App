@@ -3,7 +3,9 @@ package it.droneskycheck.app.ui.map
 import it.droneskycheck.app.data.AuthorizationInfo
 import it.droneskycheck.app.data.EnrInfo
 import it.droneskycheck.app.data.KeyValueInfo
+import it.droneskycheck.app.data.NotamCalendarDay
 import it.droneskycheck.app.data.NotamInfo
+import it.droneskycheck.app.data.NotamTimeInterval
 import it.droneskycheck.app.data.OfficialInfo
 import it.droneskycheck.app.data.ScheduleInfo
 import it.droneskycheck.app.data.TemporalBarEntry
@@ -76,6 +78,74 @@ class ZonePresentationTest {
 
         assertEquals("dalle 07:00 alle 16:00 UTC", details.activitySchedule)
         assertEquals("0700-1600", details.originalSchedule)
+    }
+
+    @Test
+    fun temporalDetailsRenderNotamCalendarDayWithOneInterval() {
+        val details = zone(
+            activeNow = true,
+            notams = listOf(notamWithCalendarSchedule(
+                NotamCalendarDay(
+                    day = 6,
+                    date = "2026-09-06",
+                    intervals = listOf(NotamTimeInterval("06:00", "06:15"))
+                )
+            ))
+        ).temporalDetailsPresentation()
+
+        assertEquals(
+            "6 settembre 2026: dalle 06:00 alle 06:15 UTC",
+            details.activitySchedule
+        )
+    }
+
+    @Test
+    fun temporalDetailsRenderNotamCalendarDayWithMultipleIntervals() {
+        val details = zone(
+            activeNow = true,
+            notams = listOf(notamWithCalendarSchedule(
+                NotamCalendarDay(
+                    day = 24,
+                    date = "2026-08-24",
+                    intervals = listOf(
+                        NotamTimeInterval("06:00", "06:15"),
+                        NotamTimeInterval("19:00", "21:00")
+                    )
+                )
+            ))
+        ).temporalDetailsPresentation()
+
+        assertEquals(
+            "24 agosto 2026: dalle 06:00 alle 06:15 UTC e dalle 19:00 alle 21:00 UTC",
+            details.activitySchedule
+        )
+    }
+
+    @Test
+    fun temporalDetailsRenderMultipleNotamCalendarDays() {
+        val details = zone(
+            activeNow = true,
+            notams = listOf(notamWithCalendarSchedule(
+                NotamCalendarDay(
+                    day = 6,
+                    date = "2026-09-06",
+                    intervals = listOf(NotamTimeInterval("06:00", "06:15"))
+                ),
+                NotamCalendarDay(
+                    day = 7,
+                    date = "2026-09-07",
+                    intervals = listOf(
+                        NotamTimeInterval("06:00", "06:15"),
+                        NotamTimeInterval("21:15", "21:45")
+                    )
+                )
+            ))
+        ).temporalDetailsPresentation()
+
+        assertEquals(
+            "6 settembre 2026: dalle 06:00 alle 06:15 UTC; 7 settembre 2026: dalle 06:00 alle 06:15 UTC e dalle 21:15 alle 21:45 UTC",
+            details.activitySchedule
+        )
     }
 
     @Test
@@ -473,7 +543,8 @@ class ZonePresentationTest {
             future = null,
             expired = null
         ),
-        enr: EnrInfo? = null
+        enr: EnrInfo? = null,
+        notams: List<NotamInfo> = emptyList()
     ): ZoneInfo =
         ZoneInfo(
             id = "zone-1",
@@ -483,9 +554,33 @@ class ZonePresentationTest {
             limitMetersAgl = 0,
             description = null,
             validity = validity,
+            notams = notams,
             enr = enr,
             authorizationRequired = null,
             activeNow = activeNow
+        )
+
+    private fun notamWithCalendarSchedule(vararg days: NotamCalendarDay): NotamInfo =
+        NotamInfo(
+            code = "W1234/26",
+            fir = "LIXX",
+            location = null,
+            zoneReference = null,
+            activityType = null,
+            severity = "HARD",
+            summary = null,
+            explanation = null,
+            operationalMeaning = null,
+            blockingReason = null,
+            schedule = ScheduleInfo(
+                raw = "calendar raw",
+                human = "legacy human",
+                activeNow = true,
+                explanation = null,
+                calendarDays = days.toList()
+            ),
+            official = null,
+            validity = null
         )
 
     private fun enr(

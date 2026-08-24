@@ -128,7 +128,19 @@ data class ScheduleInfo(
     val raw: String?,
     val human: String?,
     val activeNow: Boolean?,
-    val explanation: String?
+    val explanation: String?,
+    val calendarDays: List<NotamCalendarDay> = emptyList()
+)
+
+data class NotamCalendarDay(
+    val day: Int,
+    val date: String?,
+    val intervals: List<NotamTimeInterval> = emptyList()
+)
+
+data class NotamTimeInterval(
+    val start: String?,
+    val end: String?
 )
 
 data class TemporalBarEntry(
