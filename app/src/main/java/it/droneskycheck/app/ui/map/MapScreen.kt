@@ -8,6 +8,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationListener
@@ -313,9 +314,11 @@ fun MapScreen(
         .filterValues { it }
         .keys
     val permissionState = currentLocationPermissionState(context)
+    val syntheticWindPocAvailable = remember(context) { context.isSyntheticWindParticlePocAvailable() }
     var isPilotProfileSheetVisible by remember { mutableStateOf(false) }
     var isSettingsSheetVisible by remember { mutableStateOf(false) }
     var isMapWeatherSheetVisible by remember { mutableStateOf(false) }
+    var isSyntheticWindPocEnabled by remember { mutableStateOf(false) }
     var isLocationSearchSheetVisible by remember { mutableStateOf(false) }
     var pendingCameraFocusPoint by remember { mutableStateOf<MapPoint?>(null) }
     var currentDraft by remember { mutableStateOf<AuthorizationDraft?>(null) }
@@ -610,6 +613,7 @@ fun MapScreen(
             weatherWindField = if (isMapWeatherSheetVisible) uiState.weatherMapWindField else null,
             weatherParticleField = if (isMapWeatherSheetVisible) uiState.weatherParticleField else null,
             weatherMapCameraFit = if (isMapWeatherSheetVisible) uiState.weatherMapCameraFit else null,
+            syntheticWindPocEnabled = syntheticWindPocAvailable && isSyntheticWindPocEnabled,
             mapDarkeningEnabled = uiState.isMapDarkeningEnabled,
             enhancedZoneOutlinesEnabled = uiState.isEnhancedZoneOutlinesEnabled,
             userLocation = uiState.userLocation,
@@ -857,6 +861,11 @@ fun MapScreen(
                 error = uiState.weatherError,
                 isWeatherMapLoading = uiState.isWeatherMapLoading,
                 weatherMapError = uiState.weatherMapError,
+                syntheticWindPocAvailable = syntheticWindPocAvailable,
+                syntheticWindPocEnabled = isSyntheticWindPocEnabled,
+                onSyntheticWindPocEnabledChanged = { enabled ->
+                    isSyntheticWindPocEnabled = enabled
+                },
                 onRefresh = viewModel::onOperationalContextRequested,
                 onSelectedForecastTimeChanged = viewModel::onOperationalWeatherForecastTimeChanged,
                 onDismiss = {
@@ -1799,6 +1808,9 @@ private fun MapWeatherBottomSheet(
     error: String?,
     isWeatherMapLoading: Boolean,
     weatherMapError: String?,
+    syntheticWindPocAvailable: Boolean,
+    syntheticWindPocEnabled: Boolean,
+    onSyntheticWindPocEnabledChanged: (Boolean) -> Unit,
     onRefresh: () -> Unit,
     onSelectedForecastTimeChanged: (Instant?) -> Unit,
     onDismiss: () -> Unit,
@@ -1812,6 +1824,9 @@ private fun MapWeatherBottomSheet(
         error = error,
         isWeatherMapLoading = isWeatherMapLoading,
         weatherMapError = weatherMapError,
+        syntheticWindPocAvailable = syntheticWindPocAvailable,
+        syntheticWindPocEnabled = syntheticWindPocEnabled,
+        onSyntheticWindPocEnabledChanged = onSyntheticWindPocEnabledChanged,
         onRefresh = onRefresh,
         onSelectedForecastTimeChanged = onSelectedForecastTimeChanged,
         onDismiss = onDismiss,
@@ -8658,6 +8673,7 @@ private const val TrafficAlertPulseCount = 4
 private const val TrafficAlertPulseGapMillis = 180L
 private const val TrafficAlertToneDurationMillis = 220
 private const val TrafficAlertToneVolume = 60
+private const val SyntheticWindParticlePocEnabled = false
 private const val PeriodicNoticeLogTag = "DscPeriodicNotice"
 private const val ZoneCheckUiLogTag = "DscZoneCheckV3"
 private const val PeriodicNoticeUiSettlingMillis = 700L
@@ -8674,3 +8690,7 @@ private const val EnvironmentalProtectedAreaInfoText =
         "o dell'area protetta.\n\n" +
         "Questo layer ha funzione informativa e non sostituisce la verifica delle fonti ufficiali."
 private const val PeriodicNoticeCoffeeButtonText = "☕ Offrimi un caffè"
+
+private fun Context.isSyntheticWindParticlePocAvailable(): Boolean =
+    SyntheticWindParticlePocEnabled &&
+        (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0

@@ -47,6 +47,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -81,6 +82,9 @@ internal fun OperationalWeatherBottomSheet(
     error: String?,
     isWeatherMapLoading: Boolean = false,
     weatherMapError: String? = null,
+    syntheticWindPocAvailable: Boolean = false,
+    syntheticWindPocEnabled: Boolean = false,
+    onSyntheticWindPocEnabledChanged: (Boolean) -> Unit = {},
     onRefresh: () -> Unit,
     onSelectedForecastTimeChanged: (Instant?) -> Unit = {},
     onDismiss: () -> Unit,
@@ -140,6 +144,15 @@ internal fun OperationalWeatherBottomSheet(
                 )
             }
 
+            if (syntheticWindPocAvailable) {
+                item {
+                    SyntheticWindPocControl(
+                        enabled = syntheticWindPocEnabled,
+                        onEnabledChanged = onSyntheticWindPocEnabledChanged
+                    )
+                }
+            }
+
             item {
                 when {
                     isLoading -> OperationalWeatherLoading()
@@ -166,6 +179,44 @@ internal fun OperationalWeatherBottomSheet(
             item {
                 Spacer(modifier = Modifier.height(6.dp))
             }
+        }
+    }
+}
+
+@Composable
+private fun SyntheticWindPocControl(
+    enabled: Boolean,
+    onEnabledChanged: (Boolean) -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.55f),
+        contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Default.Air, contentDescription = null, modifier = Modifier.size(18.dp))
+                Text(
+                    text = "Vento animato (test)",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            Switch(
+                checked = enabled,
+                onCheckedChange = onEnabledChanged
+            )
         }
     }
 }
@@ -457,6 +508,17 @@ private fun OperationalWeatherTimeline(
     selectedSlot: OperationalWeatherHourSlot,
     onSlotSelected: (OperationalWeatherHourSlot) -> Unit
 ) {
+    val timelineState = rememberLazyListState()
+    val selectedSlotIndex = remember(day.slots, selectedSlot.key) {
+        day.slots.indexOfFirst { slot -> slot.key == selectedSlot.key }
+    }
+
+    LaunchedEffect(day.date, selectedSlot.key, selectedSlotIndex) {
+        if (selectedSlotIndex >= 0) {
+            timelineState.animateScrollToItem(selectedSlotIndex)
+        }
+    }
+
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
             text = "Previsione oraria",
@@ -464,6 +526,7 @@ private fun OperationalWeatherTimeline(
             fontWeight = FontWeight.SemiBold
         )
         LazyRow(
+            state = timelineState,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             contentPadding = PaddingValues(horizontal = 2.dp)
         ) {

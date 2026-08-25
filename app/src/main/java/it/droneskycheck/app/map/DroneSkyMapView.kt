@@ -2,6 +2,7 @@ package it.droneskycheck.app.map
 
 import android.content.ComponentCallbacks
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -105,6 +106,7 @@ fun DroneSkyMapView(
     weatherWindField: WeatherWindField?,
     weatherParticleField: WeatherParticleVectorField?,
     weatherMapCameraFit: WeatherMapCameraFit?,
+    syntheticWindPocEnabled: Boolean,
     mapDarkeningEnabled: Boolean,
     enhancedZoneOutlinesEnabled: Boolean,
     userLocation: UserLocation?,
@@ -121,6 +123,9 @@ fun DroneSkyMapView(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val syntheticWindPocActive = remember(context, syntheticWindPocEnabled) {
+        syntheticWindPocEnabled && context.isSyntheticWindPocAllowed()
+    }
     val currentTrafficHeatmap by rememberUpdatedState(trafficHeatmap)
     val currentTrafficHeatmapCellTapped by rememberUpdatedState(onTrafficHeatmapCellTapped)
     var lastWeatherCameraFitId by remember { mutableStateOf<Long?>(null) }
@@ -138,6 +143,15 @@ fun DroneSkyMapView(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
+        }
+    }
+    val syntheticWindPocOverlay = remember {
+        SyntheticWindParticlePocOverlay(context).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+            setPocEnabled(syntheticWindPocActive)
         }
     }
     val geoJsonRepository = remember(context) {
@@ -172,7 +186,8 @@ fun DroneSkyMapView(
                     mapDarkeningEnabled,
                     enhancedZoneOutlinesEnabled,
                     radarLabelOverlay,
-                    weatherParticleOverlay
+                    weatherParticleOverlay,
+                    syntheticWindPocOverlay
                 )
             }
         }
@@ -186,23 +201,27 @@ fun DroneSkyMapView(
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
             )
+            addView(syntheticWindPocOverlay)
             addView(weatherParticleOverlay)
             addView(radarLabelOverlay)
+            syntheticWindPocOverlay.bringToFront()
             weatherParticleOverlay.bringToFront()
             radarLabelOverlay.bringToFront()
         }
     }
 
-    DisposableEffect(lifecycleOwner, mapView, radarLabelOverlay, weatherParticleOverlay) {
+    DisposableEffect(lifecycleOwner, mapView, radarLabelOverlay, weatherParticleOverlay, syntheticWindPocOverlay) {
         var isDestroyed = false
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_START -> mapView.onStart()
                 Lifecycle.Event.ON_RESUME -> {
                     mapView.onResume()
+                    syntheticWindPocOverlay.setPocEnabled(syntheticWindPocActive)
                     weatherParticleOverlay.setVectorField(weatherParticleField)
                 }
                 Lifecycle.Event.ON_PAUSE -> {
+                    syntheticWindPocOverlay.stop()
                     weatherParticleOverlay.stop()
                     mapView.onPause()
                 }
@@ -229,6 +248,7 @@ fun DroneSkyMapView(
 
         onDispose {
             stopTrafficAttentionPulse()
+            syntheticWindPocOverlay.detachFromMap()
             weatherParticleOverlay.detachFromMap()
             radarLabelOverlay.detachFromMap()
             radarLabelOverlay.setTargets(emptyList())
@@ -245,6 +265,8 @@ fun DroneSkyMapView(
         factory = { mapContainer },
         update = { view ->
             mapView.getMapAsync { map ->
+                syntheticWindPocOverlay.setFieldCenter(selectedPoint?.lat, selectedPoint?.lon)
+                syntheticWindPocOverlay.setPocEnabled(syntheticWindPocActive)
                 map.getStyle { style ->
                     addTrafficAwarenessLayers(style)
                     addTrafficHeatmapLayer(style)
@@ -325,7 +347,8 @@ private fun configureMap(
     mapDarkeningEnabled: Boolean,
     enhancedZoneOutlinesEnabled: Boolean,
     radarLabelOverlay: TrafficRadarLabelOverlay,
-    weatherParticleOverlay: WeatherWindParticleOverlay
+    weatherParticleOverlay: WeatherWindParticleOverlay,
+    syntheticWindPocOverlay: SyntheticWindParticlePocOverlay
 ) {
     map.cameraPosition = CameraPosition.Builder()
         .target(LatLng(ROME_LATITUDE, ROME_LONGITUDE))
@@ -350,6 +373,7 @@ private fun configureMap(
         updateZoneOutlines(it, enhancedZoneOutlinesEnabled)
         addPointMarkerLayers(it)
         addWeatherWindLayer(it)
+        syntheticWindPocOverlay.attachToMap(map)
         radarLabelOverlay.attachToMap(map)
         weatherParticleOverlay.attachToMap(map)
         startTrafficAttentionPulse(map)
@@ -427,6 +451,7 @@ private fun configureMap(
         }
 
         map.addOnCameraIdleListener {
+            syntheticWindPocOverlay.setCameraMoving(false)
             weatherParticleOverlay.setCameraMoving(false)
             val bounds = map.projection.visibleRegion.latLngBounds
             val cameraBounds = CameraBounds(
@@ -455,9 +480,11 @@ private fun configureMap(
             }
         }
         map.addOnCameraMoveStartedListener {
+            syntheticWindPocOverlay.setCameraMoving(true)
             weatherParticleOverlay.setCameraMoving(true)
         }
         map.addOnCameraMoveCancelListener {
+            syntheticWindPocOverlay.setCameraMoving(false)
             weatherParticleOverlay.setCameraMoving(false)
         }
     }
@@ -1742,6 +1769,7 @@ private const val AUTH_AREA_FILL_LAYER_ID = "dsc-auth-area-fill"
 private const val USER_LOCATION_ACCURACY_LAYER_ID = "dsc-user-location-accuracy"
 private const val USER_LOCATION_DOT_LAYER_ID = "dsc-user-location-dot"
 private const val USER_LOCATION_PULSE_LAYER_ID = "dsc-user-location-pulse"
+private const val SyntheticWindParticlePocEnabled = false
 private const val NOTAM_ZEBRA_PATTERN_ID = "dsc-notam-zebra"
 private const val MAP_DARKENING_SOURCE_ID = "dsc-map-darkening-source"
 private const val MAP_DARKENING_LAYER_ID = "dsc-map-darkening-layer"
@@ -1781,3 +1809,7 @@ private val STATIC_GEOJSON_EXECUTOR = Executors.newFixedThreadPool(2)
 private val ON_DEMAND_GEOJSON_EXECUTOR = Executors.newSingleThreadExecutor()
 private val DYNAMIC_ZONES_EXECUTOR = Executors.newSingleThreadExecutor()
 private var trafficAttentionPulseRunnable: Runnable? = null
+
+private fun Context.isSyntheticWindPocAllowed(): Boolean =
+    SyntheticWindParticlePocEnabled &&
+        (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
