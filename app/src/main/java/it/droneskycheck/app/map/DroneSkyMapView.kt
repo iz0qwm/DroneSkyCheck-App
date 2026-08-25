@@ -18,8 +18,10 @@ import android.widget.FrameLayout
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
@@ -39,6 +41,11 @@ import it.droneskycheck.app.data.traffic.TrafficHeatmapState
 import it.droneskycheck.app.data.traffic.coarseTraffic
 import it.droneskycheck.app.data.traffic.trafficHeatmapCellDetailFromFeature
 import it.droneskycheck.app.data.traffic.trafficHeatmapCellsToFeatureCollection
+import it.droneskycheck.app.data.weatherMap.WeatherWindField
+import it.droneskycheck.app.data.weatherMap.WeatherMapCameraFit
+import it.droneskycheck.app.data.weatherMap.WeatherParticleVectorField
+import it.droneskycheck.app.data.weatherMap.WeatherWindMapProperties
+import it.droneskycheck.app.data.weatherMap.weatherWindFieldToFeatureCollection
 import it.droneskycheck.app.ui.map.CameraBounds
 import it.droneskycheck.app.ui.map.DemoZone
 import it.droneskycheck.app.ui.map.MapPoint
@@ -49,6 +56,7 @@ import java.util.concurrent.Executors
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.geometry.LatLngBounds
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
@@ -94,6 +102,9 @@ fun DroneSkyMapView(
     trafficAwareness: TrafficAwarenessState,
     trafficAssessments: Map<String, TrafficAssessment>,
     trafficHeatmap: TrafficHeatmapState,
+    weatherWindField: WeatherWindField?,
+    weatherParticleField: WeatherParticleVectorField?,
+    weatherMapCameraFit: WeatherMapCameraFit?,
     mapDarkeningEnabled: Boolean,
     enhancedZoneOutlinesEnabled: Boolean,
     userLocation: UserLocation?,
@@ -112,8 +123,17 @@ fun DroneSkyMapView(
     val lifecycleOwner = LocalLifecycleOwner.current
     val currentTrafficHeatmap by rememberUpdatedState(trafficHeatmap)
     val currentTrafficHeatmapCellTapped by rememberUpdatedState(onTrafficHeatmapCellTapped)
+    var lastWeatherCameraFitId by remember { mutableStateOf<Long?>(null) }
     val radarLabelOverlay = remember {
         TrafficRadarLabelOverlay(context).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        }
+    }
+    val weatherParticleOverlay = remember {
+        WeatherWindParticleOverlay(context).apply {
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
@@ -151,7 +171,8 @@ fun DroneSkyMapView(
                     onMapDataDegraded,
                     mapDarkeningEnabled,
                     enhancedZoneOutlinesEnabled,
-                    radarLabelOverlay
+                    radarLabelOverlay,
+                    weatherParticleOverlay
                 )
             }
         }
@@ -165,17 +186,26 @@ fun DroneSkyMapView(
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
             )
+            addView(weatherParticleOverlay)
             addView(radarLabelOverlay)
+            weatherParticleOverlay.bringToFront()
+            radarLabelOverlay.bringToFront()
         }
     }
 
-    DisposableEffect(lifecycleOwner, mapView, radarLabelOverlay) {
+    DisposableEffect(lifecycleOwner, mapView, radarLabelOverlay, weatherParticleOverlay) {
         var isDestroyed = false
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_START -> mapView.onStart()
-                Lifecycle.Event.ON_RESUME -> mapView.onResume()
-                Lifecycle.Event.ON_PAUSE -> mapView.onPause()
+                Lifecycle.Event.ON_RESUME -> {
+                    mapView.onResume()
+                    weatherParticleOverlay.setVectorField(weatherParticleField)
+                }
+                Lifecycle.Event.ON_PAUSE -> {
+                    weatherParticleOverlay.stop()
+                    mapView.onPause()
+                }
                 Lifecycle.Event.ON_STOP -> mapView.onStop()
                 Lifecycle.Event.ON_DESTROY -> {
                     if (!isDestroyed) {
@@ -199,6 +229,7 @@ fun DroneSkyMapView(
 
         onDispose {
             stopTrafficAttentionPulse()
+            weatherParticleOverlay.detachFromMap()
             radarLabelOverlay.detachFromMap()
             radarLabelOverlay.setTargets(emptyList())
             context.applicationContext.unregisterComponentCallbacks(callbacks)
@@ -217,6 +248,7 @@ fun DroneSkyMapView(
                 map.getStyle { style ->
                     addTrafficAwarenessLayers(style)
                     addTrafficHeatmapLayer(style)
+                    addWeatherWindLayer(style)
                     addMapDarkeningLayer(style)
                     updateMapDarkening(style, mapDarkeningEnabled)
                     updateZoneOutlines(style, enhancedZoneOutlinesEnabled)
@@ -254,6 +286,14 @@ fun DroneSkyMapView(
                         radarLabelOverlay
                     )
                     updateTrafficHeatmap(style, trafficHeatmap)
+                    updateWeatherWindField(style, weatherWindField)
+                    weatherParticleOverlay.setVectorField(weatherParticleField)
+                    if (weatherMapCameraFit == null) {
+                        lastWeatherCameraFitId = null
+                    } else if (lastWeatherCameraFitId != weatherMapCameraFit.id) {
+                        applyWeatherMapCameraFit(mapView, map, weatherMapCameraFit)
+                        lastWeatherCameraFitId = weatherMapCameraFit.id
+                    }
                     if (shouldCenterOnUserLocation && userLocation != null) {
                         centerOnUserLocation(map, userLocation)
                         onUserLocationCentered()
@@ -284,7 +324,8 @@ private fun configureMap(
     onMapDataDegraded: () -> Unit,
     mapDarkeningEnabled: Boolean,
     enhancedZoneOutlinesEnabled: Boolean,
-    radarLabelOverlay: TrafficRadarLabelOverlay
+    radarLabelOverlay: TrafficRadarLabelOverlay,
+    weatherParticleOverlay: WeatherWindParticleOverlay
 ) {
     map.cameraPosition = CameraPosition.Builder()
         .target(LatLng(ROME_LATITUDE, ROME_LONGITUDE))
@@ -308,7 +349,9 @@ private fun configureMap(
         updateMapDarkening(it, mapDarkeningEnabled)
         updateZoneOutlines(it, enhancedZoneOutlinesEnabled)
         addPointMarkerLayers(it)
+        addWeatherWindLayer(it)
         radarLabelOverlay.attachToMap(map)
+        weatherParticleOverlay.attachToMap(map)
         startTrafficAttentionPulse(map)
         updatePointMarkers(it, null, null)
         loadDscGeoJsonSources(
@@ -384,6 +427,7 @@ private fun configureMap(
         }
 
         map.addOnCameraIdleListener {
+            weatherParticleOverlay.setCameraMoving(false)
             val bounds = map.projection.visibleRegion.latLngBounds
             val cameraBounds = CameraBounds(
                 zoom = map.cameraPosition.zoom,
@@ -409,6 +453,12 @@ private fun configureMap(
                     onMapDataDegraded
                 )
             }
+        }
+        map.addOnCameraMoveStartedListener {
+            weatherParticleOverlay.setCameraMoving(true)
+        }
+        map.addOnCameraMoveCancelListener {
+            weatherParticleOverlay.setCameraMoving(false)
         }
     }
 }
@@ -722,6 +772,54 @@ private fun updateTrafficHeatmap(style: Style, trafficHeatmap: TrafficHeatmapSta
     )
 }
 
+private fun addWeatherWindLayer(style: Style) {
+    style.addGeoJsonSourceIfMissing(
+        MapLayerIds.WEATHER_WIND_SOURCE_ID,
+        weatherWindFieldToFeatureCollection(null)
+    )
+    style.addLayerBelowIfMissing(
+        MapLayerIds.WEATHER_WIND_HALO_LAYER_ID,
+        LineLayer(
+            MapLayerIds.WEATHER_WIND_HALO_LAYER_ID,
+            MapLayerIds.WEATHER_WIND_SOURCE_ID
+        ).withProperties(
+            lineColor("#ffffff"),
+            lineOpacity(0.78f),
+            lineWidth(weatherWindHaloWidthExpression()),
+            lineCap(Property.LINE_CAP_ROUND),
+            lineJoin(Property.LINE_JOIN_ROUND),
+            visibility(Property.NONE)
+        ),
+        SELECTED_POINT_RING_LAYER_ID
+    )
+    style.addLayerBelowIfMissing(
+        MapLayerIds.WEATHER_WIND_ARROW_LAYER_ID,
+        LineLayer(
+            MapLayerIds.WEATHER_WIND_ARROW_LAYER_ID,
+            MapLayerIds.WEATHER_WIND_SOURCE_ID
+        ).withProperties(
+            lineColor(Expression.get(WeatherWindMapProperties.Color)),
+            lineOpacity(0.95f),
+            lineWidth(weatherWindArrowWidthExpression()),
+            lineCap(Property.LINE_CAP_ROUND),
+            lineJoin(Property.LINE_JOIN_ROUND),
+            visibility(Property.NONE)
+        ),
+        SELECTED_POINT_RING_LAYER_ID
+    )
+}
+
+private fun updateWeatherWindField(style: Style, windField: WeatherWindField?) {
+    addWeatherWindLayer(style)
+    style.setGeoJsonSourceIfAvailable(
+        MapLayerIds.WEATHER_WIND_SOURCE_ID,
+        weatherWindFieldToFeatureCollection(windField)
+    )
+    val nextVisibility = if (windField == null) Property.NONE else Property.VISIBLE
+    style.getLayer(MapLayerIds.WEATHER_WIND_HALO_LAYER_ID)?.setProperties(visibility(nextVisibility))
+    style.getLayer(MapLayerIds.WEATHER_WIND_ARROW_LAYER_ID)?.setProperties(visibility(nextVisibility))
+}
+
 private fun addMapDarkeningLayer(style: Style) {
     style.addGeoJsonSourceIfMissing(MAP_DARKENING_SOURCE_ID, mapDarkeningFeatureCollection())
     style.addLayerBelowIfMissing(
@@ -940,6 +1038,33 @@ private fun centerOnPoint(map: MapLibreMap, point: MapPoint, minZoom: Double) {
             LatLng(point.lat, point.lon),
             maxOf(currentZoom, minZoom)
         )
+    )
+}
+
+private fun applyWeatherMapCameraFit(
+    mapView: MapView,
+    map: MapLibreMap,
+    fit: WeatherMapCameraFit
+) {
+    val bounds = LatLngBounds.from(
+        fit.north,
+        fit.east,
+        fit.south,
+        fit.west
+    )
+    val density = mapView.resources.displayMetrics.density
+    val sidePadding = (24f * density).toInt()
+    val topPadding = (28f * density).toInt()
+    val panelPadding = (mapView.height * WeatherMapPanelPaddingFraction).toInt() + (28f * density).toInt()
+    map.animateCamera(
+        CameraUpdateFactory.newLatLngBounds(
+            bounds,
+            sidePadding,
+            topPadding,
+            sidePadding,
+            panelPadding
+        ),
+        WeatherMapCameraFitDurationMs
     )
 }
 
@@ -1544,6 +1669,30 @@ private fun trafficHeatmapRadiusExpression(): Expression =
         Expression.literal(44.0f)
     )
 
+private fun weatherWindArrowWidthExpression(): Expression =
+    Expression.interpolate(
+        Expression.linear(),
+        Expression.zoom(),
+        Expression.literal(10.0),
+        Expression.literal(2.0f),
+        Expression.literal(13.0),
+        Expression.literal(2.8f),
+        Expression.literal(16.0),
+        Expression.literal(3.3f)
+    )
+
+private fun weatherWindHaloWidthExpression(): Expression =
+    Expression.interpolate(
+        Expression.linear(),
+        Expression.zoom(),
+        Expression.literal(10.0),
+        Expression.literal(5.4f),
+        Expression.literal(13.0),
+        Expression.literal(6.8f),
+        Expression.literal(16.0),
+        Expression.literal(8.0f)
+    )
+
 private fun trafficSymbolLayerIds(): Array<String> =
     listOf(
         MapLayerIds.TRAFFIC_AWARENESS_MARKER_LAYER_ID,
@@ -1574,6 +1723,8 @@ private const val ROME_LONGITUDE = 12.4964
 private const val ROME_ZOOM = 10.0
 private const val USER_LOCATION_CENTER_ZOOM = 15.0
 private const val SEARCH_RESULT_CENTER_ZOOM = 13.5
+private const val WeatherMapPanelPaddingFraction = 0.52
+private const val WeatherMapCameraFitDurationMs = 850
 private const val DEFAULT_APPROXIMATE_ACCURACY_METERS = 3_000f
 private const val SELECTED_POINT_SOURCE_ID = "dsc-selected-point-source"
 private const val SELECTED_POINT_RING_LAYER_ID = "dsc-selected-point-ring"

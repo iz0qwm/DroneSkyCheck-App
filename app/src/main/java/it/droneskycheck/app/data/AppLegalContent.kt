@@ -92,11 +92,15 @@ object AppReleaseNotes {
     val Current = ReleaseNotes(
         versionName = "3.8",
         versionCode = 28,
-        title = "Cosa c'e di nuovo in Drone Sky Check 3.8",
-        intro = "Questa versione migliora la lettura degli orari NOTAM quando il giorno del mese e associato a fasce orarie specifiche.",
+        title = "Cosa c'è di nuovo in Drone Sky Check 3.8",
+        intro = "Questa versione migliora la lettura degli orari NOTAM quando il giorno del mese è associato a fasce orarie specifiche.",
         highlights = listOf(
-            "Gli orari di attivita dei NOTAM con giorni del mese mantengono ora l'associazione corretta tra data e fasce UTC.",
-            "La visualizzazione dei dettagli temporali dei NOTAM resta compatibile con le risposte backend precedenti."
+            "Gli orari di attività dei NOTAM con giorni del mese mantengono ora l'associazione corretta tra data e fasce UTC.",
+            "La visualizzazione dei dettagli temporali dei NOTAM resta compatibile con le risposte backend precedenti.",
+            "Nuovo pannello Meteo Operativo con previsioni orarie e giornaliere più dettagliate.",
+            "Meteo Operativo con mappa vento interattiva e pannello più compatto.",
+            "Mappa vento migliorata con inquadratura automatica e animazione del flusso nell'area selezionata.",
+            "Campo vento sulla mappa sincronizzato con l'ora selezionata nelle previsioni operative."
         )
     )
 }

@@ -62,6 +62,15 @@ import it.droneskycheck.app.data.weather.WeatherForecastRepository
 import it.droneskycheck.app.data.weather.NearbyMetarClient
 import it.droneskycheck.app.data.weather.NearbyMetarRepository
 import it.droneskycheck.app.data.weather.toWeatherMetrics
+import it.droneskycheck.app.data.weatherMap.WeatherMapClient
+import it.droneskycheck.app.data.weatherMap.WeatherMapDefaults
+import it.droneskycheck.app.data.weatherMap.WeatherMapForecast
+import it.droneskycheck.app.data.weatherMap.WeatherMapRepository
+import it.droneskycheck.app.data.weatherMap.WeatherMapLogTag
+import it.droneskycheck.app.data.weatherMap.WeatherWindField
+import it.droneskycheck.app.data.weatherMap.cameraFitFor
+import it.droneskycheck.app.data.weatherMap.particleVectorFieldFor
+import it.droneskycheck.app.data.weatherMap.toWeatherMapDiagnosticReason
 import it.droneskycheck.app.data.traffic.TrafficAwarenessClient
 import it.droneskycheck.app.data.traffic.TrafficAwarenessDefaults
 import it.droneskycheck.app.data.traffic.TrafficAwarenessLogTag
@@ -114,6 +123,7 @@ class MapViewModel(
     private val zoneCheckRepository: ZoneCheckV3Client = ZoneCheckV3Repository(),
     private val legalTimelineRepository: LegalTimelineClient = LegalTimelineRepository(),
     private val weatherForecastRepository: WeatherForecastClient = WeatherForecastRepository(),
+    private val weatherMapRepository: WeatherMapClient = WeatherMapRepository(),
     private val nearbyMetarRepository: NearbyMetarClient = NearbyMetarRepository(),
     private val trafficAwarenessRepository: TrafficAwarenessClient = TrafficAwarenessRepository(),
     private val trafficHeatmapRepository: TrafficHeatmapClient = TrafficHeatmapRepository(),
@@ -155,6 +165,7 @@ class MapViewModel(
     private var verdictJob: Job? = null
     private var legalTimelineJob: Job? = null
     private var weatherJob: Job? = null
+    private var weatherMapJob: Job? = null
     private var trafficAwarenessJob: Job? = null
     private var trafficHeatmapJob: Job? = null
     private var trafficHeatmapRequestId = 0L
@@ -545,6 +556,7 @@ class MapViewModel(
 
         legalTimelineJob?.cancel()
         weatherJob?.cancel()
+        weatherMapJob?.cancel()
         _uiState.value = _uiState.value.copy(
             isOperationalContextRequested = true,
             isWeatherAnalysisEnabled = true,
@@ -555,6 +567,13 @@ class MapViewModel(
             weatherForecast = null,
             weatherAssessment = null,
             nearbyMetar = null,
+            isWeatherMapLoading = true,
+            weatherMapForecast = null,
+            weatherMapWindField = null,
+            weatherParticleField = null,
+            weatherMapCameraFit = null,
+            selectedForecastTime = null,
+            weatherMapError = null,
             droneOperationalAssessment = null,
             flightOpportunityMode = FlightOpportunityMode.OPEN,
             flightOpportunityStatus = FlightOpportunityStatus.LOADING,
@@ -577,12 +596,17 @@ class MapViewModel(
             requestId = requestId,
             point = point
         )
+        launchWeatherMap(
+            requestId = requestId,
+            point = point
+        )
     }
 
     fun onWeatherAnalysisEnabledChanged(enabled: Boolean) {
         mapPreferences.setWeatherAnalysisEnabled(enabled)
         if (!enabled) {
             weatherJob?.cancel()
+            weatherMapJob?.cancel()
             _uiState.value = _uiState.value.copy(
                 isOperationalContextRequested = false,
                 isWeatherAnalysisEnabled = false,
@@ -590,6 +614,13 @@ class MapViewModel(
                 weatherForecast = null,
                 weatherAssessment = null,
                 nearbyMetar = null,
+                isWeatherMapLoading = false,
+                weatherMapForecast = null,
+                weatherMapWindField = null,
+                weatherParticleField = null,
+                weatherMapCameraFit = null,
+                selectedForecastTime = null,
+                weatherMapError = null,
                 droneOperationalAssessment = null,
                 flightOpportunityMode = FlightOpportunityMode.OPEN,
                 flightOpportunityStatus = FlightOpportunityStatus.IDLE,
@@ -624,6 +655,7 @@ class MapViewModel(
         verdictJob?.cancel()
         legalTimelineJob?.cancel()
         weatherJob?.cancel()
+        weatherMapJob?.cancel()
         val currentState = _uiState.value
         val keepTrafficSnapshot = currentState.trafficAwareness.enabled &&
             currentState.trafficAwarenessPositionLocked &&
@@ -645,6 +677,13 @@ class MapViewModel(
             weatherForecast = null,
             weatherAssessment = null,
             nearbyMetar = null,
+            isWeatherMapLoading = false,
+            weatherMapForecast = null,
+            weatherMapWindField = null,
+            weatherParticleField = null,
+            weatherMapCameraFit = null,
+            selectedForecastTime = null,
+            weatherMapError = null,
             droneOperationalAssessment = null,
             flightOpportunityMode = FlightOpportunityMode.OPEN,
             flightOpportunityStatus = FlightOpportunityStatus.IDLE,
@@ -830,6 +869,104 @@ class MapViewModel(
                 )
             }
         }
+    }
+
+    private fun launchWeatherMap(requestId: Long, point: MapPoint) {
+        weatherMapJob?.cancel()
+        _uiState.value = _uiState.value.copy(
+            isWeatherMapLoading = true,
+            weatherMapForecast = null,
+            weatherMapWindField = null,
+            weatherParticleField = null,
+            weatherMapCameraFit = null,
+            weatherMapError = null
+        )
+
+        weatherMapJob = scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                weatherMapRepository.getWeatherMap(
+                    latitude = point.lat,
+                    longitude = point.lon,
+                    mode = WeatherMapDefaults.ModeOperational
+                )
+            }
+
+            if (!isCurrentSelection(requestId, point) || !_uiState.value.isOperationalContextRequested) {
+                return@launch
+            }
+
+            result.onSuccess { forecast ->
+                val current = _uiState.value
+                val field = forecast.windFieldFor(
+                    selectedTime = current.selectedForecastTime,
+                    zoom = current.cameraBounds?.zoom ?: DefaultWeatherMapZoom
+                )
+                val particleField = forecast.particleVectorFieldFor(current.selectedForecastTime)
+                _uiState.value = current.copy(
+                    isWeatherMapLoading = false,
+                    weatherMapForecast = forecast,
+                    weatherMapWindField = field,
+                    weatherParticleField = particleField,
+                    weatherMapCameraFit = forecast.cameraFitFor(
+                        id = requestId,
+                        requestedLat = point.lat,
+                        requestedLon = point.lon
+                    ),
+                    weatherMapError = if (field == null) WeatherMapUnavailableHint else null
+                )
+                DscLogger.debug(
+                    WeatherMapLogTag,
+                    "Weather map success lat=${point.lat} lon=${point.lon} " +
+                        "times=${forecast.times.size} nodes=${forecast.nodes.size} fieldVectors=${field?.vectors?.size ?: 0}"
+                )
+            }.onFailure { error ->
+                DscLogger.warn(
+                    WeatherMapLogTag,
+                    "Weather map hidden by UI reason=${error.toWeatherMapDiagnosticReason()} " +
+                        "lat=${point.lat} lon=${point.lon}",
+                    error
+                )
+                _uiState.value = _uiState.value.copy(
+                    isWeatherMapLoading = false,
+                    weatherMapForecast = null,
+                    weatherMapWindField = null,
+                    weatherParticleField = null,
+                    weatherMapCameraFit = null,
+                    weatherMapError = WeatherMapUnavailableHint
+                )
+            }
+        }
+    }
+
+    fun onOperationalWeatherForecastTimeChanged(selectedTime: Instant?) {
+        val state = _uiState.value
+        val field = state.weatherMapForecast?.windFieldFor(
+            selectedTime = selectedTime,
+            zoom = state.cameraBounds?.zoom ?: DefaultWeatherMapZoom
+        )
+        val particleField = state.weatherMapForecast?.particleVectorFieldFor(selectedTime)
+        _uiState.value = state.copy(
+            selectedForecastTime = selectedTime,
+            weatherMapWindField = field,
+            weatherParticleField = particleField,
+            weatherMapError = when {
+                state.isWeatherMapLoading -> null
+                selectedTime == null -> null
+                state.weatherMapForecast != null && field == null -> WeatherMapUnavailableHint
+                else -> state.weatherMapError
+            }
+        )
+    }
+
+    fun onOperationalWeatherSheetDismissed() {
+        weatherMapJob?.cancel()
+        _uiState.value = _uiState.value.copy(
+            isWeatherMapLoading = false,
+            weatherMapWindField = null,
+            weatherParticleField = null,
+            weatherMapCameraFit = null,
+            selectedForecastTime = null
+        )
     }
 
     fun enableTrafficAwareness() {
@@ -1957,7 +2094,14 @@ class MapViewModel(
     }
 
     fun onCameraIdle(bounds: CameraBounds) {
-        _uiState.value = _uiState.value.copy(cameraBounds = bounds)
+        val current = _uiState.value
+        _uiState.value = current.copy(
+            cameraBounds = bounds,
+            weatherMapWindField = current.weatherMapForecast?.windFieldFor(
+                selectedTime = current.selectedForecastTime,
+                zoom = bounds.zoom
+            )
+        )
         scheduleTrafficHeatmapLoad(bounds)
     }
 
@@ -2258,11 +2402,14 @@ class MapViewModel(
         const val TrafficHeatmapZoomHint = "Ingrandisci la mappa per visualizzare il traffico osservato."
         const val TrafficHeatmapEmptyHint = "Nessun dato storico disponibile per l'area visualizzata."
         const val TrafficHeatmapUnavailableHint = "Dati traffico storico temporaneamente non disponibili."
+        const val WeatherMapUnavailableHint = "Campo vento non disponibile"
+        const val DefaultWeatherMapZoom = 13.0
         const val StatusMessageMillis = 8_000L
         const val MaxHelpTourSteps = 7
     }
 
     override fun onCleared() {
+        weatherMapJob?.cancel()
         trafficAwarenessJob?.cancel()
         trafficHeatmapJob?.cancel()
         mapStatusMessageJob?.cancel()

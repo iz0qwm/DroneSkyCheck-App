@@ -14,6 +14,7 @@ object DscApiConfig {
     const val ZoneCheckV3Url = "https://appzonecheckv3-32dg4v266a-uc.a.run.app/appZoneCheckV3"
     const val LegalTimelineUrl = "https://applegaltimeline-32dg4v266a-uc.a.run.app/appLegalTimeline"
     const val WeatherForecastUrl = "https://appweatherforecast-32dg4v266a-uc.a.run.app/appWeatherForecast"
+    const val WeatherMapUrl = "https://us-central1-droneskycheck-d0136.cloudfunctions.net/appWeatherMap"
     const val TrafficAwarenessUrl = "https://apptrafficawareness-32dg4v266a-uc.a.run.app/appTrafficAwareness"
     const val TrafficHeatmapUrl = "https://us-central1-droneskycheck-d0136.cloudfunctions.net/appTrafficHeatmap"
     const val ZonesUrl = "https://zones-32dg4v266a-uc.a.run.app/zones"

@@ -71,6 +71,13 @@ import it.droneskycheck.app.data.weather.WeatherForecastUnitsDto
 import it.droneskycheck.app.data.weather.WeatherMetrics
 import it.droneskycheck.app.data.weather.NearbyMetar
 import it.droneskycheck.app.data.weather.NearbyMetarClient
+import it.droneskycheck.app.data.weatherMap.WeatherMapCache
+import it.droneskycheck.app.data.weatherMap.WeatherMapClient
+import it.droneskycheck.app.data.weatherMap.WeatherMapCoordinates
+import it.droneskycheck.app.data.weatherMap.WeatherMapForecast
+import it.droneskycheck.app.data.weatherMap.WeatherMapGrid
+import it.droneskycheck.app.data.weatherMap.WeatherMapNode
+import it.droneskycheck.app.data.weatherMap.WeatherMapUnits
 import java.time.LocalDate
 import java.io.File
 import java.time.Clock
@@ -186,6 +193,56 @@ class MapViewModelTest {
         assertEquals(Instant.parse("2026-08-16T22:00:00Z"), legal.lastTo)
         assertEquals(MapPoint(41.9, 12.5), weather.lastPoint)
         assertEquals(FlightOpportunityStatus.PARTIAL, viewModel.uiState.value.flightOpportunityStatus)
+        scope.cancel()
+    }
+
+    @Test
+    fun weatherMapFailureDoesNotBreakOperationalForecast() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val forecast = weatherForecast()
+        val weatherMap = FakeWeatherMapClient(result = Result.failure(IllegalStateException("weather map down")))
+        val viewModel = viewModel(
+            scope = scope,
+            weather = FakeWeatherClient(forecast = forecast),
+            weatherMap = weatherMap,
+            preferences = InMemoryMapPreferences()
+        )
+
+        viewModel.onMapTapped(selection(41.9, 12.5))
+        waitUntil { viewModel.uiState.value.selectedPoint != null }
+        viewModel.onOperationalContextRequested()
+        waitUntil { viewModel.uiState.value.weatherForecast != null && !viewModel.uiState.value.isWeatherMapLoading }
+
+        assertEquals(forecast, viewModel.uiState.value.weatherForecast)
+        assertEquals("Campo vento non disponibile", viewModel.uiState.value.weatherMapError)
+        assertNull(viewModel.uiState.value.weatherMapWindField)
+        assertEquals(1, weatherMap.calls)
+        scope.cancel()
+    }
+
+    @Test
+    fun selectedForecastTimeUpdatesWeatherWindFieldLocally() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val forecast = weatherForecast(start = Instant.parse("2026-08-11T06:00:00Z"), hours = 3)
+        val mapForecast = weatherMapForecast(start = Instant.parse("2026-08-11T06:00:00Z"))
+        val weatherMap = FakeWeatherMapClient(result = Result.success(mapForecast))
+        val viewModel = viewModel(
+            scope = scope,
+            weather = FakeWeatherClient(forecast = forecast),
+            weatherMap = weatherMap,
+            preferences = InMemoryMapPreferences()
+        )
+
+        viewModel.onMapTapped(selection(41.9, 12.5))
+        waitUntil { viewModel.uiState.value.selectedPoint != null }
+        viewModel.onCameraIdle(centerItalyBounds(lat = 41.9, lon = 12.5, zoom = 13.5))
+        viewModel.onOperationalContextRequested()
+        waitUntil { weatherMap.calls == 1 && !viewModel.uiState.value.isWeatherMapLoading }
+        viewModel.onOperationalWeatherForecastTimeChanged(Instant.parse("2026-08-11T08:00:00Z"))
+
+        assertEquals(2, viewModel.uiState.value.weatherMapWindField?.timeIndex)
+        assertEquals(81, viewModel.uiState.value.weatherMapWindField?.vectors?.size)
+        assertEquals(1, weatherMap.calls)
         scope.cancel()
     }
 
@@ -1773,6 +1830,7 @@ class MapViewModelTest {
         zoneCheck: ZoneCheckV3Client = FakeZoneCheckClient(),
         legal: FakeLegalTimelineClient = FakeLegalTimelineClient(),
         weather: FakeWeatherClient = FakeWeatherClient(),
+        weatherMap: WeatherMapClient = FakeWeatherMapClient(),
         metar: NearbyMetarClient = FakeNearbyMetarClient(),
         traffic: TrafficAwarenessClient = FakeTrafficAwarenessClient(),
         trafficHeatmap: TrafficHeatmapClient = FakeTrafficHeatmapClient(),
@@ -1789,6 +1847,7 @@ class MapViewModelTest {
             zoneCheckRepository = zoneCheck,
             legalTimelineRepository = legal,
             weatherForecastRepository = weather,
+            weatherMapRepository = weatherMap,
             nearbyMetarRepository = metar,
             trafficAwarenessRepository = traffic,
             trafficHeatmapRepository = trafficHeatmap,
@@ -2154,6 +2213,21 @@ private class FakeWeatherClient(
     }
 }
 
+private class FakeWeatherMapClient(
+    private val result: Result<WeatherMapForecast> = Result.failure(IllegalStateException("weather map fixture"))
+) : WeatherMapClient {
+    var calls: Int = 0
+        private set
+    var lastPoint: MapPoint? = null
+        private set
+
+    override suspend fun getWeatherMap(latitude: Double, longitude: Double, mode: String): Result<WeatherMapForecast> {
+        calls += 1
+        lastPoint = MapPoint(latitude, longitude)
+        return result
+    }
+}
+
 private class FakeNearbyMetarClient(
     private val metar: NearbyMetar? = null
 ) : NearbyMetarClient {
@@ -2437,5 +2511,48 @@ private fun weatherForecast(
             units = WeatherForecastUnitsDto(null, null, null, null, null, null, null, null),
             cache = WeatherForecastCacheDto(false, null, null)
         )
+    )
+}
+
+private fun weatherMapForecast(
+    start: Instant = Instant.parse("2026-08-11T06:00:00Z")
+): WeatherMapForecast {
+    val nodes = (0 until 81).map { index ->
+        val row = index / 9
+        val col = index % 9
+        WeatherMapNode(
+            lat = 41.8 + row * 0.025,
+            lon = 12.4 + col * 0.025,
+            providerLat = null,
+            providerLon = null,
+            elevationMeters = null
+        )
+    }
+    val valueCount = 81 * 72
+    return WeatherMapForecast(
+        schemaVersion = 1,
+        mode = "operational",
+        requestedCenter = WeatherMapCoordinates(41.9, 12.5),
+        grid = WeatherMapGrid(
+            centerLat = 41.9,
+            centerLon = 12.5,
+            rows = 9,
+            cols = 9,
+            nodeCount = 81,
+            stepKm = 2.5,
+            widthKm = 20.0,
+            heightKm = 20.0
+        ),
+        units = WeatherMapUnits(
+            windSpeedKmh = "km/h",
+            windDirectionDegrees = "degrees",
+            windGustsKmh = "km/h"
+        ),
+        times = (0 until 72).map { start.plusSeconds(it * 3600L) },
+        nodes = nodes,
+        windSpeedKmh = (0 until valueCount).map { 12.0 },
+        windDirectionDegrees = (0 until valueCount).map { 90.0 },
+        windGustsKmh = (0 until valueCount).map { 18.0 },
+        cache = WeatherMapCache(hit = false, ageMs = null, ttlMs = null)
     )
 }

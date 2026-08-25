@@ -607,6 +607,9 @@ fun MapScreen(
             trafficAwareness = uiState.trafficAwareness,
             trafficAssessments = uiState.trafficVisualAssessments,
             trafficHeatmap = uiState.trafficHeatmap,
+            weatherWindField = if (isMapWeatherSheetVisible) uiState.weatherMapWindField else null,
+            weatherParticleField = if (isMapWeatherSheetVisible) uiState.weatherParticleField else null,
+            weatherMapCameraFit = if (isMapWeatherSheetVisible) uiState.weatherMapCameraFit else null,
             mapDarkeningEnabled = uiState.isMapDarkeningEnabled,
             enhancedZoneOutlinesEnabled = uiState.isEnhancedZoneOutlinesEnabled,
             userLocation = uiState.userLocation,
@@ -852,8 +855,15 @@ fun MapScreen(
                 assessment = uiState.weatherAssessment,
                 nearbyMetar = uiState.nearbyMetar,
                 error = uiState.weatherError,
+                isWeatherMapLoading = uiState.isWeatherMapLoading,
+                weatherMapError = uiState.weatherMapError,
                 onRefresh = viewModel::onOperationalContextRequested,
-                onDismiss = { isMapWeatherSheetVisible = false }
+                onSelectedForecastTimeChanged = viewModel::onOperationalWeatherForecastTimeChanged,
+                onDismiss = {
+                    isMapWeatherSheetVisible = false
+                    viewModel.onOperationalWeatherSheetDismissed()
+                },
+                modifier = Modifier.align(Alignment.BottomCenter)
             )
         }
 
@@ -1787,70 +1797,26 @@ private fun MapWeatherBottomSheet(
     assessment: WeatherAssessment?,
     nearbyMetar: NearbyMetar?,
     error: String?,
+    isWeatherMapLoading: Boolean,
+    weatherMapError: String?,
     onRefresh: () -> Unit,
-    onDismiss: () -> Unit
+    onSelectedForecastTimeChanged: (Instant?) -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = ZoneSheetMaxHeight)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text(
-                        text = "Meteo",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = point?.let { "Punto ${it.lat.formatCoordinate()}, ${it.lon.formatCoordinate()}" }
-                            ?: "Seleziona un punto sulla mappa",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                IconButton(onClick = onRefresh, enabled = point != null && !isLoading) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Aggiorna meteo")
-                }
-            }
-            when {
-                isLoading -> Row(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                    Text("Aggiornamento meteo in corso.", style = MaterialTheme.typography.bodyMedium)
-                }
-                assessment != null && forecast != null -> {
-                    WeatherAnalysisContent(assessment = assessment, forecast = forecast)
-                    NearbyMetarSection(nearbyMetar)
-                }
-                error != null -> Text(
-                    text = error,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error
-                )
-                else -> Text(
-                    text = "Apri il meteo dopo aver selezionato un punto sulla mappa.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Spacer(modifier = Modifier.height(12.dp))
-        }
-    }
+    OperationalWeatherBottomSheet(
+        point = point,
+        isLoading = isLoading,
+        forecast = forecast,
+        nearbyMetar = nearbyMetar,
+        error = error,
+        isWeatherMapLoading = isWeatherMapLoading,
+        weatherMapError = weatherMapError,
+        onRefresh = onRefresh,
+        onSelectedForecastTimeChanged = onSelectedForecastTimeChanged,
+        onDismiss = onDismiss,
+        modifier = modifier
+    )
 }
 
 @Composable

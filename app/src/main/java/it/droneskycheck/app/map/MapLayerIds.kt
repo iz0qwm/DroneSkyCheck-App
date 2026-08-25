@@ -19,6 +19,9 @@ object MapLayerIds {
     const val TRAFFIC_AWARENESS_RADIUS_LINE_LAYER_ID = "traffic-awareness-radius-line-layer"
     const val TRAFFIC_HEATMAP_SOURCE_ID = "traffic-observed-heatmap-source"
     const val TRAFFIC_HEATMAP_LAYER_ID = "traffic-observed-heatmap-layer"
+    const val WEATHER_WIND_SOURCE_ID = "dsc-weather-map-source"
+    const val WEATHER_WIND_HALO_LAYER_ID = "dsc-weather-wind-halo"
+    const val WEATHER_WIND_ARROW_LAYER_ID = "dsc-weather-wind-arrow"
 
     val STATIC_LAYERS = listOf(
         DscMapLayer(

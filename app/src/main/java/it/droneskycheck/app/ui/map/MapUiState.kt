@@ -21,7 +21,12 @@ import it.droneskycheck.app.data.traffic.TrafficTarget
 import it.droneskycheck.app.data.weather.WeatherAssessment
 import it.droneskycheck.app.data.weather.WeatherForecast
 import it.droneskycheck.app.data.weather.NearbyMetar
+import it.droneskycheck.app.data.weatherMap.WeatherMapForecast
+import it.droneskycheck.app.data.weatherMap.WeatherMapCameraFit
+import it.droneskycheck.app.data.weatherMap.WeatherParticleVectorField
+import it.droneskycheck.app.data.weatherMap.WeatherWindField
 import it.droneskycheck.app.map.DscLayerCategory
+import java.time.Instant
 
 data class MapUiState(
     val selectedZone: DemoZone? = null,
@@ -50,6 +55,13 @@ data class MapUiState(
     val weatherAssessment: WeatherAssessment? = null,
     val nearbyMetar: NearbyMetar? = null,
     val weatherError: String? = null,
+    val isWeatherMapLoading: Boolean = false,
+    val weatherMapForecast: WeatherMapForecast? = null,
+    val weatherMapWindField: WeatherWindField? = null,
+    val weatherParticleField: WeatherParticleVectorField? = null,
+    val weatherMapCameraFit: WeatherMapCameraFit? = null,
+    val selectedForecastTime: Instant? = null,
+    val weatherMapError: String? = null,
     val trafficAwareness: TrafficAwarenessState = TrafficAwarenessState(),
     val trafficAwarenessCenter: MapPoint? = null,
     val trafficAwarenessPositionLocked: Boolean = false,
