@@ -64,6 +64,7 @@ import it.droneskycheck.app.data.ai.AiAssistantRequest
 import it.droneskycheck.app.data.ai.AiAssistantSource
 import it.droneskycheck.app.data.ai.AiAssistantSourceGroup
 import it.droneskycheck.app.data.ai.AiAssistantUnavailableMessage
+import it.droneskycheck.app.data.ai.localAiAssistantResponseFor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -99,6 +100,23 @@ fun AiAssistantScreen(
 
         draft = ""
         addMessage(AiChatAuthor.User, query)
+        localAiAssistantResponseFor(query, context)?.let { response ->
+            DscLogger.debug(
+                AiAssistantUiLogTag,
+                "UI append start kind=${response.kind} mappedTextSource=${response.mappedTextSource} " +
+                    "textLength=${response.displayText.length} sources=${response.sources.size}"
+            )
+            addMessage(
+                author = AiChatAuthor.Assistant,
+                text = response.displayText,
+                sources = response.sources
+            )
+            DscLogger.debug(
+                AiAssistantUiLogTag,
+                "UI state updated messages=${messages.size} loading=false error=false"
+            )
+            return
+        }
         isLoading = true
         scope.launch {
             val result = withContext(Dispatchers.IO) {

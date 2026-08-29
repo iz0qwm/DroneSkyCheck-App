@@ -85,6 +85,8 @@ enum class AiAssistantResponseKind {
     Both,
     OperationalAnswer,
     NeedsContext,
+    OutOfScope,
+    Ambiguous,
     OperationalUnavailable,
     Error
 }
@@ -109,10 +111,11 @@ enum class AiAssistantSourceGroup {
 fun parseAiAssistantResponse(json: JSONObject): AiAssistantResponse {
     val status = json.optStringOrNull("status")
     val route = json.optStringOrNull("route")
-    val kindRaw = route
-        ?: json.optStringOrNull("type")
+    val responseType = json.optStringOrNull("type")
         ?: json.optStringOrNull("kind")
-        ?: status
+    val kindRaw = status
+        ?: responseType
+        ?: route
         ?: "ANSWER"
     val regulatoryAnswer = json.optJSONObject("regulatoryAnswer")
     val productAnswer = json.optJSONObject("productAnswer")
@@ -121,13 +124,18 @@ fun parseAiAssistantResponse(json: JSONObject): AiAssistantResponse {
         "REGULATORY" -> AiAssistantResponseKind.RegulatoryAnswer
         "DSC_PRODUCT", "PRODUCT" -> AiAssistantResponseKind.ProductAnswer
         "OPERATIONAL_ANSWER" -> AiAssistantResponseKind.OperationalAnswer
+        "DSC_OPERATIONAL_REQUIRED" -> AiAssistantResponseKind.OperationalAnswer
         "NEEDS_CONTEXT" -> AiAssistantResponseKind.NeedsContext
+        "OUT_OF_SCOPE", "OUT_OF_DOMAIN", "UNSUPPORTED_QUERY", "UNSUPPORTED" -> AiAssistantResponseKind.OutOfScope
+        "AMBIGUOUS", "UNCLEAR", "LOW_CONFIDENCE", "CLARIFICATION_NEEDED" -> AiAssistantResponseKind.Ambiguous
         "OPERATIONAL_UNAVAILABLE" -> AiAssistantResponseKind.OperationalUnavailable
         "ERROR" -> AiAssistantResponseKind.Error
+        "OK" -> kindFromRouteOrNestedAnswers(route, regulatoryAnswer, productAnswer)
         else -> when {
             regulatoryAnswer != null && productAnswer != null -> AiAssistantResponseKind.Both
             regulatoryAnswer != null -> AiAssistantResponseKind.RegulatoryAnswer
             productAnswer != null -> AiAssistantResponseKind.ProductAnswer
+            route?.uppercase() == "DSC_OPERATIONAL_REQUIRED" -> AiAssistantResponseKind.OperationalAnswer
             else -> AiAssistantResponseKind.Answer
         }
     }
@@ -153,6 +161,8 @@ fun parseAiAssistantResponse(json: JSONObject): AiAssistantResponse {
         AiAssistantResponseKind.NeedsContext -> mappedText(json.optStringOrNull("nextQuestion"), "nextQuestion")
             ?: mappedText(json.optStringOrNull("answer"), "answer")
             ?: MappedAiText("Mi serve qualche dettaglio in più per rispondere con prudenza.", "fallback")
+        AiAssistantResponseKind.OutOfScope -> MappedAiText(AiAssistantOutOfScopeMessage, "status.outOfScope")
+        AiAssistantResponseKind.Ambiguous -> MappedAiText(AiAssistantAmbiguousQuestionMessage, "status.ambiguous")
         AiAssistantResponseKind.OperationalUnavailable -> mappedText(json.optStringOrNull("message"), "message")
             ?: fallbackMappedText()
         AiAssistantResponseKind.Error -> mappedText(json.optStringOrNull("message"), "message")
@@ -174,6 +184,21 @@ fun parseAiAssistantResponse(json: JSONObject): AiAssistantResponse {
 }
 
 const val AiAssistantUnavailableMessage = "L'Assistente DSC non è disponibile in questo momento. Riprova."
+const val AiAssistantSelectPointMessage = "Posso verificarlo, ma ho bisogno del punto preciso. Selezionalo sulla mappa e poi chiedimi \"Posso volare qui?\"."
+const val AiAssistantOutOfScopeMessage = "Non sono riuscito a collegare bene la domanda alle informazioni che posso verificare. Prova a riformularla in modo più specifico.\n\nPuoi chiedermi informazioni sulle regole di volo, sull'uso di Drone Sky Check o sul punto selezionato sulla mappa."
+const val AiAssistantAmbiguousQuestionMessage = "Non sono sicuro di aver capito cosa vuoi sapere. Prova a riformulare la domanda aggiungendo qualche dettaglio."
+
+fun localAiAssistantResponseFor(query: String, context: AiAssistantContext): AiAssistantResponse? {
+    if (context.location != null) return null
+    if (!query.isLocalizedOperationalFlightQuestion()) return null
+    return AiAssistantResponse(
+        kind = AiAssistantResponseKind.NeedsContext,
+        displayText = AiAssistantSelectPointMessage,
+        status = "NEEDS_CONTEXT",
+        route = "LOCAL_CONTEXT_GATE",
+        mappedTextSource = "local.context.location"
+    )
+}
 
 private fun JSONObject.toOperationalSummaryText(): String =
     listOfNotNull(
@@ -276,12 +301,61 @@ fun JSONObject.toAiAssistantShapeLogSummary(): String {
         "hasProductAnswer=${productAnswer != null}",
         "hasOperationalAnswer=${has("operationalAnswer") && !isNull("operationalAnswer")}",
         "hasOperationalSummary=${has("operationalSummary") && !isNull("operationalSummary")}",
+        "operational=${optJSONObject("operationalSummary").operationalSummaryShape()}",
         "hasNextQuestion=${has("nextQuestion") && !isNull("nextQuestion")}",
         "both=$hasBoth",
         "regulatory=${regulatoryAnswer.answerShape()}",
         "product=${productAnswer.answerShape()}"
     ).joinToString(" ")
 }
+
+private fun kindFromRouteOrNestedAnswers(
+    route: String?,
+    regulatoryAnswer: JSONObject?,
+    productAnswer: JSONObject?
+): AiAssistantResponseKind =
+    when (route?.uppercase()) {
+        "BOTH" -> AiAssistantResponseKind.Both
+        "REGULATORY" -> AiAssistantResponseKind.RegulatoryAnswer
+        "DSC_PRODUCT", "PRODUCT" -> AiAssistantResponseKind.ProductAnswer
+        "DSC_OPERATIONAL_REQUIRED" -> AiAssistantResponseKind.OperationalAnswer
+        else -> when {
+            regulatoryAnswer != null && productAnswer != null -> AiAssistantResponseKind.Both
+            regulatoryAnswer != null -> AiAssistantResponseKind.RegulatoryAnswer
+            productAnswer != null -> AiAssistantResponseKind.ProductAnswer
+            else -> AiAssistantResponseKind.Answer
+        }
+    }
+
+private fun String.isLocalizedOperationalFlightQuestion(): Boolean {
+    val normalized = trim().lowercase()
+    if (normalized.isBlank()) return false
+    val asksFlightPermission = PermissionFlightRegex.containsMatchIn(normalized)
+    if (!asksFlightPermission) return false
+    return PlaceWithoutCoordinatesRegex.findAll(normalized).any { match ->
+        val candidate = match.groupValues.getOrNull(1).orEmpty()
+        candidate !in NonPlaceQuestionWords
+    }
+}
+
+private val PermissionFlightRegex = Regex(
+    """(?:\b(?:posso|possiamo|puo|può)\b.{0,40}\bvolare\b)|(?:\bsi\s+puo\b.{0,40}\bvolare\b)|(?:\bsi\s+può\b.{0,40}\bvolare\b)|(?:\bvolare\b.{0,40}\b(?:posso|possiamo|puo|può)\b)"""
+)
+
+private val PlaceWithoutCoordinatesRegex = Regex(
+    """\b(?:a|ad)\s+([a-zà-ÿ][a-zà-ÿ'’.-]{2,})(?:\s+[a-zà-ÿ][a-zà-ÿ'’.-]{2,}){0,3}"""
+)
+
+private val NonPlaceQuestionWords = setOf(
+    "che",
+    "chi",
+    "cosa",
+    "dove",
+    "quanto",
+    "quale",
+    "quali",
+    "quando"
+)
 
 private fun JSONObject.topLevelKeys(): List<String> =
     keys().asSequence().toList().sorted()
@@ -294,5 +368,16 @@ private fun JSONObject?.answerShape(): String {
         "answerLength=${json.optStringOrNull("answer")?.length ?: 0}",
         "sources=${json.optJSONArray("sources")?.length() ?: 0}",
         "citations=${json.optJSONArray("citations")?.length() ?: 0}"
+    ).joinToString(prefix = "{", postfix = "}")
+}
+
+private fun JSONObject?.operationalSummaryShape(): String {
+    val json = this ?: return "{present=false}"
+    return listOf(
+        "present=true",
+        "headlineLength=${json.optStringOrNull("headline")?.length ?: 0}",
+        "summaryLength=${json.optStringOrNull("summary")?.length ?: 0}",
+        "detailsType=${json.opt("details")?.javaClass?.simpleName ?: "missing"}",
+        "detailsCount=${json.optJSONArray("details")?.length() ?: 0}"
     ).joinToString(prefix = "{", postfix = "}")
 }
