@@ -90,17 +90,17 @@ object AppExternalLinks {
 object AppReleaseNotes {
     // When versionName changes, reset this section for the new version and collect only that version's changes.
     val Current = ReleaseNotes(
-        versionName = "3.8",
-        versionCode = 28,
-        title = "Cosa c'è di nuovo in Drone Sky Check 3.8",
-        intro = "Questa versione migliora la lettura degli orari NOTAM quando il giorno del mese è associato a fasce orarie specifiche.",
+        versionName = "3.9",
+        versionCode = 29,
+        title = "Cosa c'è di nuovo in Drone Sky Check 3.9",
+        intro = "Questa versione introduce una prima integrazione dell'Assistente DSC, pensata per aiutarti a orientarti tra regole di volo, funzioni dell'app e informazioni sul punto selezionato.",
         highlights = listOf(
-            "Gli orari di attività dei NOTAM con giorni del mese mantengono ora l'associazione corretta tra data e fasce UTC.",
-            "La visualizzazione dei dettagli temporali dei NOTAM resta compatibile con le risposte backend precedenti.",
-            "Nuovo pannello Meteo Operativo con previsioni orarie e giornaliere più dettagliate.",
-            "Meteo Operativo con mappa vento interattiva e pannello più compatto.",
-            "Mappa vento migliorata con inquadratura automatica e animazione del flusso nell'area selezionata.",
-            "Campo vento sulla mappa sincronizzato con l'ora selezionata nelle previsioni operative."
+            "Nuovo pulsante Assistente DSC nel menu flottante della mappa, con apertura in una schermata dedicata.",
+            "L'Assistente DSC può rispondere a domande sulle regole di volo, sull'uso di Drone Sky Check e sul punto selezionato sulla mappa.",
+            "Quando è disponibile un punto selezionato, l'assistente lo usa come contesto operativo senza richiedere di reinserire le coordinate.",
+            "Le risposte possono mostrare fonti consultabili, mantenendo separate le informazioni normative da quelle relative all'app.",
+            "Le domande su luoghi non selezionati vengono gestite in modo prudente: l'app chiede di indicare prima il punto preciso sulla mappa.",
+            "Migliorata la distinzione tra domande fuori ambito, contesto mancante e reale indisponibilità tecnica dell'assistente."
         )
     )
 }
