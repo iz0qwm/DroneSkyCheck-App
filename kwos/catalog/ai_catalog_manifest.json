@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "catalogVersion": 3,
+  "updatedAt": "2026-08-30T00:00:00Z",
+  "files": {
+    "droneRegulatoryCatalog": {
+      "url": "https://www.kwos.org/appoggio/droni/DroneSkyCheck/catalog/drone_regulatory_catalog.json",
+      "sha256": "8702ef02d714b8dd97d8506dfe0b4051ac07002c9fcb2322a505ad7258f6875e"
+    },
+    "terminology": {
+      "url": "https://www.kwos.org/appoggio/droni/DroneSkyCheck/catalog/terminology.json",
+      "sha256": "09755d52b00494880f1e4ed8b234c6c745d1930b30be57d7a569f8921bf0eeee"
+    }
+  }
+}

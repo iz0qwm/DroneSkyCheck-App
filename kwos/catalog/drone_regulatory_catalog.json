@@ -1,0 +1,1194 @@
+{
+  "schemaVersion": 1,
+  "catalogVersion": 2,
+  "updatedAt": "2026-08-30T00:00:00Z",
+  "drones": [
+    {
+      "manufacturer": "DJI",
+      "model": "Neo",
+      "aliases": [
+        "dji neo",
+        "neo",
+        "djineo"
+      ],
+      "eu": {
+        "classMark": "C0",
+        "declaredTakeoffWeightGrams": 135,
+        "declaredTakeoffWeightText": "Approx. 135 g",
+        "mtomGrams": null,
+        "mtomText": null,
+        "camera": true,
+        "remoteId": null,
+        "configurationId": "eu-standard",
+        "configurationLabel": "Configurazione standard EU",
+        "sourceRefs": [
+          "dji-neo-support"
+        ],
+        "notes": null
+      },
+      "sources": [
+        {
+          "id": "dji-neo-support",
+          "type": "MANUFACTURER",
+          "name": "DJI Neo - Support Specs",
+          "url": "https://www.dji.com/support/product/neo",
+          "retrievedAt": "2026-08-30"
+        }
+      ],
+      "verifiedAt": "2026-08-30",
+      "defaultConfiguration": {
+        "id": "eu-standard",
+        "label": "Configurazione standard EU",
+        "region": "EU",
+        "classMark": "C0",
+        "declaredTakeoffWeightGrams": 135,
+        "declaredTakeoffWeightText": "Approx. 135 g",
+        "mtomGrams": null,
+        "mtomText": null,
+        "camera": true,
+        "remoteId": null,
+        "sourceRefs": [
+          "dji-neo-support"
+        ],
+        "notes": null,
+        "verifiedAt": "2026-08-30"
+      },
+      "variants": []
+    },
+    {
+      "manufacturer": "DJI",
+      "model": "Neo 2",
+      "aliases": [
+        "dji neo 2",
+        "neo2",
+        "neo 2",
+        "neo-2",
+        "djineo2"
+      ],
+      "eu": {
+        "classMark": "C0",
+        "declaredTakeoffWeightGrams": 151,
+        "declaredTakeoffWeightText": "151 g",
+        "mtomGrams": null,
+        "mtomText": null,
+        "camera": true,
+        "remoteId": null,
+        "configurationId": "eu-standard",
+        "configurationLabel": "Configurazione standard EU",
+        "sourceRefs": [
+          "dji-neo-2-store-ca",
+          "dji-neo-2-store-kr"
+        ],
+        "notes": null
+      },
+      "sources": [
+        {
+          "id": "dji-neo-2-store-ca",
+          "type": "MANUFACTURER",
+          "name": "DJI Neo 2 - DJI Store certification FAQ",
+          "url": "https://store.dji.com/ca/product/dji-neo-2-fly-more-140w-gan-charging-combo?from=site-nav&set_region=CA&vid=258321",
+          "retrievedAt": "2026-08-30"
+        },
+        {
+          "id": "dji-neo-2-store-kr",
+          "type": "MANUFACTURER",
+          "name": "DJI Neo 2 - DJI Store comparison specs",
+          "url": "https://store.dji.com/kr/product/dji-neo-2-fly-more-combo-drone-only",
+          "retrievedAt": "2026-08-30"
+        }
+      ],
+      "verifiedAt": "2026-08-30",
+      "defaultConfiguration": {
+        "id": "eu-standard",
+        "label": "Configurazione standard EU",
+        "region": "EU",
+        "classMark": "C0",
+        "declaredTakeoffWeightGrams": 151,
+        "declaredTakeoffWeightText": "151 g",
+        "mtomGrams": null,
+        "mtomText": null,
+        "camera": true,
+        "remoteId": null,
+        "sourceRefs": [
+          "dji-neo-2-store-ca",
+          "dji-neo-2-store-kr"
+        ],
+        "notes": null,
+        "verifiedAt": "2026-08-30"
+      },
+      "variants": []
+    },
+    {
+      "manufacturer": "DJI",
+      "model": "Mavic Mini",
+      "aliases": [
+        "dji mavic mini",
+        "mavicmini",
+        "mavic mini",
+        "mavic-mini",
+        "djimavicmini"
+      ],
+      "eu": {
+        "classMark": null,
+        "mtomGrams": null,
+        "camera": null,
+        "remoteId": null
+      },
+      "sources": [],
+      "verifiedAt": null
+    },
+    {
+      "manufacturer": "DJI",
+      "model": "Mini 2",
+      "aliases": [
+        "dji mini 2",
+        "mini2",
+        "mini 2",
+        "mini-2",
+        "djimini2"
+      ],
+      "eu": {
+        "classMark": null,
+        "mtomGrams": null,
+        "camera": null,
+        "remoteId": null
+      },
+      "sources": [],
+      "verifiedAt": null
+    },
+    {
+      "manufacturer": "DJI",
+      "model": "Mini 2 SE",
+      "aliases": [
+        "dji mini 2 se",
+        "mini2se",
+        "mini 2 se",
+        "mini-2-se",
+        "djimini2se"
+      ],
+      "eu": {
+        "classMark": null,
+        "mtomGrams": null,
+        "camera": null,
+        "remoteId": null
+      },
+      "sources": [],
+      "verifiedAt": null
+    },
+    {
+      "manufacturer": "DJI",
+      "model": "Mini 4K",
+      "aliases": [
+        "dji mini 4k",
+        "mini4k",
+        "mini 4k",
+        "mini-4k",
+        "djimini4k"
+      ],
+      "eu": {
+        "classMark": "C0",
+        "declaredTakeoffWeightGrams": 246,
+        "declaredTakeoffWeightText": "246 g",
+        "mtomGrams": null,
+        "mtomText": null,
+        "camera": true,
+        "remoteId": null,
+        "configurationId": "eu-standard",
+        "configurationLabel": "Configurazione standard EU",
+        "sourceRefs": [
+          "dji-mini-4k-specs"
+        ],
+        "notes": null
+      },
+      "sources": [
+        {
+          "id": "dji-mini-4k-specs",
+          "type": "MANUFACTURER",
+          "name": "DJI Mini 4K / DJI Mini 2 SE - Specs",
+          "url": "https://www.dji.com/mini-2-se/specs",
+          "retrievedAt": "2026-08-30"
+        }
+      ],
+      "verifiedAt": "2026-08-30",
+      "defaultConfiguration": {
+        "id": "eu-standard",
+        "label": "Configurazione standard EU",
+        "region": "EU",
+        "classMark": "C0",
+        "declaredTakeoffWeightGrams": 246,
+        "declaredTakeoffWeightText": "246 g",
+        "mtomGrams": null,
+        "mtomText": null,
+        "camera": true,
+        "remoteId": null,
+        "sourceRefs": [
+          "dji-mini-4k-specs"
+        ],
+        "notes": null,
+        "verifiedAt": "2026-08-30"
+      },
+      "variants": []
+    },
+    {
+      "manufacturer": "DJI",
+      "model": "Mini 3",
+      "aliases": [
+        "dji mini 3",
+        "mini3",
+        "mini 3",
+        "mini-3",
+        "djimini3"
+      ],
+      "eu": {
+        "classMark": null,
+        "mtomGrams": null,
+        "camera": null,
+        "remoteId": null
+      },
+      "sources": [],
+      "verifiedAt": null
+    },
+    {
+      "manufacturer": "DJI",
+      "model": "Mini 3 Pro",
+      "aliases": [
+        "dji mini 3 pro",
+        "mini3pro",
+        "mini 3 pro",
+        "mini-3-pro",
+        "djimini3pro"
+      ],
+      "eu": {
+        "classMark": null,
+        "mtomGrams": null,
+        "camera": null,
+        "remoteId": null
+      },
+      "sources": [],
+      "verifiedAt": null
+    },
+    {
+      "manufacturer": "DJI",
+      "model": "Mini 4 Pro",
+      "aliases": [
+        "dji mini 4 pro",
+        "mini4pro",
+        "mini 4 pro",
+        "mini-4-pro",
+        "djimini4pro"
+      ],
+      "eu": {
+        "classMark": "C0",
+        "declaredTakeoffWeightGrams": null,
+        "declaredTakeoffWeightText": "< 249 g",
+        "mtomGrams": null,
+        "mtomText": null,
+        "camera": true,
+        "remoteId": null,
+        "configurationId": "eu-standard-battery",
+        "configurationLabel": "Configurazione EU con Intelligent Flight Battery",
+        "sourceRefs": [
+          "dji-mini-4-pro-specs"
+        ],
+        "notes": "Con Intelligent Flight Battery Plus il peso supera 249 g; la batteria Plus non e venduta in Europa secondo DJI."
+      },
+      "sources": [
+        {
+          "id": "dji-mini-4-pro-specs",
+          "type": "MANUFACTURER",
+          "name": "DJI Mini 4 Pro - Specs",
+          "url": "https://www.dji.com/mini-4-pro/specs",
+          "retrievedAt": "2026-08-30"
+        }
+      ],
+      "verifiedAt": "2026-08-30",
+      "defaultConfiguration": {
+        "id": "eu-standard-battery",
+        "label": "Configurazione EU con Intelligent Flight Battery",
+        "region": "EU",
+        "classMark": "C0",
+        "declaredTakeoffWeightGrams": null,
+        "declaredTakeoffWeightText": "< 249 g",
+        "mtomGrams": null,
+        "mtomText": null,
+        "camera": true,
+        "remoteId": null,
+        "sourceRefs": [
+          "dji-mini-4-pro-specs"
+        ],
+        "notes": "Con Intelligent Flight Battery Plus il peso supera 249 g; la batteria Plus non e venduta in Europa secondo DJI.",
+        "verifiedAt": "2026-08-30"
+      },
+      "variants": [
+        {
+          "id": "intelligent-flight-battery-plus",
+          "label": "Configurazione con Intelligent Flight Battery Plus",
+          "region": "EU",
+          "classMark": null,
+          "declaredTakeoffWeightGrams": null,
+          "declaredTakeoffWeightText": "> 249 g",
+          "mtomGrams": null,
+          "mtomText": null,
+          "camera": true,
+          "remoteId": null,
+          "sourceRefs": [
+            "dji-mini-4-pro-specs"
+          ],
+          "notes": "DJI indica che la batteria Plus non e venduta in Europa e porta il drone sopra 249 g; classe EU non salvata per questa configurazione.",
+          "verifiedAt": "2026-08-30"
+        }
+      ]
+    },
+    {
+      "manufacturer": "DJI",
+      "model": "Mini 5 Pro",
+      "aliases": [
+        "dji mini 5 pro",
+        "dji mini5pro",
+        "mini5pro",
+        "mini 5 pro",
+        "mini-5-pro",
+        "djimini5pro"
+      ],
+      "eu": {
+        "classMark": "C0",
+        "declaredTakeoffWeightGrams": 249,
+        "declaredTakeoffWeightText": "249 g",
+        "mtomGrams": null,
+        "mtomText": null,
+        "camera": true,
+        "remoteId": null,
+        "configurationId": "eu-fly-more-combo",
+        "configurationLabel": "Fly More Combo EU con Intelligent Flight Battery",
+        "sourceRefs": [
+          "dji-mini-5-pro-store-ro"
+        ],
+        "notes": "DJI distingue Fly More Combo C0 e Fly More Combo Plus C1."
+      },
+      "sources": [
+        {
+          "id": "dji-mini-5-pro-store-ro",
+          "type": "MANUFACTURER",
+          "name": "DJI Mini 5 Pro - DJI Store EU certification FAQ",
+          "url": "https://store.dji.com/ro/product/dji-mini-5-pro-fly-more-combo-dji-rc-n3?from=site-nav&set_region=RO",
+          "retrievedAt": "2026-08-30"
+        }
+      ],
+      "verifiedAt": "2026-08-30",
+      "defaultConfiguration": {
+        "id": "eu-fly-more-combo",
+        "label": "Fly More Combo EU con Intelligent Flight Battery",
+        "region": "EU",
+        "classMark": "C0",
+        "declaredTakeoffWeightGrams": 249,
+        "declaredTakeoffWeightText": "249 g",
+        "mtomGrams": null,
+        "mtomText": null,
+        "camera": true,
+        "remoteId": null,
+        "sourceRefs": [
+          "dji-mini-5-pro-store-ro"
+        ],
+        "notes": "DJI distingue Fly More Combo C0 e Fly More Combo Plus C1.",
+        "verifiedAt": "2026-08-30"
+      },
+      "variants": [
+        {
+          "id": "eu-fly-more-combo-plus",
+          "label": "Fly More Combo Plus EU con Intelligent Flight Battery Plus",
+          "region": "EU",
+          "classMark": "C1",
+          "declaredTakeoffWeightGrams": null,
+          "declaredTakeoffWeightText": null,
+          "mtomGrams": null,
+          "mtomText": "supera la soglia MTOM C0",
+          "camera": true,
+          "remoteId": null,
+          "sourceRefs": [
+            "dji-mini-5-pro-store-ro"
+          ],
+          "notes": "Se un drone C0 viene equipaggiato con Intelligent Flight Battery Plus, DJI indica che supera la soglia MTOM C0 e non puo piu essere operato come C0 in UE.",
+          "verifiedAt": "2026-08-30"
+        }
+      ]
+    },
+    {
+      "manufacturer": "DJI",
+      "model": "Flip",
+      "aliases": [
+        "dji flip",
+        "flip",
+        "djiflip"
+      ],
+      "eu": {
+        "classMark": "C0",
+        "declaredTakeoffWeightGrams": null,
+        "declaredTakeoffWeightText": "< 249 g",
+        "mtomGrams": null,
+        "mtomText": null,
+        "camera": true,
+        "remoteId": null,
+        "configurationId": "eu-standard",
+        "configurationLabel": "Configurazione standard EU",
+        "sourceRefs": [
+          "dji-flip-specs"
+        ],
+        "notes": null
+      },
+      "sources": [
+        {
+          "id": "dji-flip-specs",
+          "type": "MANUFACTURER",
+          "name": "DJI Flip - Specs",
+          "url": "https://www.dji.com/flip/specs",
+          "retrievedAt": "2026-08-30"
+        }
+      ],
+      "verifiedAt": "2026-08-30",
+      "defaultConfiguration": {
+        "id": "eu-standard",
+        "label": "Configurazione standard EU",
+        "region": "EU",
+        "classMark": "C0",
+        "declaredTakeoffWeightGrams": null,
+        "declaredTakeoffWeightText": "< 249 g",
+        "mtomGrams": null,
+        "mtomText": null,
+        "camera": true,
+        "remoteId": null,
+        "sourceRefs": [
+          "dji-flip-specs"
+        ],
+        "notes": null,
+        "verifiedAt": "2026-08-30"
+      },
+      "variants": []
+    },
+    {
+      "manufacturer": "DJI",
+      "model": "Avata",
+      "aliases": [
+        "dji avata",
+        "avata",
+        "djiavata"
+      ],
+      "eu": {
+        "classMark": null,
+        "mtomGrams": null,
+        "camera": null,
+        "remoteId": null
+      },
+      "sources": [],
+      "verifiedAt": null
+    },
+    {
+      "manufacturer": "DJI",
+      "model": "Avata 2",
+      "aliases": [
+        "dji avata 2",
+        "avata2",
+        "avata 2",
+        "avata-2",
+        "djiavata2"
+      ],
+      "eu": {
+        "classMark": null,
+        "mtomGrams": null,
+        "camera": null,
+        "remoteId": null
+      },
+      "sources": [],
+      "verifiedAt": null
+    },
+    {
+      "manufacturer": "DJI",
+      "model": "FPV",
+      "aliases": [
+        "dji fpv",
+        "fpv",
+        "djifpv"
+      ],
+      "eu": {
+        "classMark": null,
+        "mtomGrams": null,
+        "camera": null,
+        "remoteId": null
+      },
+      "sources": [],
+      "verifiedAt": null
+    },
+    {
+      "manufacturer": "DJI",
+      "model": "Mavic Air 2",
+      "aliases": [
+        "dji mavic air 2",
+        "mavicair2",
+        "mavic air 2",
+        "mavic-air-2",
+        "djimavicair2"
+      ],
+      "eu": {
+        "classMark": null,
+        "mtomGrams": null,
+        "camera": null,
+        "remoteId": null
+      },
+      "sources": [],
+      "verifiedAt": null
+    },
+    {
+      "manufacturer": "DJI",
+      "model": "Air 2S",
+      "aliases": [
+        "dji air 2s",
+        "air2s",
+        "air 2s",
+        "mavic air 2s",
+        "air-2s",
+        "djiair2s"
+      ],
+      "eu": {
+        "classMark": null,
+        "mtomGrams": null,
+        "camera": null,
+        "remoteId": null
+      },
+      "sources": [],
+      "verifiedAt": null
+    },
+    {
+      "manufacturer": "DJI",
+      "model": "Air 3",
+      "aliases": [
+        "dji air 3",
+        "air3",
+        "air 3",
+        "air-3",
+        "djiair3"
+      ],
+      "eu": {
+        "classMark": null,
+        "mtomGrams": null,
+        "camera": null,
+        "remoteId": null
+      },
+      "sources": [],
+      "verifiedAt": null
+    },
+    {
+      "manufacturer": "DJI",
+      "model": "Air 3S",
+      "aliases": [
+        "dji air 3s",
+        "air3s",
+        "air 3s",
+        "air-3s",
+        "djiair3s"
+      ],
+      "eu": {
+        "classMark": "C1",
+        "declaredTakeoffWeightGrams": 724,
+        "declaredTakeoffWeightText": "724 g",
+        "mtomGrams": null,
+        "mtomText": null,
+        "camera": true,
+        "remoteId": null,
+        "configurationId": "eu-standard",
+        "configurationLabel": "Configurazione standard EU",
+        "sourceRefs": [
+          "dji-air-3s-specs"
+        ],
+        "notes": null
+      },
+      "sources": [
+        {
+          "id": "dji-air-3s-specs",
+          "type": "MANUFACTURER",
+          "name": "DJI Air 3S - Specs",
+          "url": "https://www.dji.com/air-3s/specs",
+          "retrievedAt": "2026-08-30"
+        }
+      ],
+      "verifiedAt": "2026-08-30",
+      "defaultConfiguration": {
+        "id": "eu-standard",
+        "label": "Configurazione standard EU",
+        "region": "EU",
+        "classMark": "C1",
+        "declaredTakeoffWeightGrams": 724,
+        "declaredTakeoffWeightText": "724 g",
+        "mtomGrams": null,
+        "mtomText": null,
+        "camera": true,
+        "remoteId": null,
+        "sourceRefs": [
+          "dji-air-3s-specs"
+        ],
+        "notes": null,
+        "verifiedAt": "2026-08-30"
+      },
+      "variants": []
+    },
+    {
+      "manufacturer": "DJI",
+      "model": "Mavic 3 Classic",
+      "aliases": [
+        "dji mavic 3 classic",
+        "mavic3classic",
+        "mavic 3 classic",
+        "mavic-3-classic",
+        "djimavic3classic"
+      ],
+      "eu": {
+        "classMark": null,
+        "mtomGrams": null,
+        "camera": null,
+        "remoteId": null
+      },
+      "sources": [],
+      "verifiedAt": null
+    },
+    {
+      "manufacturer": "DJI",
+      "model": "Mavic 3",
+      "aliases": [
+        "dji mavic 3",
+        "mavic3",
+        "mavic 3",
+        "mavic-3",
+        "djimavic3"
+      ],
+      "eu": {
+        "classMark": null,
+        "mtomGrams": null,
+        "camera": null,
+        "remoteId": null
+      },
+      "sources": [],
+      "verifiedAt": null
+    },
+    {
+      "manufacturer": "DJI",
+      "model": "Mavic 3 Pro",
+      "aliases": [
+        "dji mavic 3 pro",
+        "mavic3pro",
+        "mavic 3 pro",
+        "mavic-3-pro",
+        "djimavic3pro"
+      ],
+      "eu": {
+        "classMark": null,
+        "mtomGrams": null,
+        "camera": null,
+        "remoteId": null
+      },
+      "sources": [],
+      "verifiedAt": null
+    },
+    {
+      "manufacturer": "DJI",
+      "model": "Mavic 4 Pro",
+      "aliases": [
+        "dji mavic 4 pro",
+        "mavic4pro",
+        "mavic 4 pro",
+        "mavic-4-pro",
+        "djimavic4pro"
+      ],
+      "eu": {
+        "classMark": null,
+        "mtomGrams": null,
+        "camera": null,
+        "remoteId": null
+      },
+      "sources": [],
+      "verifiedAt": null
+    },
+    {
+      "manufacturer": "DJI",
+      "model": "Mavic 3E",
+      "aliases": [
+        "dji mavic 3e",
+        "mavic3e",
+        "mavic 3e",
+        "mavic 3 enterprise",
+        "dji mavic 3 enterprise",
+        "mavic-3e",
+        "djimavic3e"
+      ],
+      "eu": {
+        "classMark": null,
+        "mtomGrams": null,
+        "camera": null,
+        "remoteId": null
+      },
+      "sources": [],
+      "verifiedAt": null
+    },
+    {
+      "manufacturer": "DJI",
+      "model": "Mavic 3T",
+      "aliases": [
+        "dji mavic 3t",
+        "mavic3t",
+        "mavic 3t",
+        "mavic 3 thermal",
+        "mavic-3t",
+        "djimavic3t"
+      ],
+      "eu": {
+        "classMark": null,
+        "mtomGrams": null,
+        "camera": null,
+        "remoteId": null
+      },
+      "sources": [],
+      "verifiedAt": null
+    },
+    {
+      "manufacturer": "DJI",
+      "model": "Mavic 3TA",
+      "aliases": [
+        "dji mavic 3ta",
+        "mavic3ta",
+        "mavic 3ta",
+        "mavic-3ta",
+        "djimavic3ta"
+      ],
+      "eu": {
+        "classMark": null,
+        "mtomGrams": null,
+        "camera": null,
+        "remoteId": null
+      },
+      "sources": [],
+      "verifiedAt": null
+    },
+    {
+      "manufacturer": "DJI",
+      "model": "Mavic 3M",
+      "aliases": [
+        "dji mavic 3m",
+        "mavic3m",
+        "mavic 3m",
+        "mavic 3 multispectral",
+        "mavic-3m",
+        "djimavic3m"
+      ],
+      "eu": {
+        "classMark": null,
+        "mtomGrams": null,
+        "camera": null,
+        "remoteId": null
+      },
+      "sources": [],
+      "verifiedAt": null
+    },
+    {
+      "manufacturer": "DJI",
+      "model": "Matrice 30",
+      "aliases": [
+        "dji matrice 30",
+        "matrice30",
+        "matrice 30",
+        "m30",
+        "matrice-30",
+        "djimatrice30"
+      ],
+      "eu": {
+        "classMark": null,
+        "mtomGrams": null,
+        "camera": null,
+        "remoteId": null
+      },
+      "sources": [],
+      "verifiedAt": null
+    },
+    {
+      "manufacturer": "DJI",
+      "model": "Matrice 30T",
+      "aliases": [
+        "dji matrice 30t",
+        "matrice30t",
+        "matrice 30t",
+        "m30t",
+        "matrice-30t",
+        "djimatrice30t"
+      ],
+      "eu": {
+        "classMark": null,
+        "mtomGrams": null,
+        "camera": null,
+        "remoteId": null
+      },
+      "sources": [],
+      "verifiedAt": null
+    },
+    {
+      "manufacturer": "DJI",
+      "model": "Matrice 300 RTK",
+      "aliases": [
+        "dji matrice 300 rtk",
+        "matrice300rtk",
+        "matrice 300 rtk",
+        "m300rtk",
+        "m300 rtk",
+        "dji m300 rtk",
+        "matrice-300-rtk",
+        "djimatrice300rtk"
+      ],
+      "eu": {
+        "classMark": null,
+        "mtomGrams": null,
+        "camera": null,
+        "remoteId": null
+      },
+      "sources": [],
+      "verifiedAt": null
+    },
+    {
+      "manufacturer": "DJI",
+      "model": "Matrice 350 RTK",
+      "aliases": [
+        "dji matrice 350 rtk",
+        "matrice350rtk",
+        "matrice 350 rtk",
+        "matrice350",
+        "matrice 350",
+        "m350rtk",
+        "m350 rtk",
+        "m350",
+        "dji m350 rtk",
+        "matrice-350-rtk",
+        "djimatrice350rtk"
+      ],
+      "eu": {
+        "classMark": null,
+        "mtomGrams": null,
+        "camera": null,
+        "remoteId": null
+      },
+      "sources": [],
+      "verifiedAt": null
+    },
+    {
+      "manufacturer": "DJI",
+      "model": "Matrice 4E",
+      "aliases": [
+        "dji matrice 4e",
+        "matrice4e",
+        "matrice 4e",
+        "m4e",
+        "matrice-4e",
+        "djimatrice4e"
+      ],
+      "eu": {
+        "classMark": null,
+        "mtomGrams": null,
+        "camera": null,
+        "remoteId": null
+      },
+      "sources": [],
+      "verifiedAt": null
+    },
+    {
+      "manufacturer": "DJI",
+      "model": "Matrice 4T",
+      "aliases": [
+        "dji matrice 4t",
+        "matrice4t",
+        "matrice 4t",
+        "m4t",
+        "matrice-4t",
+        "djimatrice4t"
+      ],
+      "eu": {
+        "classMark": null,
+        "mtomGrams": null,
+        "camera": null,
+        "remoteId": null
+      },
+      "sources": [],
+      "verifiedAt": null
+    },
+    {
+      "manufacturer": "DJI",
+      "model": "Matrice 400",
+      "aliases": [
+        "dji matrice 400",
+        "matrice400",
+        "matrice 400",
+        "m400",
+        "matrice-400",
+        "djimatrice400"
+      ],
+      "eu": {
+        "classMark": null,
+        "mtomGrams": null,
+        "camera": null,
+        "remoteId": null
+      },
+      "sources": [],
+      "verifiedAt": null
+    },
+    {
+      "manufacturer": "AUTEL",
+      "model": "EVO Nano",
+      "aliases": [
+        "autel evo nano",
+        "evo nano",
+        "evonano",
+        "evo-nano",
+        "autelevonano"
+      ],
+      "eu": {
+        "classMark": null,
+        "mtomGrams": null,
+        "camera": null,
+        "remoteId": null
+      },
+      "sources": [],
+      "verifiedAt": null
+    },
+    {
+      "manufacturer": "AUTEL",
+      "model": "EVO Nano+",
+      "aliases": [
+        "autel evo nano plus",
+        "evo nano plus",
+        "evonanoplus",
+        "evo-nano-plus",
+        "autelevonanoplus"
+      ],
+      "eu": {
+        "classMark": null,
+        "mtomGrams": null,
+        "camera": null,
+        "remoteId": null
+      },
+      "sources": [],
+      "verifiedAt": null
+    },
+    {
+      "manufacturer": "AUTEL",
+      "model": "EVO Lite",
+      "aliases": [
+        "autel evo lite",
+        "evo lite",
+        "evolite",
+        "evo-lite",
+        "autelevolite"
+      ],
+      "eu": {
+        "classMark": null,
+        "mtomGrams": null,
+        "camera": null,
+        "remoteId": null
+      },
+      "sources": [],
+      "verifiedAt": null
+    },
+    {
+      "manufacturer": "AUTEL",
+      "model": "EVO Lite+",
+      "aliases": [
+        "autel evo lite plus",
+        "evo lite plus",
+        "evoliteplus",
+        "evo-lite-plus",
+        "autelevoliteplus"
+      ],
+      "eu": {
+        "classMark": null,
+        "mtomGrams": null,
+        "camera": null,
+        "remoteId": null
+      },
+      "sources": [],
+      "verifiedAt": null
+    },
+    {
+      "manufacturer": "AUTEL",
+      "model": "EVO II Pro V3",
+      "aliases": [
+        "autel evo ii pro v3",
+        "evo ii pro v3",
+        "evo2prov3",
+        "evoiiprov3",
+        "evo-ii-pro-v3",
+        "autelevoiiprov3"
+      ],
+      "eu": {
+        "classMark": null,
+        "mtomGrams": null,
+        "camera": null,
+        "remoteId": null
+      },
+      "sources": [],
+      "verifiedAt": null
+    },
+    {
+      "manufacturer": "AUTEL",
+      "model": "EVO II RTK Series V3",
+      "aliases": [
+        "autel evo ii rtk series v3",
+        "evo ii rtk series v3",
+        "evo2rtkv3",
+        "evo ii rtk v3",
+        "evoiirtkseriesv3",
+        "evo-ii-rtk-series-v3",
+        "autelevoiirtkseriesv3"
+      ],
+      "eu": {
+        "classMark": null,
+        "mtomGrams": null,
+        "camera": null,
+        "remoteId": null
+      },
+      "sources": [],
+      "verifiedAt": null
+    },
+    {
+      "manufacturer": "AUTEL",
+      "model": "EVO II Dual 640T V3",
+      "aliases": [
+        "autel evo ii dual 640t v3",
+        "evo ii dual 640t v3",
+        "evo2dual640tv3",
+        "evo ii dual v3",
+        "evoiidual640tv3",
+        "evo-ii-dual-640t-v3",
+        "autelevoiidual640tv3"
+      ],
+      "eu": {
+        "classMark": null,
+        "mtomGrams": null,
+        "camera": null,
+        "remoteId": null
+      },
+      "sources": [],
+      "verifiedAt": null
+    },
+    {
+      "manufacturer": "AUTEL",
+      "model": "EVO Max 4T",
+      "aliases": [
+        "autel evo max 4t",
+        "evo max 4t",
+        "evomax4t",
+        "evo-max-4t",
+        "autelevomax4t"
+      ],
+      "eu": {
+        "classMark": null,
+        "mtomGrams": null,
+        "camera": null,
+        "remoteId": null
+      },
+      "sources": [],
+      "verifiedAt": null
+    },
+    {
+      "manufacturer": "AUTEL",
+      "model": "EVO Max 4T V2",
+      "aliases": [
+        "autel evo max 4t v2",
+        "evo max 4t v2",
+        "evomax4tv2",
+        "evo-max-4t-v2",
+        "autelevomax4tv2"
+      ],
+      "eu": {
+        "classMark": null,
+        "mtomGrams": null,
+        "camera": null,
+        "remoteId": null
+      },
+      "sources": [],
+      "verifiedAt": null
+    },
+    {
+      "manufacturer": "AUTEL",
+      "model": "EVO Max 4N",
+      "aliases": [
+        "autel evo max 4n",
+        "evo max 4n",
+        "evomax4n",
+        "evo-max-4n",
+        "autelevomax4n"
+      ],
+      "eu": {
+        "classMark": null,
+        "mtomGrams": null,
+        "camera": null,
+        "remoteId": null
+      },
+      "sources": [],
+      "verifiedAt": null
+    },
+    {
+      "manufacturer": "DJI",
+      "model": "Avata 360",
+      "aliases": [
+        "dji avata 360",
+        "avata360",
+        "avata 360",
+        "avata-360",
+        "djiavata360"
+      ],
+      "eu": {
+        "classMark": "C1",
+        "declaredTakeoffWeightGrams": 455,
+        "declaredTakeoffWeightText": "455 g",
+        "mtomGrams": 455,
+        "mtomText": "455 g",
+        "camera": true,
+        "remoteId": null,
+        "configurationId": "eu-standard",
+        "configurationLabel": "Configurazione standard EU",
+        "sourceRefs": [
+          "dji-avata-360-downloads",
+          "dji-avata-360-store"
+        ],
+        "notes": "Dati da manuale DJI: C1 certification section; MTOM dichiarato 455 g."
+      },
+      "sources": [
+        {
+          "id": "dji-avata-360-downloads",
+          "type": "MANUFACTURER",
+          "name": "DJI Avata 360 - Downloads / User Manual",
+          "url": "https://www.dji.com/avata-360/downloads",
+          "retrievedAt": "2026-08-30"
+        },
+        {
+          "id": "dji-avata-360-store",
+          "type": "MANUFACTURER",
+          "name": "DJI Avata 360 - DJI Store",
+          "url": "https://store.dji.com/si/product/dji-avata-360?vid=214791",
+          "retrievedAt": "2026-08-30"
+        }
+      ],
+      "verifiedAt": "2026-08-30",
+      "defaultConfiguration": {
+        "id": "eu-standard",
+        "label": "Configurazione standard EU",
+        "region": "EU",
+        "classMark": "C1",
+        "declaredTakeoffWeightGrams": 455,
+        "declaredTakeoffWeightText": "455 g",
+        "mtomGrams": 455,
+        "mtomText": "455 g",
+        "camera": true,
+        "remoteId": null,
+        "sourceRefs": [
+          "dji-avata-360-downloads",
+          "dji-avata-360-store"
+        ],
+        "notes": "Dati da manuale DJI: C1 certification section; MTOM dichiarato 455 g.",
+        "verifiedAt": "2026-08-30"
+      },
+      "variants": []
+    }
+  ]
+}

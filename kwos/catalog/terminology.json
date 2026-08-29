@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "terminologyVersion": 1,
+  "updatedAt": "2026-08-29T00:00:00Z",
+  "terms": [
+    {
+      "canonical": "attestato di competenza del pilota remoto",
+      "aliases": [
+        "patentino",
+        "patentino drone",
+        "patente drone",
+        "patente per drone",
+        "licenza drone",
+        "licenza per pilotare il drone"
+      ],
+      "topics": [
+        "OPEN",
+        "A1_A3",
+        "A2"
+      ]
+    },
+    {
+      "canonical": "zona geografica UAS con limitazioni",
+      "aliases": [
+        "zona rossa",
+        "area rossa",
+        "mappa rossa",
+        "zona vietata",
+        "zona dove non posso volare",
+        "area dove non posso volare",
+        "posso volare nel rosso",
+        "come volo nel rosso",
+        "è rosso"
+      ],
+      "topics": [
+        "GEOGRAPHICAL_ZONE",
+        "CTR_ATZ",
+        "P_R_D",
+        "PARKS",
+        "NOTAM",
+        "AUTHORIZATION"
+      ]
+    },
+    {
+      "canonical": "autorizzazione al volo / procedura autorizzativa",
+      "aliases": [
+        "permesso",
+        "permesso di volo",
+        "permesso per il drone",
+        "autorizzazione",
+        "richiesta per volare",
+        "chiedere il permesso",
+        "farmi autorizzare",
+        "posso chiedere un permesso"
+      ],
+      "topics": [
+        "AUTHORIZATION",
+        "ATM05",
+        "ATM09"
+      ]
+    },
+    {
+      "canonical": "registrazione operatore UAS",
+      "aliases": [
+        "registrazione drone",
+        "registrare il drone",
+        "registrazione operatore",
+        "registrazione su d-flight",
+        "registrazione dflight",
+        "codice operatore",
+        "qr operatore",
+        "qr code drone"
+      ],
+      "topics": [
+        "OPERATOR_REGISTRATION"
+      ]
+    }
+  ]
+}
