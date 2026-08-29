@@ -62,6 +62,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Air
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -247,9 +248,12 @@ import it.droneskycheck.app.map.DscLayerCategory
 import it.droneskycheck.app.map.DscZoneMapColors
 import it.droneskycheck.app.map.DroneSkyMapView
 import it.droneskycheck.app.map.MapLayerIds
+import it.droneskycheck.app.data.ai.AiAssistantContext
+import it.droneskycheck.app.data.ai.AiAssistantLocation
 import it.droneskycheck.app.ui.authorization.AuthorizationDraftSheet
 import it.droneskycheck.app.ui.accessibility.DroneSkyCheckTextScaleProvider
 import it.droneskycheck.app.ui.accessibility.effectiveDscFontScale
+import it.droneskycheck.app.ui.assistant.AiAssistantScreen
 import it.droneskycheck.app.ui.beginner.BeginnerGuideExperienceDialog
 import it.droneskycheck.app.ui.beginner.BeginnerGuideStartupIntroDialog
 import it.droneskycheck.app.ui.help.HelpBottomSheet
@@ -318,6 +322,7 @@ fun MapScreen(
     var isPilotProfileSheetVisible by remember { mutableStateOf(false) }
     var isSettingsSheetVisible by remember { mutableStateOf(false) }
     var isMapWeatherSheetVisible by remember { mutableStateOf(false) }
+    var isAiAssistantVisible by remember { mutableStateOf(false) }
     var isSyntheticWindPocEnabled by remember { mutableStateOf(false) }
     var isLocationSearchSheetVisible by remember { mutableStateOf(false) }
     var pendingCameraFocusPoint by remember { mutableStateOf<MapPoint?>(null) }
@@ -491,6 +496,7 @@ fun MapScreen(
         !isSettingsSheetVisible &&
         !uiState.isTrafficAlertSettingsSheetVisible &&
         !uiState.isAppInfoSheetVisible &&
+        !isAiAssistantVisible &&
         uiState.selectedTrafficTarget == null &&
         !isPilotProfileSheetVisible &&
         !isDraftSheetVisible &&
@@ -511,6 +517,7 @@ fun MapScreen(
         !isSettingsSheetVisible &&
         !uiState.isTrafficAlertSettingsSheetVisible &&
         !uiState.isAppInfoSheetVisible &&
+        !isAiAssistantVisible &&
         uiState.selectedTrafficTarget == null &&
         !isPilotProfileSheetVisible &&
         !isDraftSheetVisible &&
@@ -747,6 +754,7 @@ fun MapScreen(
             },
             onTrafficSettingsClick = viewModel::onTrafficAlertSettingsRequested,
             onSettingsClick = { isSettingsSheetVisible = true },
+            onAiAssistantClick = { isAiAssistantVisible = true },
             onLocationClick = {
                 val userLocation = uiState.userLocation
                 when {
@@ -1127,6 +1135,19 @@ fun MapScreen(
                 )
             }
         }
+
+        if (isAiAssistantVisible) {
+            AiAssistantScreen(
+                context = AiAssistantContext.from(
+                    location = uiState.selectedPoint?.let { point ->
+                        AiAssistantLocation(lat = point.lat, lon = point.lon)
+                    },
+                    drone = uiState.selectedDrone
+                ),
+                onBack = { isAiAssistantVisible = false },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
     }
     }
 }
@@ -1402,6 +1423,7 @@ private fun MapControlsToolbar(
     onTrafficClick: () -> Unit,
     onTrafficSettingsClick: () -> Unit,
     onSettingsClick: () -> Unit,
+    onAiAssistantClick: () -> Unit,
     onLocationClick: () -> Unit,
     onSearchClick: () -> Unit,
     onProfileClick: () -> Unit,
@@ -1570,6 +1592,33 @@ private fun MapControlsToolbar(
             ) {
                 Icon(
                     imageVector = Icons.Default.Settings,
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        }
+
+        AnimatedVisibility(
+            visible = expanded,
+            enter = actionEnter,
+            exit = actionExit,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .offset(x = (-72).dp, y = (-136).dp)
+        ) {
+            MapActionFab(
+                label = "Assistente DSC",
+                direction = MapActionDirection.Left,
+                contentDescription = "Assistente DSC",
+                containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                onClick = {
+                    expanded = false
+                    onAiAssistantClick()
+                }
+            ) {
+                Icon(
+                    imageVector = Icons.Default.AutoAwesome,
                     contentDescription = null,
                     modifier = Modifier.size(24.dp)
                 )

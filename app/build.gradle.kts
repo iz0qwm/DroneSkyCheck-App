@@ -16,8 +16,8 @@ android {
         applicationId = "it.droneskycheck.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 28
-        versionName = "3.8"
+        versionCode = 29
+        versionName = "3.9"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
