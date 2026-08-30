@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "contentVersion": 10,
-  "updatedAt": "2026-08-19T12:35:00Z",
-  "onboardingVersion": 5,
+  "contentVersion": 11,
+  "updatedAt": "2026-08-30T00:00:00Z",
+  "onboardingVersion": 6,
   "onboarding": {
     "steps": [
       {
@@ -52,12 +52,19 @@
         "order": 6
       },
       {
+        "id": "dsc_assistant",
+        "target": "assistant_button",
+        "title": "Assistente DSC",
+        "text": "Tocca l'icona AI per chiedere chiarimenti sulla normativa UAS e sulle funzioni di Drone Sky Check.",
+        "order": 7
+      },
+      {
         "id": "profile_button",
         "target": "profile_button",
         "action": "open_profile",
         "title": "Profilo pilota e drone",
         "text": "Qui puoi configurare pilota, operatore, attestati e drone utilizzato nelle valutazioni.",
-        "order": 7
+        "order": 8
       }
     ]
   },
@@ -199,13 +206,51 @@
       ]
     },
     {
+      "id": "dsc_assistant",
+      "title": "Assistente DSC",
+      "summary": "Chiedi informazioni su normativa UAS, utilizzo di Drone Sky Check e principali dubbi operativi.",
+      "introduction": "L'Assistente DSC è un assistente specializzato nel mondo UAS e nelle funzioni di Drone Sky Check. Puoi usarlo per chiarire dubbi sulla normativa, comprendere meglio termini e procedure oppure chiedere come utilizzare le funzioni dell'app.",
+      "order": 4,
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "Puoi aprire l'Assistente DSC toccando l'icona AI presente nell'app e formulare la domanda con parole normali, come faresti con una persona esperta dell'argomento."
+        },
+        {
+          "type": "bullet_list",
+          "items": [
+            "Normativa UAS: puoi chiedere chiarimenti su categorie OPEN, classi dei droni, attestati, distanze, limitazioni e altri aspetti regolamentari.",
+            "Drone Sky Check: puoi chiedere come utilizzare le funzioni dell'app, interpretare una schermata o trovare una determinata funzione.",
+            "Terminologia: l'Assistente può aiutarti a comprendere termini aeronautici e UAS come A1/A3, A2, CTR, ATZ, NOTAM, AIP, ENR o SORA.",
+            "Fonti: quando possibile, le risposte normative riportano i riferimenti ai documenti utilizzati, così puoi verificare direttamente l'informazione."
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "L'Assistente DSC non effettua una ricerca generica su Internet per costruire le risposte normative. Utilizza una raccolta controllata e versionata di documenti e fonti selezionate per Drone Sky Check, insieme alla documentazione dell'app."
+        },
+        {
+          "type": "paragraph",
+          "text": "Puoi quindi fare domande anche in modo molto semplice, ad esempio “serve il patentino per questo drone?”, “che differenza c'è tra una zona R e una zona D?” oppure “come preparo una richiesta ATM-05?”. L'Assistente prova a interpretare la domanda e a utilizzare le fonti pertinenti."
+        },
+        {
+          "type": "note",
+          "text": "L'Assistente DSC è uno strumento di supporto e può commettere errori. Per le informazioni normative più importanti controlla sempre i riferimenti e le fonti indicate nella risposta."
+        },
+        {
+          "type": "note",
+          "text": "Per sapere se puoi volare in uno specifico punto e in uno specifico momento utilizza sempre anche il Controllo zona di Drone Sky Check. La situazione operativa può dipendere da zone geografiche, orari, NOTAM e altre informazioni che cambiano nel tempo."
+        }
+      ]
+    },
+    {
       "id": "traffic",
       "title": "Traffico aereo",
       "summary": "Visualizza gli aeromobili rilevati nell'area e individua quelli che richiedono maggiore attenzione.",
       "introduction": "La funzione Traffico aereo aumenta la consapevolezza di ciò che sta volando nelle vicinanze, mostrando sulla mappa gli aeromobili rilevati dalle sorgenti disponibili a Drone Sky Check.",
       "image": "traffic_overview.jpeg",
       "imageAlt": "Mappa di Drone Sky Check con la funzione Traffico aereo attiva e gli aeromobili rilevati nell'area",
-      "order": 4,
+      "order": 5,
       "blocks": [
         {
           "type": "paragraph",
@@ -251,7 +296,7 @@
       "introduction": "I NOTAM sono avvisi aeronautici pubblicati per comunicare condizioni o attività temporanee che possono interessare lo spazio aereo e le operazioni di volo.",
       "image": "info_notam.jpeg",
       "imageAlt": "Scheda informativa di un NOTAM interpretato da Drone Sky Check",
-      "order": 5,
+      "order": 6,
       "blocks": [
         {
           "type": "paragraph",
@@ -292,7 +337,7 @@
 	  "introduction": "L'AIP, Aeronautical Information Publication, raccoglie le informazioni aeronautiche ufficiali di carattere durevole. La sezione ENR, En-route, descrive lo spazio aereo, le rotte e numerose aree o attività che possono interessare le operazioni di volo.",
 	  "image": "info_enr_aip.png",
 	  "imageAlt": "Esempio di una zona ENR pubblicata nell'AIP Italia",
-	  "order": 6,
+	  "order": 7,
 	  "blocks": [
 		{
 		  "type": "paragraph",
@@ -344,7 +389,7 @@
       "introduction": "Quando Drone Sky Check riconosce una zona per la quale è disponibile una procedura di richiesta supportata, può guidarti nella preparazione dei dati e dei documenti necessari.",
       "image": "disegno_zona_richiesta.jpeg",
       "imageAlt": "Disegno dell'area di operazione per una richiesta di autorizzazione",
-      "order": 7,
+      "order": 8,
       "blocks": [
         {
           "type": "paragraph",
@@ -402,7 +447,7 @@
       "introduction": "Il Profilo pilota raccoglie le informazioni che Drone Sky Check può utilizzare nelle valutazioni operative e, quando supportato, nella preparazione delle richieste di autorizzazione.",
       "image": "profilo_pilota.jpeg",
       "imageAlt": "Schermata del Profilo pilota di Drone Sky Check",
-      "order": 8,
+      "order": 9,
       "blocks": [
         {
           "type": "paragraph",

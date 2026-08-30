@@ -26,6 +26,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Description
@@ -587,6 +588,7 @@ private fun topicIcon(id: String): ImageVector =
         "getting_started" -> Icons.Default.CheckCircle
         "check_area" -> Icons.Default.Map
         "weather" -> Icons.Default.Cloud
+        "dsc_assistant" -> Icons.Default.AutoAwesome
         "traffic" -> Icons.Default.Flight
         "notam" -> Icons.Default.Description
         "authorizations" -> Icons.Default.Security

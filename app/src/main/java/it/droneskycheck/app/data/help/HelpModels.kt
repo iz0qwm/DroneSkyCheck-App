@@ -38,6 +38,7 @@ enum class HelpTourTarget(val wireName: String) {
     ZONES_BUTTON("zones_button"),
     LOCATION_BUTTON("location_button"),
     TRAFFIC_BUTTON("traffic_button"),
+    ASSISTANT_BUTTON("assistant_button"),
     PROFILE_BUTTON("profile_button"),
     SELECTED_POINT_PANEL("selected_point_panel"),
     WEATHER_ACTION("weather_action"),

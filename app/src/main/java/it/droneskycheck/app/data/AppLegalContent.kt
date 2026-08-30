@@ -100,7 +100,8 @@ object AppReleaseNotes {
             "Quando è disponibile un punto selezionato, l'assistente lo usa come contesto operativo senza richiedere di reinserire le coordinate.",
             "Le risposte possono mostrare fonti consultabili, mantenendo separate le informazioni normative da quelle relative all'app.",
             "Le domande su luoghi non selezionati vengono gestite in modo prudente: l'app chiede di indicare prima il punto preciso sulla mappa.",
-            "Migliorata la distinzione tra domande fuori ambito, contesto mancante e reale indisponibilità tecnica dell'assistente."
+            "Migliorata la distinzione tra domande fuori ambito, contesto mancante e reale indisponibilità tecnica dell'assistente.",
+            "Nuova sezione della guida dedicata all'Assistente DSC e integrazione nel tour guidato."
         )
     )
 }

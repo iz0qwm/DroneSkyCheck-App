@@ -1319,6 +1319,7 @@ private fun HelpTourTarget.overlayAlignment(): Alignment =
         HelpTourTarget.ZONES_BUTTON,
         HelpTourTarget.LOCATION_BUTTON,
         HelpTourTarget.TRAFFIC_BUTTON,
+        HelpTourTarget.ASSISTANT_BUTTON,
         HelpTourTarget.PROFILE_BUTTON -> Alignment.BottomEnd
         HelpTourTarget.SELECTED_POINT_PANEL,
         HelpTourTarget.WEATHER_ACTION,
@@ -1340,6 +1341,7 @@ private fun HelpTourTarget.overlayPadding(): PaddingValues =
         HelpTourTarget.ZONES_BUTTON -> PaddingValues(bottom = 76.dp, end = 4.dp)
         HelpTourTarget.LOCATION_BUTTON -> PaddingValues(bottom = 152.dp, end = 4.dp)
         HelpTourTarget.TRAFFIC_BUTTON -> PaddingValues(bottom = 216.dp, end = 4.dp)
+        HelpTourTarget.ASSISTANT_BUTTON -> PaddingValues(bottom = 76.dp, end = 76.dp)
         HelpTourTarget.PROFILE_BUTTON -> PaddingValues(bottom = 4.dp, end = 76.dp)
         HelpTourTarget.SELECTED_POINT_PANEL,
         HelpTourTarget.WEATHER_ACTION,
@@ -1352,6 +1354,7 @@ private fun HelpTourTarget.label(): String =
         HelpTourTarget.ZONES_BUTTON -> "Zone"
         HelpTourTarget.LOCATION_BUTTON -> "Posizione"
         HelpTourTarget.TRAFFIC_BUTTON -> "Traffico"
+        HelpTourTarget.ASSISTANT_BUTTON -> "Assistente DSC"
         HelpTourTarget.PROFILE_BUTTON -> "Profilo"
         HelpTourTarget.SELECTED_POINT_PANEL -> "Punto selezionato"
         HelpTourTarget.WEATHER_ACTION -> "Opportunita"
@@ -1364,6 +1367,7 @@ private fun HelpTourTarget.icon(): ImageVector =
         HelpTourTarget.ZONES_BUTTON -> Icons.Default.Visibility
         HelpTourTarget.LOCATION_BUTTON -> Icons.Default.MyLocation
         HelpTourTarget.TRAFFIC_BUTTON -> Icons.Default.Flight
+        HelpTourTarget.ASSISTANT_BUTTON -> Icons.Default.AutoAwesome
         HelpTourTarget.PROFILE_BUTTON -> Icons.Default.Settings
         HelpTourTarget.SELECTED_POINT_PANEL -> Icons.Default.Info
         HelpTourTarget.WEATHER_ACTION -> Icons.Default.WbSunny

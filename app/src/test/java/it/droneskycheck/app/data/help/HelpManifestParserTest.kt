@@ -37,6 +37,14 @@ class HelpManifestParserTest {
     }
 
     @Test
+    fun assistantButtonTargetParsesFromManifest() {
+        val result = HelpManifestParser.parse(helpManifestJson(target = "assistant_button"))
+
+        assertEquals(HelpTourTarget.ASSISTANT_BUTTON, result.manifest?.onboardingSteps?.single()?.target)
+        assertEquals(HelpTourAction.NONE, result.manifest?.onboardingSteps?.single()?.action)
+    }
+
+    @Test
     fun unknownActionFallsBackToNoneWithWarning() {
         val result = HelpManifestParser.parse(helpManifestJson(action = "open_anything"))
 
@@ -119,6 +127,7 @@ class HelpManifestParserTest {
     @Test
     fun targetMapperHandlesKnownAndUnknownValues() {
         assertEquals(HelpTourTarget.TRAFFIC_BUTTON, HelpTourTarget.fromWireName("traffic_button"))
+        assertEquals(HelpTourTarget.ASSISTANT_BUTTON, HelpTourTarget.fromWireName("assistant_button"))
         assertEquals(HelpTourTarget.ZONES_BUTTON, HelpTourTarget.fromWireName("zones_button"))
         assertNull(HelpTourTarget.fromWireName("unknown_button"))
     }
