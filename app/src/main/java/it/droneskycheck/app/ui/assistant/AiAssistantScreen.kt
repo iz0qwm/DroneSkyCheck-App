@@ -582,10 +582,10 @@ private fun String.toQuotaCountdown(): String? {
 
 private fun AiAssistantQuota.advanceAfterCountdown(): AiAssistantQuota {
     if (unlimited || remaining >= capacity) return this
+    val secondsToRefill = refillSeconds ?: return copy(remaining = capacity, nextCreditAt = null)
     val nextRemaining = (remaining + 1).coerceAtMost(capacity)
-    val secondsToRefill = refillSeconds
     val currentNextCreditAt = nextCreditAt
-    val nextCredit = if (nextRemaining < capacity && secondsToRefill != null && currentNextCreditAt != null) {
+    val nextCredit = if (nextRemaining < capacity && currentNextCreditAt != null) {
         runCatching {
             Instant.parse(currentNextCreditAt).plusSeconds(secondsToRefill.toLong()).toString()
         }.getOrNull()
