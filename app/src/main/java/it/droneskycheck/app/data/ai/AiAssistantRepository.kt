@@ -6,21 +6,45 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.SocketTimeoutException
 import java.net.URL
+import java.util.UUID
 import org.json.JSONException
 import org.json.JSONObject
 
 interface AiAssistantClient {
+    suspend fun quota(): Result<AiAssistantQuota>
     suspend fun answer(request: AiAssistantRequest): Result<AiAssistantResponse>
 }
 
 class AiAssistantRepository(
     private val endpointUrl: String = DscApiConfig.AiAssistantAnswerUrl,
+    private val quotaEndpointUrl: String = DscApiConfig.AiAssistantQuotaUrl,
     private val apiKey: String = DscApiConfig.ApiKey,
+    private val installationIdProvider: DscAiInstallationIdProvider = RuntimeDscAiInstallationIdProvider(),
     private val httpClient: AiAssistantHttpClient = UrlConnectionAiAssistantHttpClient()
 ) : AiAssistantClient {
+    override suspend fun quota(): Result<AiAssistantQuota> =
+        runCatching {
+            val response = httpClient.get(
+                url = URL(quotaEndpointUrl),
+                apiKey = apiKey,
+                installationId = installationIdProvider.getOrCreateInstallationId()
+            )
+            if (response.statusCode !in 200..299) {
+                throw AiAssistantRepositoryError.HttpError(response.statusCode)
+            }
+            parseAiAssistantQuotaResponse(JSONObject(response.body))
+        }.onFailure { error ->
+            DscLogger.warn(
+                AiAssistantLogTag,
+                "quota request failed reason=${error.toAiAssistantDiagnosticReason()}",
+                error
+            )
+        }
+
     override suspend fun answer(request: AiAssistantRequest): Result<AiAssistantResponse> =
         runCatching {
             val startedAt = System.nanoTime()
+            val installationId = installationIdProvider.getOrCreateInstallationId()
             DscLogger.debug(
                 AiAssistantLogTag,
                 "request start endpoint=${endpointUrl.toEndpointName()} " +
@@ -30,6 +54,7 @@ class AiAssistantRepository(
             val response = httpClient.post(
                 url = URL(endpointUrl),
                 apiKey = apiKey,
+                installationId = installationId,
                 body = request.toJson().toString()
             )
             val elapsedMs = startedAt.elapsedMillis()
@@ -38,6 +63,7 @@ class AiAssistantRepository(
                 "HTTP response status=${response.statusCode} elapsedMs=$elapsedMs bodyLength=${response.body.length}"
             )
             if (response.statusCode !in 200..299) {
+                parseQuotaExhausted(response.body)?.let { throw it }
                 throw AiAssistantRepositoryError.HttpError(response.statusCode)
             }
             try {
@@ -77,7 +103,8 @@ class AiAssistantRepository(
 }
 
 interface AiAssistantHttpClient {
-    fun post(url: URL, apiKey: String, body: String): AiAssistantHttpResponse
+    fun get(url: URL, apiKey: String, installationId: String): AiAssistantHttpResponse
+    fun post(url: URL, apiKey: String, installationId: String, body: String): AiAssistantHttpResponse
 }
 
 data class AiAssistantHttpResponse(
@@ -86,7 +113,20 @@ data class AiAssistantHttpResponse(
 )
 
 class UrlConnectionAiAssistantHttpClient : AiAssistantHttpClient {
-    override fun post(url: URL, apiKey: String, body: String): AiAssistantHttpResponse {
+    override fun get(url: URL, apiKey: String, installationId: String): AiAssistantHttpResponse {
+        val connection = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = ConnectTimeoutMillis
+            readTimeout = ReadTimeoutMillis
+            setRequestProperty("Accept", "application/json")
+            setRequestProperty("x-api-key", apiKey)
+            setRequestProperty(InstallationIdHeader, installationId)
+        }
+
+        return readResponse(connection)
+    }
+
+    override fun post(url: URL, apiKey: String, installationId: String, body: String): AiAssistantHttpResponse {
         val connection = (url.openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = ConnectTimeoutMillis
@@ -95,6 +135,7 @@ class UrlConnectionAiAssistantHttpClient : AiAssistantHttpClient {
             setRequestProperty("Accept", "application/json")
             setRequestProperty("Content-Type", "application/json")
             setRequestProperty("x-api-key", apiKey)
+            setRequestProperty(InstallationIdHeader, installationId)
         }
 
         return try {
@@ -120,14 +161,36 @@ class UrlConnectionAiAssistantHttpClient : AiAssistantHttpClient {
         }
     }
 
+    private fun readResponse(connection: HttpURLConnection): AiAssistantHttpResponse =
+        try {
+            val statusCode = connection.responseCode
+            val stream = if (statusCode in 200..299) {
+                connection.inputStream
+            } else {
+                connection.errorStream
+            }
+            AiAssistantHttpResponse(
+                statusCode = statusCode,
+                body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            )
+        } catch (error: SocketTimeoutException) {
+            throw AiAssistantRepositoryError.Timeout(error.message)
+        } catch (error: IOException) {
+            throw AiAssistantRepositoryError.Network(error.message)
+        } finally {
+            connection.disconnect()
+        }
+
     private companion object {
         const val ConnectTimeoutMillis = 15_000
         const val ReadTimeoutMillis = 60_000
+        const val InstallationIdHeader = "X-DSC-Installation-ID"
     }
 }
 
 sealed class AiAssistantRepositoryError(message: String?) : Exception(message) {
     data class HttpError(val statusCode: Int) : AiAssistantRepositoryError("AI assistant HTTP $statusCode")
+    data class QuotaExhausted(val quota: AiAssistantQuota) : AiAssistantRepositoryError("AI assistant quota exhausted")
     data class Timeout(override val message: String?) : AiAssistantRepositoryError(message ?: "AI assistant timeout")
     data class Network(override val message: String?) : AiAssistantRepositoryError(message ?: "AI assistant network error")
     data class InvalidJson(override val message: String?) : AiAssistantRepositoryError(message ?: "Invalid AI assistant JSON")
@@ -135,6 +198,19 @@ sealed class AiAssistantRepositoryError(message: String?) : Exception(message) {
 }
 
 private const val AiAssistantLogTag = "DscAiAssistant"
+
+private class RuntimeDscAiInstallationIdProvider : DscAiInstallationIdProvider {
+    private val installationId: String = UUID.randomUUID().toString()
+
+    override fun getOrCreateInstallationId(): String = installationId
+}
+
+private fun parseQuotaExhausted(body: String): AiAssistantRepositoryError.QuotaExhausted? =
+    runCatching {
+        val json = JSONObject(body)
+        if (json.optString("error") != "AI_QUOTA_EXHAUSTED") return@runCatching null
+        AiAssistantRepositoryError.QuotaExhausted(parseAiAssistantQuotaResponse(json))
+    }.getOrNull()
 
 private fun AiAssistantContext.toLogSummary(): String =
     listOf(
@@ -150,6 +226,7 @@ private fun Throwable.toAiAssistantDiagnosticReason(): String =
         is AiAssistantRepositoryError.Timeout -> "TIMEOUT"
         is AiAssistantRepositoryError.Network -> "NETWORK"
         is AiAssistantRepositoryError.HttpError -> "HTTP_$statusCode"
+        is AiAssistantRepositoryError.QuotaExhausted -> "AI_QUOTA_EXHAUSTED"
         is AiAssistantRepositoryError.InvalidJson -> "JSON_PARSING"
         is AiAssistantRepositoryError.InvalidSchema -> "JSON_SCHEMA"
         else -> this::class.simpleName ?: "UNKNOWN"

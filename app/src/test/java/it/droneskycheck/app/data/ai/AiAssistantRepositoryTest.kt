@@ -227,6 +227,7 @@ class AiAssistantRepositoryTest {
             AiAssistantRepository(
                 endpointUrl = "https://example.test/appDscAiAssistantAnswer",
                 apiKey = "test-key",
+                installationIdProvider = FakeDscAiInstallationIdProvider("11111111-1111-4111-8111-111111111111"),
                 httpClient = FakeAiAssistantHttpClient(
                     error = AiAssistantRepositoryError.Network("offline")
                 )
@@ -240,6 +241,106 @@ class AiAssistantRepositoryTest {
 
         assertTrue(result.isFailure)
         assertTrue(result.exceptionOrNull() is AiAssistantRepositoryError.Network)
+    }
+
+    @Test
+    fun repositorySendsInstallationIdHeaderAndParsesQuota() {
+        val fakeHttpClient = FakeAiAssistantHttpClient(
+            response = AiAssistantHttpResponse(
+                200,
+                """
+                {
+                  "status": "ANSWER",
+                  "answer": "Risposta.",
+                  "quota": {
+                    "capacity": 5,
+                    "remaining": 4,
+                    "unlimited": false,
+                    "nextCreditAt": "2026-08-30T10:12:00Z",
+                    "refillSeconds": 720
+                  }
+                }
+                """.trimIndent()
+            )
+        )
+        val result = runBlocking {
+            AiAssistantRepository(
+                endpointUrl = "https://example.test/appDscAiAssistantAnswer",
+                apiKey = "test-key",
+                installationIdProvider = FakeDscAiInstallationIdProvider("11111111-1111-4111-8111-111111111111"),
+                httpClient = fakeHttpClient
+            ).answer(AiAssistantRequest(query = "Domanda"))
+        }
+
+        val response = result.getOrThrow()
+        assertEquals("11111111-1111-4111-8111-111111111111", fakeHttpClient.lastPostInstallationId)
+        assertEquals(5, response.quota?.capacity)
+        assertEquals(4, response.quota?.remaining)
+        assertFalse(response.quota?.unlimited ?: true)
+        assertEquals("2026-08-30T10:12:00Z", response.quota?.nextCreditAt)
+    }
+
+    @Test
+    fun repositoryParsesQuotaStatusEndpoint() {
+        val fakeHttpClient = FakeAiAssistantHttpClient(
+            getResponse = AiAssistantHttpResponse(
+                200,
+                """
+                {
+                  "quota": {
+                    "capacity": 5,
+                    "remaining": 5,
+                    "unlimited": true,
+                    "nextCreditAt": null
+                  }
+                }
+                """.trimIndent()
+            )
+        )
+        val quota = runBlocking {
+            AiAssistantRepository(
+                quotaEndpointUrl = "https://example.test/appDscAiAssistantQuota",
+                apiKey = "test-key",
+                installationIdProvider = FakeDscAiInstallationIdProvider("11111111-1111-4111-8111-111111111111"),
+                httpClient = fakeHttpClient
+            ).quota()
+        }.getOrThrow()
+
+        assertEquals("11111111-1111-4111-8111-111111111111", fakeHttpClient.lastGetInstallationId)
+        assertEquals(5, quota.remaining)
+        assertTrue(quota.unlimited)
+        assertNull(quota.nextCreditAt)
+    }
+
+    @Test
+    fun repositoryMapsQuotaExhaustedError() {
+        val result = runBlocking {
+            AiAssistantRepository(
+                endpointUrl = "https://example.test/appDscAiAssistantAnswer",
+                apiKey = "test-key",
+                installationIdProvider = FakeDscAiInstallationIdProvider("11111111-1111-4111-8111-111111111111"),
+                httpClient = FakeAiAssistantHttpClient(
+                    response = AiAssistantHttpResponse(
+                        429,
+                        """
+                        {
+                          "error": "AI_QUOTA_EXHAUSTED",
+                          "quota": {
+                            "capacity": 5,
+                            "remaining": 0,
+                            "unlimited": false,
+                            "nextCreditAt": "2026-08-30T10:12:00Z"
+                          }
+                        }
+                        """.trimIndent()
+                    )
+                )
+            ).answer(AiAssistantRequest(query = "Domanda"))
+        }
+
+        val error = result.exceptionOrNull()
+        assertTrue(error is AiAssistantRepositoryError.QuotaExhausted)
+        assertEquals(0, (error as AiAssistantRepositoryError.QuotaExhausted).quota.remaining)
     }
 
     @Test
@@ -265,10 +366,27 @@ class AiAssistantRepositoryTest {
 
 private class FakeAiAssistantHttpClient(
     private val response: AiAssistantHttpResponse? = null,
+    private val getResponse: AiAssistantHttpResponse? = null,
     private val error: AiAssistantRepositoryError? = null
 ) : AiAssistantHttpClient {
-    override fun post(url: URL, apiKey: String, body: String): AiAssistantHttpResponse {
+    var lastGetInstallationId: String? = null
+    var lastPostInstallationId: String? = null
+
+    override fun get(url: URL, apiKey: String, installationId: String): AiAssistantHttpResponse {
+        lastGetInstallationId = installationId
+        error?.let { throw it }
+        return getResponse ?: response ?: AiAssistantHttpResponse(200, "{}")
+    }
+
+    override fun post(url: URL, apiKey: String, installationId: String, body: String): AiAssistantHttpResponse {
+        lastPostInstallationId = installationId
         error?.let { throw it }
         return response ?: AiAssistantHttpResponse(200, "{}")
     }
+}
+
+private class FakeDscAiInstallationIdProvider(
+    private val installationId: String
+) : DscAiInstallationIdProvider {
+    override fun getOrCreateInstallationId(): String = installationId
 }

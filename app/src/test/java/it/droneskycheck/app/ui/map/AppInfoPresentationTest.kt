@@ -86,11 +86,13 @@ class AppInfoPresentationTest {
                     androidRelease = "15",
                     sdkInt = 35
                 ),
-                dataset = uasDatasetInfoPresentation(mapStatusMessage = null)
+                dataset = uasDatasetInfoPresentation(mapStatusMessage = null),
+                aiInstallationId = TestAiInstallationId
             )
         )
 
         assertTrue(text.contains("Versione app: 3.0-beta4 (19)"))
+        assertTrue(text.contains("ID installazione Assistente DSC: $TestAiInstallationId"))
         assertTrue(text.contains("Dati Zone UAS: Dati Zone UAS disponibili"))
         assertTrue(text.contains("Versione dataset Zone UAS: non disponibile"))
         assertTrue(text.contains("Metadata Zone UAS: Versione e date dataset non disponibili nell'app"))
@@ -110,6 +112,7 @@ class AppInfoPresentationTest {
                     sdkInt = 35
                 ),
                 dataset = uasDatasetInfoPresentation(mapStatusMessage = null),
+                aiInstallationId = TestAiInstallationId,
                 textScale = textScaleInfoPresentation(
                     systemFontScale = 1.0f,
                     largeTextEnabled = true,
@@ -121,5 +124,9 @@ class AppInfoPresentationTest {
         assertTrue(text.contains("Scala testo Android: 1.00"))
         assertTrue(text.contains("Testo piu grande DSC: Attivo"))
         assertTrue(text.contains("Scala testo effettiva DSC: 1.25"))
+    }
+
+    private companion object {
+        const val TestAiInstallationId = "11111111-1111-4111-8111-111111111111"
     }
 }

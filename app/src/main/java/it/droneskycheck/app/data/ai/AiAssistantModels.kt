@@ -75,7 +75,16 @@ data class AiAssistantResponse(
     val sources: List<AiAssistantSource> = emptyList(),
     val status: String? = null,
     val route: String? = null,
-    val mappedTextSource: String
+    val mappedTextSource: String,
+    val quota: AiAssistantQuota? = null
+)
+
+data class AiAssistantQuota(
+    val capacity: Int,
+    val remaining: Int,
+    val unlimited: Boolean,
+    val nextCreditAt: String? = null,
+    val refillSeconds: Int? = null
 )
 
 enum class AiAssistantResponseKind {
@@ -179,9 +188,13 @@ fun parseAiAssistantResponse(json: JSONObject): AiAssistantResponse {
         sources = json.collectAiSources(),
         status = status,
         route = route,
-        mappedTextSource = mapped.path
+        mappedTextSource = mapped.path,
+        quota = json.optJSONObject("quota")?.toAiAssistantQuota()
     )
 }
+
+fun parseAiAssistantQuotaResponse(json: JSONObject): AiAssistantQuota =
+    (json.optJSONObject("quota") ?: json).toAiAssistantQuota()
 
 const val AiAssistantUnavailableMessage = "L'Assistente DSC non è disponibile in questo momento. Riprova."
 const val AiAssistantSelectPointMessage = "Posso verificarlo, ma ho bisogno del punto preciso. Selezionalo sulla mappa e poi chiedimi \"Posso volare qui?\"."
@@ -199,6 +212,15 @@ fun localAiAssistantResponseFor(query: String, context: AiAssistantContext): AiA
         mappedTextSource = "local.context.location"
     )
 }
+
+private fun JSONObject.toAiAssistantQuota(): AiAssistantQuota =
+    AiAssistantQuota(
+        capacity = optInt("capacity", 5).coerceAtLeast(1),
+        remaining = optInt("remaining", 0).coerceAtLeast(0),
+        unlimited = optBoolean("unlimited", false),
+        nextCreditAt = optStringOrNull("nextCreditAt"),
+        refillSeconds = if (has("refillSeconds") && !isNull("refillSeconds")) optInt("refillSeconds") else null
+    )
 
 private fun JSONObject.toOperationalSummaryText(): String =
     listOfNotNull(

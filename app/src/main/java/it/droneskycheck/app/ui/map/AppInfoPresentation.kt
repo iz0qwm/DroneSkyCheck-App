@@ -31,6 +31,7 @@ data class UasDatasetInfoPresentation(
 data class AppInfoPresentation(
     val build: AppBuildInfoPresentation,
     val dataset: UasDatasetInfoPresentation,
+    val aiInstallationId: String,
     val textScale: TextScaleInfoPresentation? = null,
     val releaseNotes: ReleaseNotes = AppReleaseNotes.Current
 )
@@ -59,11 +60,13 @@ fun appInfoPresentation(
     context: Context,
     mapStatusMessage: String?,
     updates: UasDatasetUpdates?,
+    aiInstallationId: String,
     textScale: TextScaleInfoPresentation? = null
 ): AppInfoPresentation =
     AppInfoPresentation(
         build = context.readAppBuildInfoPresentation(),
         dataset = uasDatasetInfoPresentation(mapStatusMessage, updates),
+        aiInstallationId = aiInstallationId,
         textScale = textScale
     )
 
@@ -118,6 +121,7 @@ fun appInfoDiagnosticText(info: AppInfoPresentation): String =
         appendLine(info.build.appName)
         appendLine("Versione app: ${info.build.versionName} (${info.build.versionCode})")
         appendLine("Piattaforma: ${info.build.platform}")
+        appendLine("ID installazione Assistente DSC: ${info.aiInstallationId}")
         info.textScale?.let { textScale ->
             appendLine("Scala testo Android: ${textScale.systemFontScaleLabel}")
             appendLine("Testo piu grande DSC: ${textScale.largeTextEnabledLabel}")

@@ -30,6 +30,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -52,6 +53,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -59,31 +61,46 @@ import androidx.compose.ui.unit.dp
 import it.droneskycheck.app.data.DscLogger
 import it.droneskycheck.app.data.ai.AiAssistantClient
 import it.droneskycheck.app.data.ai.AiAssistantContext
+import it.droneskycheck.app.data.ai.AiAssistantQuota
 import it.droneskycheck.app.data.ai.AiAssistantRepository
 import it.droneskycheck.app.data.ai.AiAssistantRequest
+import it.droneskycheck.app.data.ai.AiAssistantRepositoryError
 import it.droneskycheck.app.data.ai.AiAssistantSource
 import it.droneskycheck.app.data.ai.AiAssistantSourceGroup
 import it.droneskycheck.app.data.ai.AiAssistantUnavailableMessage
+import it.droneskycheck.app.data.ai.DscAiInstallationIdRepository
 import it.droneskycheck.app.data.ai.localAiAssistantResponseFor
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.time.Duration
+import java.time.Instant
 
 @Composable
 fun AiAssistantScreen(
     context: AiAssistantContext,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
-    client: AiAssistantClient = remember { AiAssistantRepository() }
+    client: AiAssistantClient? = null
 ) {
     BackHandler(onBack = onBack)
 
+    val appContext = LocalContext.current.applicationContext
+    val assistantClient = client ?: remember(appContext) {
+        AiAssistantRepository(
+            installationIdProvider = DscAiInstallationIdRepository(appContext)
+        )
+    }
     var draft by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
+    var quota by remember { mutableStateOf<AiAssistantQuota?>(null) }
+    var quotaCountdown by remember { mutableStateOf<String?>(null) }
     var nextMessageId by remember { mutableLongStateOf(1L) }
     val messages = remember { mutableStateListOf<AiChatMessage>() }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    val canSendWithQuota = quota?.let { it.unlimited || it.remaining > 0 } != false
 
     fun addMessage(author: AiChatAuthor, text: String, sources: List<AiAssistantSource> = emptyList()) {
         messages += AiChatMessage(
@@ -97,6 +114,10 @@ fun AiAssistantScreen(
     fun submitQuestion() {
         val query = draft.trim()
         if (query.isBlank() || isLoading) return
+        if (!canSendWithQuota) {
+            addMessage(AiChatAuthor.Assistant, exhaustedQuotaMessage(quota))
+            return
+        }
 
         draft = ""
         addMessage(AiChatAuthor.User, query)
@@ -120,7 +141,7 @@ fun AiAssistantScreen(
         isLoading = true
         scope.launch {
             val result = withContext(Dispatchers.IO) {
-                client.answer(
+                assistantClient.answer(
                     AiAssistantRequest(
                         query = query,
                         includeSources = true,
@@ -131,6 +152,7 @@ fun AiAssistantScreen(
             }
             result.fold(
                 onSuccess = { response ->
+                    response.quota?.let { quota = it }
                     DscLogger.debug(
                         AiAssistantUiLogTag,
                         "UI append start kind=${response.kind} mappedTextSource=${response.mappedTextSource} " +
@@ -142,12 +164,22 @@ fun AiAssistantScreen(
                         sources = response.sources
                     )
                 },
-                onFailure = {
+                onFailure = { error ->
+                    if (error is AiAssistantRepositoryError.QuotaExhausted) {
+                        quota = error.quota
+                    }
                     DscLogger.debug(
                         AiAssistantUiLogTag,
                         "UI append start kind=Error mappedTextSource=fallback textLength=${AiAssistantUnavailableMessage.length} sources=0"
                     )
-                    addMessage(AiChatAuthor.Assistant, AiAssistantUnavailableMessage)
+                    addMessage(
+                        AiChatAuthor.Assistant,
+                        if (error is AiAssistantRepositoryError.QuotaExhausted) {
+                            exhaustedQuotaMessage(error.quota)
+                        } else {
+                            AiAssistantUnavailableMessage
+                        }
+                    )
                 }
             )
             isLoading = false
@@ -160,6 +192,25 @@ fun AiAssistantScreen(
 
     LaunchedEffect(messages.size) {
         DscLogger.debug(AiAssistantUiLogTag, "AiAssistantScreen messages=${messages.size}")
+    }
+
+    LaunchedEffect(assistantClient) {
+        val result = withContext(Dispatchers.IO) {
+            assistantClient.quota()
+        }
+        result.getOrNull()?.let { quota = it }
+    }
+
+    LaunchedEffect(quota?.nextCreditAt, quota?.remaining, quota?.unlimited) {
+        quotaCountdown = quota?.nextCreditAt?.toQuotaCountdown()
+        while (quota?.unlimited == false && quota?.nextCreditAt != null) {
+            delay(1_000)
+            val next = quota?.nextCreditAt
+            quotaCountdown = next?.toQuotaCountdown()
+            if (quotaCountdown == null) {
+                quota = quota?.advanceAfterCountdown()
+            }
+        }
     }
 
     LaunchedEffect(messages.size, isLoading) {
@@ -181,7 +232,7 @@ fun AiAssistantScreen(
                 .windowInsetsPadding(WindowInsets.safeDrawing)
                 .imePadding()
         ) {
-            AiAssistantTopBar(onBack = onBack)
+            AiAssistantTopBar(onBack = onBack, quota = quota, quotaCountdown = quotaCountdown)
             HorizontalDivider()
             LazyColumn(
                 modifier = Modifier
@@ -223,7 +274,7 @@ fun AiAssistantScreen(
                 )
                 Button(
                     onClick = { submitQuestion() },
-                    enabled = draft.isNotBlank() && !isLoading,
+                    enabled = draft.isNotBlank() && !isLoading && canSendWithQuota,
                     shape = CircleShape,
                     modifier = Modifier.size(52.dp),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
@@ -239,7 +290,11 @@ fun AiAssistantScreen(
 }
 
 @Composable
-private fun AiAssistantTopBar(onBack: () -> Unit) {
+private fun AiAssistantTopBar(
+    onBack: () -> Unit,
+    quota: AiAssistantQuota?,
+    quotaCountdown: String?
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -284,8 +339,26 @@ private fun AiAssistantTopBar(onBack: () -> Unit) {
                     )
                 }
             }
+            AiQuotaIndicator(quota = quota, quotaCountdown = quotaCountdown)
         }
     }
+}
+
+@Composable
+private fun AiQuotaIndicator(quota: AiAssistantQuota?, quotaCountdown: String?) {
+    val text = when {
+        quota == null -> "Quote AI in verifica"
+        quota.unlimited -> "Modalità test · utilizzo AI illimitato"
+        quota.remaining <= 0 && quotaCountdown != null -> "Crediti 0/${quota.capacity} · prossimo tra $quotaCountdown"
+        else -> "Crediti ${quota.remaining}/${quota.capacity}"
+    }
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis
+    )
 }
 
 @Composable
@@ -308,6 +381,27 @@ private fun AiAssistantIntro() {
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            Text(
+                text = "Funzione sperimentale: verifica sempre le fonti ufficiali prima di volare.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.Top
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Info,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = "L'Assistente DSC utilizza servizi di intelligenza artificiale. Per mantenere il servizio disponibile a tutti, il numero di richieste è limitato e si rigenera automaticamente nel tempo.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }
@@ -438,6 +532,44 @@ private fun AiAssistantSourceGroup.toDisplayLabel(): String =
         AiAssistantSourceGroup.Regulatory -> "Normativa"
         AiAssistantSourceGroup.Product -> "Drone Sky Check"
     }
+
+private fun exhaustedQuotaMessage(quota: AiAssistantQuota?): String {
+    val countdown = quota?.nextCreditAt?.toQuotaCountdown()
+    return if (countdown != null) {
+        "Hai esaurito i crediti dell'Assistente DSC. Potrai inviare una nuova domanda tra $countdown."
+    } else {
+        "Hai esaurito i crediti dell'Assistente DSC. Riprova tra qualche minuto."
+    }
+}
+
+private fun String.toQuotaCountdown(): String? {
+    val seconds = runCatching {
+        Duration.between(Instant.now(), Instant.parse(this)).seconds
+    }.getOrNull() ?: return null
+    if (seconds <= 0) return null
+    val minutes = seconds / 60
+    val remainingSeconds = seconds % 60
+    return if (minutes > 0) {
+        "${minutes}m ${remainingSeconds}s"
+    } else {
+        "${remainingSeconds}s"
+    }
+}
+
+private fun AiAssistantQuota.advanceAfterCountdown(): AiAssistantQuota {
+    if (unlimited || remaining >= capacity) return this
+    val nextRemaining = (remaining + 1).coerceAtMost(capacity)
+    val secondsToRefill = refillSeconds
+    val currentNextCreditAt = nextCreditAt
+    val nextCredit = if (nextRemaining < capacity && secondsToRefill != null && currentNextCreditAt != null) {
+        runCatching {
+            Instant.parse(currentNextCreditAt).plusSeconds(secondsToRefill.toLong()).toString()
+        }.getOrNull()
+    } else {
+        null
+    }
+    return copy(remaining = nextRemaining, nextCreditAt = nextCredit)
+}
 
 private data class AiChatMessage(
     val id: Long,

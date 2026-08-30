@@ -250,6 +250,7 @@ import it.droneskycheck.app.map.DroneSkyMapView
 import it.droneskycheck.app.map.MapLayerIds
 import it.droneskycheck.app.data.ai.AiAssistantContext
 import it.droneskycheck.app.data.ai.AiAssistantLocation
+import it.droneskycheck.app.data.ai.DscAiInstallationIdRepository
 import it.droneskycheck.app.ui.authorization.AuthorizationDraftSheet
 import it.droneskycheck.app.ui.accessibility.DroneSkyCheckTextScaleProvider
 import it.droneskycheck.app.ui.accessibility.effectiveDscFontScale
@@ -348,18 +349,26 @@ fun MapScreen(
         targets = uiState.trafficAwareness.response?.traffic?.targets.orEmpty(),
         assessments = uiState.trafficAssessments
     )
+    val aiInstallationIdRepository = remember(context) {
+        DscAiInstallationIdRepository(context.applicationContext)
+    }
+    val aiInstallationId = remember(aiInstallationIdRepository) {
+        aiInstallationIdRepository.getOrCreateInstallationId()
+    }
     val appInfo = remember(
         context,
         uiState.mapStatusMessage,
         uiState.uasDatasetUpdates,
         systemFontScale,
         uiState.isLargeTextEnabled,
-        effectiveFontScale
+        effectiveFontScale,
+        aiInstallationId
     ) {
         appInfoPresentation(
             context = context.applicationContext,
             mapStatusMessage = uiState.mapStatusMessage,
             updates = uiState.uasDatasetUpdates,
+            aiInstallationId = aiInstallationId,
             textScale = textScaleInfoPresentation(
                 systemFontScale = systemFontScale,
                 largeTextEnabled = uiState.isLargeTextEnabled,
@@ -1117,6 +1126,9 @@ fun MapScreen(
                     isHelpSheetVisible = true
                 },
                 onOpenWebApp = { openExternalUrl(context, AppExternalLinks.WebMapUrl) },
+                onCopyAiInstallationId = {
+                    copyAiInstallationIdToClipboard(context, appInfo.aiInstallationId)
+                },
                 onCopy = {
                     copyAppInfoToClipboard(context, appInfo)
                 },
@@ -3054,6 +3066,7 @@ private fun AppInfoBottomSheet(
     onRefreshUasDataset: () -> Unit,
     onOpenHelp: () -> Unit,
     onOpenWebApp: () -> Unit,
+    onCopyAiInstallationId: () -> Unit,
     onCopy: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -3098,6 +3111,10 @@ private fun AppInfoBottomSheet(
                 AppInfoRow("Versione", "${info.build.versionName} (${info.build.versionCode})")
                 AppInfoRow("Piattaforma", info.build.platform)
                 AppInfoRow("Tipo", "App Android nativa")
+                AppInfoRow("ID installazione Assistente DSC", info.aiInstallationId)
+                TextButton(onClick = onCopyAiInstallationId) {
+                    Text("Copia ID Assistente DSC")
+                }
             }
 
             AppInfoExpandableSection(
@@ -8657,6 +8674,14 @@ private fun copyAppInfoToClipboard(context: Context, info: AppInfoPresentation) 
         ClipData.newPlainText("Drone Sky Check app info", appInfoDiagnosticText(info))
     )
     Toast.makeText(context, "Informazioni copiate negli appunti", Toast.LENGTH_SHORT).show()
+}
+
+private fun copyAiInstallationIdToClipboard(context: Context, installationId: String) {
+    val clipboard = ContextCompat.getSystemService(context, ClipboardManager::class.java) ?: return
+    clipboard.setPrimaryClip(
+        ClipData.newPlainText("Drone Sky Check AI installation ID", installationId)
+    )
+    Toast.makeText(context, "ID Assistente DSC copiato", Toast.LENGTH_SHORT).show()
 }
 
 private class MapViewModelFactory(
