@@ -313,6 +313,32 @@ class AiAssistantRepositoryTest {
     }
 
     @Test
+    fun parserDoesNotShowInternalInsufficientEvidenceSentinel() {
+        val response = parseAiAssistantResponse(
+            JSONObject(
+                """
+                {
+                  "status": "BOTH",
+                  "regulatoryAnswer": {
+                    "answer": "Per metterti in regola parti da modello, classe, peso e punto di volo."
+                  },
+                  "productAnswer": {
+                    "status": "INSUFFICIENT_EVIDENCE",
+                    "answer": "INSUFFICIENT_EVIDENCE"
+                  }
+                }
+                """.trimIndent()
+            )
+        )
+
+        assertEquals(AiAssistantResponseKind.Both, response.kind)
+        assertTrue(response.displayText.contains("Normativa"))
+        assertTrue(response.displayText.contains("Per metterti in regola"))
+        assertFalse(response.displayText.contains("INSUFFICIENT_EVIDENCE"))
+        assertFalse(response.displayText.contains("Drone Sky Check"))
+    }
+
+    @Test
     fun repositoryMapsQuotaExhaustedError() {
         val result = runBlocking {
             AiAssistantRepository(

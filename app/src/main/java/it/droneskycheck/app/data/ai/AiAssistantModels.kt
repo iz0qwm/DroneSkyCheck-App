@@ -236,7 +236,7 @@ private data class MappedAiText(
 )
 
 private fun mappedText(value: String?, path: String): MappedAiText? =
-    value?.takeIf(String::isNotBlank)?.let { MappedAiText(it, path) }
+    value?.takeIf(String::isNotBlank)?.takeUnless(::isInternalAiSentinel)?.let { MappedAiText(it, path) }
 
 private fun fallbackMappedText(): MappedAiText =
     MappedAiText(AiAssistantUnavailableMessage, "fallback")
@@ -250,8 +250,8 @@ private fun bothAnswerText(
     regulatoryAnswer: JSONObject?,
     productAnswer: JSONObject?
 ): MappedAiText {
-    val regulatory = regulatoryAnswer?.optStringOrNull("answer")
-    val product = productAnswer?.optStringOrNull("answer")
+    val regulatory = regulatoryAnswer?.optStringOrNull("answer")?.takeUnless(::isInternalAiSentinel)
+    val product = productAnswer?.optStringOrNull("answer")?.takeUnless(::isInternalAiSentinel)
     val sections = listOfNotNull(
         regulatory?.let { "Normativa\n\n$it" },
         product?.let { "Drone Sky Check\n\n$it" }
@@ -310,6 +310,12 @@ private fun JSONObject.optStringOrNull(name: String): String? {
     if (!has(name) || isNull(name)) return null
     return opt(name)?.toString()?.trim()?.takeIf { it.isNotBlank() && it != "null" }
 }
+
+private fun isInternalAiSentinel(value: String): Boolean =
+    when (value.trim().uppercase()) {
+        "INSUFFICIENT_EVIDENCE", "NO_EVIDENCE", "NOT_APPLICABLE", "UNKNOWN" -> true
+        else -> false
+    }
 
 fun JSONObject.toAiAssistantShapeLogSummary(): String {
     val regulatoryAnswer = optJSONObject("regulatoryAnswer")

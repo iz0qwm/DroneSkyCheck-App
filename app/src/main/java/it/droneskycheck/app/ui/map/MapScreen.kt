@@ -1616,7 +1616,7 @@ private fun MapControlsToolbar(
             exit = actionExit,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .offset(x = (-72).dp, y = (-136).dp)
+                .offset(x = (-72).dp, y = (-72).dp)
         ) {
             MapActionFab(
                 label = "Assistente DSC",
