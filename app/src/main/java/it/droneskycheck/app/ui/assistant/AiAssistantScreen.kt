@@ -95,6 +95,7 @@ fun AiAssistantScreen(
     var draft by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
     var quota by remember { mutableStateOf<AiAssistantQuota?>(null) }
+    var quotaStatusUnavailable by remember { mutableStateOf(false) }
     var quotaCountdown by remember { mutableStateOf<String?>(null) }
     var nextMessageId by remember { mutableLongStateOf(1L) }
     val messages = remember { mutableStateListOf<AiChatMessage>() }
@@ -198,7 +199,15 @@ fun AiAssistantScreen(
         val result = withContext(Dispatchers.IO) {
             assistantClient.quota()
         }
-        result.getOrNull()?.let { quota = it }
+        result.fold(
+            onSuccess = {
+                quota = it
+                quotaStatusUnavailable = false
+            },
+            onFailure = {
+                quotaStatusUnavailable = true
+            }
+        )
     }
 
     LaunchedEffect(quota?.nextCreditAt, quota?.remaining, quota?.unlimited) {
@@ -232,7 +241,12 @@ fun AiAssistantScreen(
                 .windowInsetsPadding(WindowInsets.safeDrawing)
                 .imePadding()
         ) {
-            AiAssistantTopBar(onBack = onBack, quota = quota, quotaCountdown = quotaCountdown)
+            AiAssistantTopBar(
+                onBack = onBack,
+                quota = quota,
+                quotaCountdown = quotaCountdown,
+                quotaStatusUnavailable = quotaStatusUnavailable
+            )
             HorizontalDivider()
             LazyColumn(
                 modifier = Modifier
@@ -293,7 +307,8 @@ fun AiAssistantScreen(
 private fun AiAssistantTopBar(
     onBack: () -> Unit,
     quota: AiAssistantQuota?,
-    quotaCountdown: String?
+    quotaCountdown: String?,
+    quotaStatusUnavailable: Boolean
 ) {
     Row(
         modifier = Modifier
@@ -339,14 +354,23 @@ private fun AiAssistantTopBar(
                     )
                 }
             }
-            AiQuotaIndicator(quota = quota, quotaCountdown = quotaCountdown)
+            AiQuotaIndicator(
+                quota = quota,
+                quotaCountdown = quotaCountdown,
+                quotaStatusUnavailable = quotaStatusUnavailable
+            )
         }
     }
 }
 
 @Composable
-private fun AiQuotaIndicator(quota: AiAssistantQuota?, quotaCountdown: String?) {
+private fun AiQuotaIndicator(
+    quota: AiAssistantQuota?,
+    quotaCountdown: String?,
+    quotaStatusUnavailable: Boolean
+) {
     val text = when {
+        quota == null && quotaStatusUnavailable -> "Crediti AI non disponibili"
         quota == null -> "Quote AI in verifica"
         quota.unlimited -> "Modalità test · utilizzo AI illimitato"
         quota.remaining <= 0 && quotaCountdown != null -> "Crediti 0/${quota.capacity} · prossimo tra $quotaCountdown"

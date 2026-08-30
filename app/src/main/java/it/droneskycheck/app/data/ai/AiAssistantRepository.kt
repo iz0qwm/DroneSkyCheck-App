@@ -34,11 +34,12 @@ class AiAssistantRepository(
             }
             parseAiAssistantQuotaResponse(JSONObject(response.body))
         }.onFailure { error ->
-            DscLogger.warn(
-                AiAssistantLogTag,
-                "quota request failed reason=${error.toAiAssistantDiagnosticReason()}",
-                error
-            )
+            val message = "quota request failed reason=${error.toAiAssistantDiagnosticReason()}"
+            if (error is AiAssistantRepositoryError.HttpError && error.statusCode in setOf(404, 405)) {
+                DscLogger.debug(AiAssistantLogTag, message)
+            } else {
+                DscLogger.warn(AiAssistantLogTag, message, error)
+            }
         }
 
     override suspend fun answer(request: AiAssistantRequest): Result<AiAssistantResponse> =
