@@ -39,6 +39,99 @@ class AiAssistantRepositoryTest {
         assertEquals(724.0, context.getDouble("massGrams"), 0.0)
         assertFalse(context.has("cameraPresent"))
         assertFalse(context.has("isToy"))
+        assertFalse(context.has("lastOperationalContext"))
+    }
+
+    @Test
+    fun requestIncludesLastOperationalContextForTemporalFollowUp() {
+        val operationalContext = AiAssistantOperationalContext(
+            location = AiAssistantLocation(lat = 42.583333, lon = 11.333333),
+            evaluatedAt = "2026-09-01T16:27:34Z",
+            verdict = "AVAILABLE",
+            maxAltitudeM = 120.0,
+            authorizationRequired = false,
+            contributors = listOf(
+                AiAssistantOperationalContributor(
+                    id = "NOTAM:W1876/26",
+                    sourceType = "NOTAM",
+                    designator = "W1876/26",
+                    name = "NOTAM W1876/26",
+                    activeNow = false,
+                    operationalStatus = "INACTIVE",
+                    maxAltitudeM = 0.0
+                )
+            )
+        )
+
+        val context = AiAssistantContext(
+            location = operationalContext.location,
+            lastOperationalContext = operationalContext
+        ).toJson()
+
+        val serialized = context.getJSONObject("lastOperationalContext")
+        assertEquals(1, serialized.getInt("version"))
+        assertEquals("W1876/26", serialized.getJSONArray("contributors").getJSONObject(0).getString("designator"))
+        assertEquals("NOTAM", serialized.getJSONArray("contributors").getJSONObject(0).getString("sourceType"))
+    }
+
+    @Test
+    fun parsesOperationalContextWithNotamForNextQuestion() {
+        val response = parseAiAssistantResponse(
+            JSONObject(
+                """
+                {
+                  "status": "OPERATIONAL_ANSWER",
+                  "route": "DSC_OPERATIONAL_REQUIRED",
+                  "operationalAnswer": {
+                    "zoneCheckV3Succeeded": true,
+                    "location": {"lat": 42.583333, "lon": 11.333333},
+                    "evaluatedAt": "2026-09-01T16:27:34Z",
+                    "verdict": "AVAILABLE",
+                    "maxAltitudeM": 120,
+                    "authorizationRequired": false,
+                    "responsibleZone": null,
+                    "zones": [
+                      {
+                        "id": "ZONE:W1876",
+                        "name": "NOTAM W1876/26",
+                        "family": "NOTAM",
+                        "activeNow": false,
+                        "notams": [
+                          {
+                            "code": "W1876/26",
+                            "zoneName": "NOTAM W1876/26",
+                            "activeNow": false,
+                            "validity": {
+                              "validFrom": "2026-09-05T04:44:54.826Z",
+                              "validTo": "2026-09-06T17:43:18.968Z"
+                            },
+                            "schedule": {"raw": "SEP 05-06 SR-SS", "human": "alba-tramonto"}
+                          }
+                        ]
+                      }
+                    ],
+                    "notams": [
+                      {
+                        "code": "W1876/26",
+                        "zoneName": "NOTAM W1876/26",
+                        "activeNow": false
+                      }
+                    ]
+                  },
+                  "operationalSummary": {
+                    "headline": "Puoi volare fino a 120 m AGL.",
+                    "summary": "Il NOTAM non è attivo ora.",
+                    "details": []
+                  }
+                }
+                """.trimIndent()
+            )
+        )
+
+        val operationalContext = response.operationalContext
+        assertEquals(1, operationalContext?.contributors?.count { it.sourceType == "NOTAM" })
+        assertEquals("W1876/26", operationalContext?.contributors?.first { it.sourceType == "NOTAM" }?.designator)
+        assertEquals(false, operationalContext?.contributors?.first { it.sourceType == "NOTAM" }?.activeNow)
     }
 
     @Test

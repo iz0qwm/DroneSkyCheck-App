@@ -1,6 +1,7 @@
 package it.droneskycheck.app.data.ai
 
 import it.droneskycheck.app.data.LocalDrone
+import java.time.Instant
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -9,12 +10,82 @@ data class AiAssistantLocation(
     val lon: Double
 )
 
+data class AiAssistantOperationalTemporal(
+    val validFrom: String? = null,
+    val validTo: String? = null,
+    val schedule: String? = null,
+    val interpretedSchedule: String? = null
+) {
+    fun toJson(): JSONObject = JSONObject().apply {
+        validFrom?.let { put("validFrom", it) }
+        validTo?.let { put("validTo", it) }
+        schedule?.let { put("schedule", it) }
+        interpretedSchedule?.let { put("interpretedSchedule", it) }
+    }
+}
+
+data class AiAssistantOperationalContributor(
+    val id: String,
+    val sourceType: String,
+    val designator: String,
+    val name: String,
+    val family: String? = null,
+    val type: String? = null,
+    val activeNow: Boolean? = null,
+    val operationalStatus: String? = null,
+    val maxAltitudeM: Double? = null,
+    val temporal: AiAssistantOperationalTemporal? = null
+) {
+    fun toJson(): JSONObject = JSONObject()
+        .put("id", id)
+        .put("sourceType", sourceType)
+        .put("designator", designator)
+        .put("name", name)
+        .apply {
+            family?.let { put("family", it) }
+            type?.let { put("type", it) }
+            activeNow?.let { put("activeNow", it) }
+            operationalStatus?.let { put("operationalStatus", it) }
+            maxAltitudeM?.let { put("maxAltitudeM", it) }
+            temporal?.let { put("temporal", it.toJson()) }
+        }
+}
+
+data class AiAssistantOperationalContext(
+    val location: AiAssistantLocation,
+    val evaluatedAt: String,
+    val verdict: String? = null,
+    val maxAltitudeM: Double? = null,
+    val authorizationRequired: Boolean? = null,
+    val responsibleContributorId: String? = null,
+    val contributors: List<AiAssistantOperationalContributor> = emptyList(),
+    val version: Int = 1
+) {
+    fun toJson(): JSONObject = JSONObject()
+        .put("version", version)
+        .put(
+            "location",
+            JSONObject()
+                .put("lat", location.lat)
+                .put("lon", location.lon)
+        )
+        .put("evaluatedAt", evaluatedAt)
+        .put("contributors", JSONArray().apply { contributors.forEach { put(it.toJson()) } })
+        .apply {
+            verdict?.let { put("verdict", it) }
+            maxAltitudeM?.let { put("maxAltitudeM", it) }
+            authorizationRequired?.let { put("authorizationRequired", it) }
+            responsibleContributorId?.let { put("responsibleContributorId", it) }
+        }
+}
+
 data class AiAssistantContext(
     val location: AiAssistantLocation? = null,
     val aircraftModel: String? = null,
     val classMark: String? = null,
     val massGrams: Double? = null,
-    val cameraPresent: Boolean? = null
+    val cameraPresent: Boolean? = null,
+    val lastOperationalContext: AiAssistantOperationalContext? = null
 ) {
     fun toJson(): JSONObject =
         JSONObject().apply {
@@ -30,10 +101,15 @@ data class AiAssistantContext(
             classMark?.let { put("classMark", it) }
             massGrams?.let { put("massGrams", it) }
             cameraPresent?.let { put("cameraPresent", it) }
+            lastOperationalContext?.let { put("lastOperationalContext", it.toJson()) }
         }
 
     companion object {
-        fun from(location: AiAssistantLocation?, drone: LocalDrone?): AiAssistantContext {
+        fun from(
+            location: AiAssistantLocation?,
+            drone: LocalDrone?,
+            lastOperationalContext: AiAssistantOperationalContext? = null
+        ): AiAssistantContext {
             val aircraftModel = drone?.let {
                 listOf(it.manufacturer, it.model)
                     .map(String::trim)
@@ -49,7 +125,8 @@ data class AiAssistantContext(
                 aircraftModel = aircraftModel,
                 classMark = classMark,
                 massGrams = massGrams,
-                cameraPresent = cameraPresent
+                cameraPresent = cameraPresent,
+                lastOperationalContext = lastOperationalContext
             )
         }
     }
@@ -76,7 +153,8 @@ data class AiAssistantResponse(
     val status: String? = null,
     val route: String? = null,
     val mappedTextSource: String,
-    val quota: AiAssistantQuota? = null
+    val quota: AiAssistantQuota? = null,
+    val operationalContext: AiAssistantOperationalContext? = null
 )
 
 data class AiAssistantQuota(
@@ -189,7 +267,8 @@ fun parseAiAssistantResponse(json: JSONObject): AiAssistantResponse {
         status = status,
         route = route,
         mappedTextSource = mapped.path,
-        quota = json.optJSONObject("quota")?.toAiAssistantQuota()
+        quota = json.optJSONObject("quota")?.toAiAssistantQuota(),
+        operationalContext = json.toOperationalContext()
     )
 }
 
@@ -221,6 +300,146 @@ private fun JSONObject.toAiAssistantQuota(): AiAssistantQuota =
         nextCreditAt = optStringOrNull("nextCreditAt"),
         refillSeconds = if (has("refillSeconds") && !isNull("refillSeconds")) optInt("refillSeconds") else null
     )
+
+private fun JSONObject.toOperationalContext(): AiAssistantOperationalContext? {
+    if (optBoolean("operationalTemporal", false)) return null
+    val operational = optJSONObject("operationalAnswer") ?: return null
+    if (!operational.optBoolean("zoneCheckV3Succeeded", false)) return null
+    val locationJson = operational.optJSONObject("location") ?: return null
+    val lat = locationJson.optFiniteDouble("lat") ?: return null
+    val lon = locationJson.optFiniteDouble("lon") ?: return null
+    if (lat !in -90.0..90.0 || lon !in -180.0..180.0) return null
+
+    val contributors = operational.compactOperationalContributors()
+    val responsible = operational.optJSONObject("responsibleZone")
+    val responsibleId = responsible?.optStringOrNull("id") ?: responsible?.optStringOrNull("zoneId")
+    val responsibleName = responsible?.optStringOrNull("name") ?: responsible?.optStringOrNull("zoneName")
+    val responsibleContributor = contributors.firstOrNull { contributor ->
+        responsibleId != null && contributor.id == responsibleId ||
+            responsibleName != null && (contributor.name == responsibleName || contributor.designator == responsibleName)
+    }
+
+    return AiAssistantOperationalContext(
+        location = AiAssistantLocation(lat = lat, lon = lon),
+        evaluatedAt = operational.optStringOrNull("evaluatedAt") ?: Instant.now().toString(),
+        verdict = operational.optStringOrNull("verdict"),
+        maxAltitudeM = operational.optFiniteDouble("maxAltitudeM"),
+        authorizationRequired = operational.optBooleanOrNull("authorizationRequired"),
+        responsibleContributorId = responsibleContributor?.id ?: responsibleId,
+        contributors = contributors
+    )
+}
+
+private fun JSONObject.compactOperationalContributors(): List<AiAssistantOperationalContributor> {
+    val values = mutableListOf<AiAssistantOperationalContributor>()
+    optJSONArray("notams").forEachObject { notam ->
+        notam.toNotamContributor()?.let(values::add)
+    }
+    optJSONArray("zones").forEachObject { zone ->
+        zone.toZoneContributor()?.let(values::add)
+        zone.optJSONArray("notams").forEachObject { notam ->
+            notam.toNotamContributor()?.let(values::add)
+        }
+    }
+
+    val seen = mutableSetOf<String>()
+    val compact = mutableListOf<AiAssistantOperationalContributor>()
+    var serializedLength = 0
+    values.forEach { contributor ->
+        val key = "${contributor.sourceType}|${contributor.id}|${contributor.designator}".uppercase()
+        if (!seen.add(key)) return@forEach
+        compact += contributor
+        serializedLength += contributor.toJson().toString().length
+        if (serializedLength >= MaxOperationalContextCharacters) return compact
+    }
+    return compact
+}
+
+private fun JSONObject.toNotamContributor(): AiAssistantOperationalContributor? {
+    val designator = optStringOrNull("code")?.take(MaxOperationalDesignatorCharacters) ?: return null
+    val activeNow = optBooleanOrNull("activeNow")
+    val zoneName = optStringOrNull("zoneName")?.take(MaxOperationalNameCharacters)
+    val validity = optJSONObject("validity")
+    val scheduleJson = optJSONObject("schedule")
+    return AiAssistantOperationalContributor(
+        id = "NOTAM:${designator.uppercase().replace(WhitespaceRegex, "")}",
+        sourceType = "NOTAM",
+        designator = designator,
+        name = zoneName ?: "NOTAM $designator",
+        activeNow = activeNow,
+        operationalStatus = activeNow?.let { if (it) "ACTIVE" else "INACTIVE" },
+        maxAltitudeM = optFiniteDouble("maxAltitudeM") ?: 0.0,
+        temporal = operationalTemporal(
+            validity = validity,
+            schedule = scheduleJson?.optStringOrNull("raw") ?: validity?.optStringOrNull("schedule"),
+            interpretedSchedule = scheduleJson?.optStringOrNull("human")
+                ?: validity?.optStringOrNull("interpretedSchedule")
+        )
+    )
+}
+
+private fun JSONObject.toZoneContributor(): AiAssistantOperationalContributor? {
+    val name = optStringOrNull("name")?.take(MaxOperationalNameCharacters)
+    val id = optStringOrNull("id")?.take(MaxOperationalNameCharacters)
+    if (name == null && id == null) return null
+    val family = optStringOrNull("family")?.take(MaxOperationalTypeCharacters)
+    val type = optStringOrNull("type")?.take(MaxOperationalTypeCharacters)
+    val operationalStatus = optStringOrNull("operationalStatus")?.take(MaxOperationalTypeCharacters)
+    val sourceText = listOfNotNull(family, type, operationalStatus).joinToString(" ")
+    val sourceType = if (
+        EnrDesignatorRegex.containsMatchIn(name.orEmpty()) || sourceText.contains("ENR", ignoreCase = true)
+    ) {
+        "ENR"
+    } else {
+        "ZONE"
+    }
+    val designator = name ?: id ?: return null
+    return AiAssistantOperationalContributor(
+        id = id ?: "$sourceType:$designator",
+        sourceType = sourceType,
+        designator = designator,
+        name = designator,
+        family = family,
+        type = type,
+        activeNow = optBooleanOrNull("activeNow"),
+        operationalStatus = operationalStatus,
+        maxAltitudeM = optFiniteDouble("limitMetersAgl"),
+        temporal = operationalTemporal(optJSONObject("validity"))
+    )
+}
+
+private fun operationalTemporal(
+    validity: JSONObject?,
+    schedule: String? = validity?.optStringOrNull("schedule"),
+    interpretedSchedule: String? = validity?.optStringOrNull("interpretedSchedule")
+): AiAssistantOperationalTemporal? {
+    val temporal = AiAssistantOperationalTemporal(
+        validFrom = validity?.optStringOrNull("validFrom")?.take(MaxOperationalInstantCharacters),
+        validTo = validity?.optStringOrNull("validTo")?.take(MaxOperationalInstantCharacters),
+        schedule = schedule?.take(MaxOperationalScheduleCharacters),
+        interpretedSchedule = interpretedSchedule?.take(MaxOperationalScheduleCharacters)
+    )
+    return temporal.takeIf {
+        listOf(it.validFrom, it.validTo, it.schedule, it.interpretedSchedule).any { value -> !value.isNullOrBlank() }
+    }
+}
+
+private inline fun JSONArray?.forEachObject(block: (JSONObject) -> Unit) {
+    val array = this ?: return
+    for (index in 0 until array.length()) {
+        array.optJSONObject(index)?.let(block)
+    }
+}
+
+private fun JSONObject.optFiniteDouble(name: String): Double? {
+    if (!has(name) || isNull(name)) return null
+    return (opt(name) as? Number)?.toDouble()?.takeIf(Double::isFinite)
+}
+
+private fun JSONObject.optBooleanOrNull(name: String): Boolean? {
+    if (!has(name) || isNull(name) || opt(name) !is Boolean) return null
+    return optBoolean(name)
+}
 
 private fun JSONObject.toOperationalSummaryText(): String =
     listOfNotNull(
@@ -310,6 +529,15 @@ private fun JSONObject.optStringOrNull(name: String): String? {
     if (!has(name) || isNull(name)) return null
     return opt(name)?.toString()?.trim()?.takeIf { it.isNotBlank() && it != "null" }
 }
+
+private const val MaxOperationalContextCharacters = 12_000
+private const val MaxOperationalDesignatorCharacters = 80
+private const val MaxOperationalNameCharacters = 180
+private const val MaxOperationalTypeCharacters = 100
+private const val MaxOperationalInstantCharacters = 80
+private const val MaxOperationalScheduleCharacters = 500
+private val WhitespaceRegex = Regex("\\s+")
+private val EnrDesignatorRegex = Regex("^LI\\s*[PRD]\\s*\\d", RegexOption.IGNORE_CASE)
 
 private fun isInternalAiSentinel(value: String): Boolean =
     when (value.trim().uppercase()) {

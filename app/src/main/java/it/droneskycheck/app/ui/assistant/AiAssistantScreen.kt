@@ -97,6 +97,9 @@ fun AiAssistantScreen(
     var quota by remember { mutableStateOf<AiAssistantQuota?>(null) }
     var quotaStatusUnavailable by remember { mutableStateOf(false) }
     var quotaCountdown by remember { mutableStateOf<String?>(null) }
+    var lastOperationalContext by remember(context.location) {
+        mutableStateOf(context.lastOperationalContext)
+    }
     var nextMessageId by remember { mutableLongStateOf(1L) }
     val messages = remember { mutableStateListOf<AiChatMessage>() }
     val listState = rememberLazyListState()
@@ -122,7 +125,8 @@ fun AiAssistantScreen(
 
         draft = ""
         addMessage(AiChatAuthor.User, query)
-        localAiAssistantResponseFor(query, context)?.let { response ->
+        val requestContext = context.copy(lastOperationalContext = lastOperationalContext)
+        localAiAssistantResponseFor(query, requestContext)?.let { response ->
             DscLogger.debug(
                 AiAssistantUiLogTag,
                 "UI append start kind=${response.kind} mappedTextSource=${response.mappedTextSource} " +
@@ -147,13 +151,21 @@ fun AiAssistantScreen(
                         query = query,
                         includeSources = true,
                         includeDiagnostics = false,
-                        context = context
+                        context = requestContext
                     )
                 )
             }
             result.fold(
                 onSuccess = { response ->
                     response.quota?.let { quota = it }
+                    response.operationalContext?.let { operationalContext ->
+                        lastOperationalContext = operationalContext
+                        DscLogger.debug(
+                            AiAssistantUiLogTag,
+                            "operational context updated contributors=${operationalContext.contributors.size} " +
+                                "designators=${operationalContext.contributors.map { it.designator }.take(12)}"
+                        )
+                    }
                     DscLogger.debug(
                         AiAssistantUiLogTag,
                         "UI append start kind=${response.kind} mappedTextSource=${response.mappedTextSource} " +

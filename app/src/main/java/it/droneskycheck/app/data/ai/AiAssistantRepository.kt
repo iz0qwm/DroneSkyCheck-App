@@ -219,7 +219,9 @@ private fun AiAssistantContext.toLogSummary(): String =
         "aircraftModel=${aircraftModel != null}",
         "classMark=${classMark != null}",
         "massGrams=${massGrams != null}",
-        "cameraPresent=${cameraPresent != null}"
+        "cameraPresent=${cameraPresent != null}",
+        "lastOperationalContext=${lastOperationalContext != null}",
+        "operationalContributors=${lastOperationalContext?.contributors?.size ?: 0}"
     ).joinToString(prefix = "{", postfix = "}")
 
 private fun Throwable.toAiAssistantDiagnosticReason(): String =
