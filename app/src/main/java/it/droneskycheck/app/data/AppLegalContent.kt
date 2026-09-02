@@ -93,9 +93,11 @@ object AppReleaseNotes {
         versionName = "4.0",
         versionCode = 30,
         title = "Cosa c'è di nuovo in Drone Sky Check 4.0",
-        intro = "Questa versione migliora la continuità delle verifiche operative nell'Assistente DSC.",
+        intro = "Questa versione amplia le informazioni disponibili sulla mappa e migliora la continuità delle verifiche operative nell'Assistente DSC.",
         highlights = listOf(
-            "L'Assistente DSC mantiene il contesto dell'ultimo controllo operativo, così può rispondere alle domande successive sugli orari di attivazione di uno specifico NOTAM."
+            "L'Assistente DSC mantiene il contesto dell'ultimo controllo operativo, così può rispondere alle domande successive sugli orari di attivazione di uno specifico NOTAM.",
+            "Nuova fascia DSC NEWS con notizie dal mondo dei droni e accesso agli approfondimenti direttamente dalla mappa.",
+            "Nuove informazioni DSC METEO con allerte e vigilanza ufficiali della Protezione Civile per la zona visualizzata."
         )
     )
 }

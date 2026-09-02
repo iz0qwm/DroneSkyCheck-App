@@ -25,6 +25,8 @@ import it.droneskycheck.app.data.weatherMap.WeatherMapForecast
 import it.droneskycheck.app.data.weatherMap.WeatherMapCameraFit
 import it.droneskycheck.app.data.weatherMap.WeatherParticleVectorField
 import it.droneskycheck.app.data.weatherMap.WeatherWindField
+import it.droneskycheck.app.data.weatherAlerts.WeatherAlertBanner
+import it.droneskycheck.app.data.weatherAlerts.WeatherAlertResponse
 import it.droneskycheck.app.map.DscLayerCategory
 import java.time.Instant
 
@@ -55,6 +57,7 @@ data class MapUiState(
     val weatherAssessment: WeatherAssessment? = null,
     val nearbyMetar: NearbyMetar? = null,
     val weatherError: String? = null,
+    val dscWeather: WeatherAlertUiState = WeatherAlertUiState(),
     val isWeatherMapLoading: Boolean = false,
     val weatherMapForecast: WeatherMapForecast? = null,
     val weatherMapWindField: WeatherWindField? = null,
@@ -95,6 +98,16 @@ data class MapUiState(
     val helpTourOverlayRevision: Int = 0,
     val isHelpManifestRefreshing: Boolean = false,
     val helpManifestRefreshMessage: String? = null
+)
+
+data class WeatherAlertUiState(
+    val loading: Boolean = false,
+    val data: WeatherAlertResponse? = null,
+    val banner: WeatherAlertBanner? = null,
+    val stale: Boolean = false,
+    val fetchedAt: Instant? = null,
+    val error: Boolean = false,
+    val changeMessage: String? = null
 )
 
 data class MapTapSelection(

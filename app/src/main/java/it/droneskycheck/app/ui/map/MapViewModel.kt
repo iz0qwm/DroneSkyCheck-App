@@ -71,6 +71,13 @@ import it.droneskycheck.app.data.weatherMap.WeatherWindField
 import it.droneskycheck.app.data.weatherMap.cameraFitFor
 import it.droneskycheck.app.data.weatherMap.particleVectorFieldFor
 import it.droneskycheck.app.data.weatherMap.toWeatherMapDiagnosticReason
+import it.droneskycheck.app.data.weatherAlerts.WeatherAlertLoadResult
+import it.droneskycheck.app.data.weatherAlerts.WeatherAlertsClient
+import it.droneskycheck.app.data.weatherAlerts.WeatherAlertsRepository
+import it.droneskycheck.app.data.weatherAlerts.WeatherLocalChange
+import it.droneskycheck.app.data.weatherAlerts.criticalityLevelLabel
+import it.droneskycheck.app.data.weatherAlerts.localWeatherChange
+import it.droneskycheck.app.data.weatherAlerts.weatherAlertBanner
 import it.droneskycheck.app.data.traffic.TrafficAwarenessClient
 import it.droneskycheck.app.data.traffic.TrafficAwarenessDefaults
 import it.droneskycheck.app.data.traffic.TrafficAwarenessLogTag
@@ -124,6 +131,7 @@ class MapViewModel(
     private val legalTimelineRepository: LegalTimelineClient = LegalTimelineRepository(),
     private val weatherForecastRepository: WeatherForecastClient = WeatherForecastRepository(),
     private val weatherMapRepository: WeatherMapClient = WeatherMapRepository(),
+    private val weatherAlertsRepository: WeatherAlertsClient = WeatherAlertsRepository(),
     private val nearbyMetarRepository: NearbyMetarClient = NearbyMetarRepository(),
     private val trafficAwarenessRepository: TrafficAwarenessClient = TrafficAwarenessRepository(),
     private val trafficHeatmapRepository: TrafficHeatmapClient = TrafficHeatmapRepository(),
@@ -142,6 +150,9 @@ class MapViewModel(
     private val trafficAwarenessPollingIntervalMillis: Long = TrafficAwarenessDefaults.PollingIntervalMillis,
     private val trafficAwarenessRadiusKm: Double = TrafficAwarenessDefaults.DefaultRadiusKm,
     private val trafficHeatmapDebounceMillis: Long = TrafficHeatmapDefaults.DebounceMillis,
+    private val weatherStatusPollingIntervalMillis: Long = WeatherStatusPollingIntervalMillis,
+    private val weatherCameraDebounceMillis: Long = WeatherCameraDebounceMillis,
+    private val weatherTimeRefreshMillis: Long = WeatherTimeRefreshMillis,
     private val loadHelpOnInit: Boolean = true,
     externalScope: CoroutineScope? = null
 ) : ViewModel() {
@@ -166,6 +177,15 @@ class MapViewModel(
     private var legalTimelineJob: Job? = null
     private var weatherJob: Job? = null
     private var weatherMapJob: Job? = null
+    private var weatherAlertsJob: Job? = null
+    private var weatherStatusPollingJob: Job? = null
+    private var weatherTimeRefreshJob: Job? = null
+    private var weatherCameraDebounceJob: Job? = null
+    private var weatherRequestGeneration = 0L
+    private var weatherSessionResumed = false
+    private var lastCriticalityRevision: String? = null
+    private var lastVigilanceRevision: String? = null
+    private var lastWeatherPoint: MapPoint? = null
     private var trafficAwarenessJob: Job? = null
     private var trafficHeatmapJob: Job? = null
     private var trafficHeatmapRequestId = 0L
@@ -694,6 +714,8 @@ class MapViewModel(
             trafficVisualAssessments = if (keepTrafficSnapshot) currentState.trafficVisualAssessments else emptyMap(),
             selectedTrafficTarget = null
         )
+
+        requestDscWeatherForCurrentPoint(immediate = true)
 
         launchZoneVerdict(requestId, selection.point)
         val stateAfterSelection = _uiState.value
@@ -2049,6 +2071,150 @@ class MapViewModel(
         showTransientMapStatus(CachedMapDataMessage)
     }
 
+    fun onDscWeatherSessionResumed() {
+        if (weatherSessionResumed) return
+        weatherSessionResumed = true
+        requestDscWeatherForCurrentPoint(immediate = true)
+        weatherStatusPollingJob?.cancel()
+        weatherStatusPollingJob = scope.launch {
+            while (weatherSessionResumed) {
+                refreshDscWeatherStatus()
+                delay(weatherStatusPollingIntervalMillis)
+            }
+        }
+        weatherTimeRefreshJob?.cancel()
+        weatherTimeRefreshJob = scope.launch {
+            while (weatherSessionResumed) {
+                refreshDscWeatherForTime()
+                delay(weatherTimeRefreshMillis)
+            }
+        }
+    }
+
+    fun onDscWeatherSessionPaused() {
+        weatherSessionResumed = false
+        weatherStatusPollingJob?.cancel()
+        weatherStatusPollingJob = null
+        weatherTimeRefreshJob?.cancel()
+        weatherTimeRefreshJob = null
+        weatherCameraDebounceJob?.cancel()
+        weatherCameraDebounceJob = null
+        weatherAlertsJob?.cancel()
+        weatherAlertsJob = null
+        if (_uiState.value.dscWeather.loading) {
+            _uiState.value = _uiState.value.copy(
+                dscWeather = _uiState.value.dscWeather.copy(loading = false)
+            )
+        }
+    }
+
+    fun onDscWeatherChangeMessageShown() {
+        val current = _uiState.value.dscWeather
+        if (current.changeMessage != null) {
+            _uiState.value = _uiState.value.copy(
+                dscWeather = current.copy(changeMessage = null)
+            )
+        }
+    }
+
+    private suspend fun refreshDscWeatherStatus() {
+        val status = weatherAlertsRepository.getStatus().getOrNull() ?: return
+        val hasBaseline = lastCriticalityRevision != null || lastVigilanceRevision != null
+        val changed = hasBaseline && (
+            status.criticalityRevision != lastCriticalityRevision ||
+                status.vigilanceRevision != lastVigilanceRevision
+            )
+        lastCriticalityRevision = status.criticalityRevision
+        lastVigilanceRevision = status.vigilanceRevision
+        if (changed) {
+            requestDscWeatherForCurrentPoint(immediate = true, revisionTriggered = true)
+        }
+    }
+
+    private fun requestDscWeatherForCurrentPoint(
+        immediate: Boolean,
+        revisionTriggered: Boolean = false
+    ) {
+        if (!weatherSessionResumed) return
+        val point = currentDscWeatherPoint()?.normalizedWeatherPoint() ?: return
+        weatherCameraDebounceJob?.cancel()
+        weatherCameraDebounceJob = scope.launch {
+            if (!immediate) delay(weatherCameraDebounceMillis)
+            loadDscWeather(point, revisionTriggered)
+        }
+    }
+
+    private fun loadDscWeather(point: MapPoint, revisionTriggered: Boolean) {
+        weatherRequestGeneration += 1
+        val generation = weatherRequestGeneration
+        weatherAlertsJob?.cancel()
+        val currentWeather = _uiState.value.dscWeather
+        val samePoint = lastWeatherPoint == point
+        _uiState.value = _uiState.value.copy(
+            dscWeather = if (samePoint) {
+                currentWeather.copy(loading = currentWeather.data == null, error = false)
+            } else {
+                WeatherAlertUiState(loading = true)
+            }
+        )
+        weatherAlertsJob = scope.launch {
+            val result = weatherAlertsRepository.getAlerts(point.lat, point.lon)
+            if (!weatherSessionResumed || generation != weatherRequestGeneration ||
+                currentDscWeatherPoint()?.normalizedWeatherPoint() != point
+            ) return@launch
+
+            when (result) {
+                is WeatherAlertLoadResult.Available -> {
+                    val previous = _uiState.value.dscWeather.data
+                    val change = if (revisionTriggered && previous != null && lastWeatherPoint == point) {
+                        localWeatherChange(previous, result.response, clock.instant())
+                    } else {
+                        null
+                    }
+                    lastWeatherPoint = point
+                    _uiState.value = _uiState.value.copy(
+                        dscWeather = WeatherAlertUiState(
+                            loading = false,
+                            data = result.response,
+                            banner = weatherAlertBanner(result.response, clock.instant()),
+                            stale = result.stale,
+                            fetchedAt = result.fetchedAt,
+                            error = false,
+                            changeMessage = change?.toUserMessage()
+                        )
+                    )
+                }
+                WeatherAlertLoadResult.Unavailable -> {
+                    lastWeatherPoint = null
+                    _uiState.value = _uiState.value.copy(
+                        dscWeather = WeatherAlertUiState(error = true)
+                    )
+                }
+            }
+        }
+    }
+
+    private fun refreshDscWeatherForTime() {
+        val state = _uiState.value.dscWeather
+        val data = state.data ?: return
+        if (state.stale && state.fetchedAt?.let {
+                Duration.between(it, clock.instant()) > DscWeatherStaleWindow
+            } == true
+        ) {
+            _uiState.value = _uiState.value.copy(dscWeather = WeatherAlertUiState(error = true))
+            return
+        }
+        val updatedBanner = weatherAlertBanner(data, clock.instant())
+        if (updatedBanner != state.banner) {
+            _uiState.value = _uiState.value.copy(
+                dscWeather = state.copy(banner = updatedBanner, changeMessage = null)
+            )
+        }
+    }
+
+    private fun currentDscWeatherPoint(): MapPoint? =
+        _uiState.value.selectedPoint ?: _uiState.value.cameraBounds?.centerPoint()
+
     private fun showTransientMapStatus(message: String) {
         mapStatusMessageJob?.cancel()
         _uiState.value = _uiState.value.copy(
@@ -2103,6 +2269,9 @@ class MapViewModel(
             )
         )
         scheduleTrafficHeatmapLoad(bounds)
+        if (current.selectedPoint == null) {
+            requestDscWeatherForCurrentPoint(immediate = false)
+        }
     }
 
     fun onLayerPanelRequested() {
@@ -2405,15 +2574,41 @@ class MapViewModel(
         const val WeatherMapUnavailableHint = "Campo vento non disponibile"
         const val DefaultWeatherMapZoom = 13.0
         const val StatusMessageMillis = 8_000L
+        const val WeatherStatusPollingIntervalMillis = 5 * 60 * 1_000L
+        const val WeatherCameraDebounceMillis = 400L
+        const val WeatherTimeRefreshMillis = 30_000L
         const val MaxHelpTourSteps = 7
+        val DscWeatherStaleWindow: Duration = Duration.ofMinutes(30)
     }
 
     override fun onCleared() {
         weatherMapJob?.cancel()
+        weatherAlertsJob?.cancel()
+        weatherStatusPollingJob?.cancel()
+        weatherTimeRefreshJob?.cancel()
+        weatherCameraDebounceJob?.cancel()
         trafficAwarenessJob?.cancel()
         trafficHeatmapJob?.cancel()
         mapStatusMessageJob?.cancel()
         super.onCleared()
+    }
+}
+
+private fun MapPoint.normalizedWeatherPoint(): MapPoint = MapPoint(
+    lat = kotlin.math.round(lat * 10_000.0) / 10_000.0,
+    lon = kotlin.math.round(lon * 10_000.0) / 10_000.0
+)
+
+private fun WeatherLocalChange.toUserMessage(): String? {
+    val previousLevel = previous?.criticalityLevel
+    val currentLevel = current?.criticalityLevel
+    return when {
+        previous == null && current != null -> "Nuova informazione meteo nella zona · ${current.detail}"
+        previousLevel != null && currentLevel != null && previousLevel != currentLevel ->
+            "Aggiornamento allerta · La criticità è passata da ${criticalityLevelLabel(previousLevel)} " +
+                "ad ${criticalityLevelLabel(currentLevel)}"
+        current != null -> "Aggiornamento DSC METEO · ${current.detail}"
+        else -> null
     }
 }
 

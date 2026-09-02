@@ -34,6 +34,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
@@ -62,6 +63,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -83,6 +85,7 @@ import androidx.compose.material.icons.filled.Thermostat
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material.icons.filled.WbTwilight
+import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -100,6 +103,8 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -112,6 +117,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -130,7 +136,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -254,6 +263,16 @@ import it.droneskycheck.app.data.weather.NearbyMetar
 import it.droneskycheck.app.data.weather.WeatherForecastRepository
 import it.droneskycheck.app.data.weather.WeatherReasonCode
 import it.droneskycheck.app.data.weather.WeatherState
+import it.droneskycheck.app.data.weatherAlerts.CriticalityLevel
+import it.droneskycheck.app.data.weatherAlerts.WeatherAlertBanner
+import it.droneskycheck.app.data.weatherAlerts.WeatherAlertResponse
+import it.droneskycheck.app.data.weatherAlerts.WeatherAlertsRepository
+import it.droneskycheck.app.data.weatherAlerts.WeatherBannerKind
+import it.droneskycheck.app.data.weatherAlerts.WeatherCriticalityPeriod
+import it.droneskycheck.app.data.weatherAlerts.WeatherRisk
+import it.droneskycheck.app.data.weatherAlerts.criticalityLevelLabel
+import it.droneskycheck.app.data.weatherAlerts.isActiveAt
+import it.droneskycheck.app.data.weatherAlerts.vigilanceLevelLabel
 import it.droneskycheck.app.map.DscLayerCategory
 import it.droneskycheck.app.map.DscZoneMapColors
 import it.droneskycheck.app.map.DroneSkyMapView
@@ -274,6 +293,7 @@ import it.droneskycheck.app.ui.news.NewsTicker
 import it.droneskycheck.app.ui.profile.PilotProfileSheet
 import it.droneskycheck.app.ui.settings.SettingsSheet
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collect
@@ -339,6 +359,7 @@ fun MapScreen(
     var isMapWeatherSheetVisible by remember { mutableStateOf(false) }
     var isAiAssistantVisible by remember { mutableStateOf(false) }
     var isNewsScreenVisible by remember { mutableStateOf(false) }
+    var isDscWeatherSheetVisible by remember { mutableStateOf(false) }
     var selectedNewsId by remember { mutableStateOf<Long?>(null) }
     var tickerNews by remember { mutableStateOf<List<NewsItem>>(emptyList()) }
     var tickerNewsFromCache by remember { mutableStateOf(false) }
@@ -363,6 +384,9 @@ fun MapScreen(
     var isBeginnerStartupIntroVisible by remember { mutableStateOf(false) }
     var beginnerStartupIntroShownThisSession by remember { mutableStateOf(false) }
     var beginnerStartupEnabled by remember { mutableStateOf(true) }
+    var mapHeaderHeightPx by remember { mutableIntStateOf(0) }
+    val mapHeaderHeightDp = with(LocalDensity.current) { mapHeaderHeightPx.toDp() }
+    val dscWeatherSnackbarHostState = remember { SnackbarHostState() }
     var automaticLocationAttempted by remember { mutableStateOf(false) }
     val trafficAttention = trafficAttentionPresentation(
         targets = uiState.trafficAwareness.response?.traffic?.targets.orEmpty(),
@@ -423,6 +447,27 @@ fun MapScreen(
                 delay(NewsTickerRefreshMillis)
             }
         }
+    }
+
+    LaunchedEffect(viewModel, lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            viewModel.onDscWeatherSessionResumed()
+            try {
+                awaitCancellation()
+            } finally {
+                viewModel.onDscWeatherSessionPaused()
+            }
+        }
+    }
+
+    LaunchedEffect(uiState.dscWeather.changeMessage) {
+        val message = uiState.dscWeather.changeMessage ?: return@LaunchedEffect
+        dscWeatherSnackbarHostState.showSnackbar(message)
+        viewModel.onDscWeatherChangeMessageShown()
+    }
+
+    LaunchedEffect(uiState.dscWeather.data) {
+        if (uiState.dscWeather.data == null) isDscWeatherSheetVisible = false
     }
 
     LaunchedEffect(viewModel, lifecycleOwner) {
@@ -712,12 +757,15 @@ fun MapScreen(
             },
             onCameraIdle = viewModel::onCameraIdle,
             onMapDataDegraded = viewModel::onMapDataDegraded,
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = mapHeaderHeightDp)
         )
 
         MapHeader(
             tickerNews = tickerNews,
             unseenCount = unseenNewsCount(tickerNews, lastSeenNewsId),
+            dscWeather = uiState.dscWeather,
             statusMessage = uiState.mapStatusMessage,
             trafficAttention = trafficAttention,
             onNewsLabelClick = {
@@ -737,14 +785,24 @@ fun MapScreen(
                 isNewsScreenVisible = true
             },
             onTrafficAttentionClick = viewModel::onTrafficTargetSelected,
+            onDscWeatherClick = { isDscWeatherSheetVisible = true },
             onAppInfoClick = viewModel::onAppInfoRequested,
             modifier = Modifier
                 .align(Alignment.TopCenter)
+                .onSizeChanged { size -> mapHeaderHeightPx = size.height }
                 .windowInsetsPadding(
                     WindowInsets.safeDrawing.only(
                         WindowInsetsSides.Top + WindowInsetsSides.Horizontal
                     )
                 )
+        )
+
+        SnackbarHost(
+            hostState = dscWeatherSnackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .padding(16.dp)
         )
 
         currentDraft?.let { draft ->
@@ -795,7 +853,7 @@ fun MapScreen(
             isLocationEnabled = uiState.isUserLocationEnabled,
             hasUserLocation = uiState.userLocation != null,
             trafficAwareness = uiState.trafficAwareness,
-            weatherActive = uiState.isOperationalContextRequested,
+            weatherActive = isMapWeatherSheetVisible,
             weatherLoading = uiState.isWeatherAnalysisLoading,
             onLayersClick = viewModel::onLayerPanelRequested,
             onWeatherClick = {
@@ -1171,6 +1229,17 @@ fun MapScreen(
                     openExternalUrl(context, PeriodicNoticeLinks.BuyMeACoffeeUrl)
                 }
             )
+        }
+
+        if (isDscWeatherSheetVisible) {
+            uiState.dscWeather.data?.let { weatherData ->
+                DscWeatherBottomSheet(
+                    data = weatherData,
+                    stale = uiState.dscWeather.stale,
+                    now = Instant.now(),
+                    onDismiss = { isDscWeatherSheetVisible = false }
+                )
+            }
         }
 
         if (uiState.isAppInfoSheetVisible) {
@@ -3068,11 +3137,13 @@ private fun LayerVisibilityRow(
 private fun MapHeader(
     tickerNews: List<NewsItem>,
     unseenCount: Int,
+    dscWeather: WeatherAlertUiState,
     statusMessage: String?,
     trafficAttention: TrafficAttentionPresentation?,
     onNewsLabelClick: () -> Unit,
     onHeadlineClick: (NewsItem) -> Unit,
     onTrafficAttentionClick: (String) -> Unit,
+    onDscWeatherClick: () -> Unit,
     onAppInfoClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -3083,12 +3154,275 @@ private fun MapHeader(
             onNewsLabelClick = onNewsLabelClick,
             onHeadlineClick = onHeadlineClick
         )
+        AnimatedVisibility(
+            visible = dscWeather.banner != null,
+            enter = fadeIn(),
+            exit = fadeOut()
+        ) {
+            dscWeather.banner?.let { banner ->
+                DscWeatherBanner(
+                    banner = banner,
+                    onClick = onDscWeatherClick
+                )
+            }
+        }
         MapTitlePill(
             statusMessage = statusMessage,
             trafficAttention = trafficAttention,
             onTrafficAttentionClick = onTrafficAttentionClick,
             onAppInfoClick = onAppInfoClick
         )
+    }
+}
+
+@Composable
+private fun DscWeatherBanner(
+    banner: WeatherAlertBanner,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = dscWeatherBannerColors(banner)
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .semantics(mergeDescendants = true) {
+                contentDescription = "${banner.accessibilityText}. Tocca per i dettagli della Protezione Civile."
+                role = Role.Button
+            },
+        shape = MaterialTheme.shapes.extraSmall,
+        color = colors.first,
+        contentColor = colors.second,
+        tonalElevation = 4.dp,
+        shadowElevation = 2.dp
+    ) {
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 62.dp)
+                .padding(horizontal = 16.dp, vertical = 9.dp)
+        ) {
+            val expirySuffix = if (maxWidth >= 600.dp && banner.expires != null) {
+                " · fino alle ${DscWeatherTimeFormatter.format(banner.expires)}"
+            } else {
+                ""
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = if (banner.kind == WeatherBannerKind.VIGILANCE) {
+                        Icons.Default.Cloud
+                    } else {
+                        Icons.Default.WarningAmber
+                    },
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp)
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = banner.headline,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = banner.detail + expirySuffix,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun dscWeatherBannerColors(banner: WeatherAlertBanner): Pair<Color, Color> {
+    val dark = isSystemInDarkTheme()
+    return when (banner.criticalityLevel) {
+        CriticalityLevel.RED -> MaterialTheme.colorScheme.errorContainer to MaterialTheme.colorScheme.onErrorContainer
+        CriticalityLevel.ORANGE -> if (dark) {
+            Color(0xFF633000) to Color(0xFFFFDCC3)
+        } else {
+            Color(0xFFFFDCC3) to Color(0xFF351000)
+        }
+        CriticalityLevel.YELLOW -> if (dark) {
+            Color(0xFF514600) to Color(0xFFFFF0A6)
+        } else {
+            Color(0xFFFFF0A6) to Color(0xFF332D00)
+        }
+        else -> MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.onPrimaryContainer
+    }
+}
+
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun DscWeatherBottomSheet(
+    data: WeatherAlertResponse,
+    stale: Boolean,
+    now: Instant,
+    onDismiss: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 720.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Default.WarningAmber, contentDescription = null)
+                Column {
+                    Text(
+                        text = "PROTEZIONE CIVILE",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = data.criticality?.zoneName
+                            ?: data.vigilance?.zoneName
+                            ?: "Informazioni meteo territoriali",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    data.criticality?.zoneCode?.let { code ->
+                        Text(code, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+
+            if (stale) {
+                Surface(
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    shape = MaterialTheme.shapes.small
+                ) {
+                    Text(
+                        text = "Dato temporaneamente non aggiornato",
+                        modifier = Modifier.padding(12.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+
+            DscCriticalityPeriodDetails(
+                title = "OGGI",
+                period = data.criticality?.periods?.get("TODAY"),
+                now = now,
+                checkCurrentValidity = true
+            )
+            HorizontalDivider()
+            DscCriticalityPeriodDetails(
+                title = "DOMANI",
+                period = data.criticality?.periods?.get("TOMORROW"),
+                now = now,
+                checkCurrentValidity = false
+            )
+
+            HorizontalDivider()
+            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text(
+                    text = "VIGILANZA METEO",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold
+                )
+                data.vigilance?.zoneName?.let { Text(it, style = MaterialTheme.typography.titleMedium) }
+                val precipitation = data.vigilance?.periods?.get("TODAY")?.precipitation
+                Text(
+                    text = when {
+                        precipitation == null -> "Precipitazioni non disponibili"
+                        !precipitation.originalText.isNullOrBlank() ->
+                            "Precipitazioni ${precipitation.originalText.lowercase(Locale.ITALIAN)}"
+                        else -> "Precipitazioni ${vigilanceLevelLabel(precipitation.level)}"
+                    },
+                    style = MaterialTheme.typography.bodyLarge
+                )
+            }
+
+            HorizontalDivider()
+            val sources = listOfNotNull(data.sources?.criticality, data.sources?.vigilance)
+                .distinctBy { "${it.sourceName}|${it.license}" }
+            sources.forEach { source ->
+                source.sourceName?.let { DscWeatherLabelValue("Fonte", it) }
+                source.license?.let { DscWeatherLabelValue("Licenza", it) }
+            }
+            Text(
+                text = data.disclaimer
+                    ?: "Informazioni territoriali della Protezione Civile; non determinano autorizzazioni o divieti di volo UAS.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+    }
+}
+
+@Composable
+private fun DscCriticalityPeriodDetails(
+    title: String,
+    period: WeatherCriticalityPeriod?,
+    now: Instant,
+    checkCurrentValidity: Boolean
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+        if (period == null || period.maximumLevel.priority == 0) {
+            Text("Nessuna criticità", style = MaterialTheme.typography.titleMedium)
+        } else {
+            val active = !checkCurrentValidity || period.isActiveAt(now)
+            Text(
+                text = "Allerta ${criticalityLevelLabel(period.maximumLevel)}" +
+                    if (active) "" else " · non attiva ora",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            WeatherRisk.entries.forEach { risk ->
+                val level = period.risks[risk] ?: CriticalityLevel.NONE
+                Text(
+                    text = if (level.priority > 0) {
+                        "${risk.italianLabel.replaceFirstChar { it.uppercase(Locale.ITALIAN) }} · " +
+                            "allerta ${criticalityLevelLabel(level)}"
+                    } else {
+                        when (risk) {
+                            WeatherRisk.THUNDERSTORM -> "Nessuna criticità per temporali"
+                            WeatherRisk.HYDRAULIC -> "Nessuna criticità idraulica"
+                            WeatherRisk.HYDROGEOLOGICAL -> "Nessuna criticità idrogeologica"
+                        }
+                    },
+                    style = MaterialTheme.typography.bodyLarge
+                )
+            }
+            if (period.onset != null || period.expires != null) {
+                DscWeatherLabelValue(
+                    label = "Validità",
+                    value = listOfNotNull(
+                        period.onset?.let(DscWeatherTimeFormatter::format),
+                        period.expires?.let(DscWeatherTimeFormatter::format)
+                    ).joinToString(" – ")
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DscWeatherLabelValue(label: String, value: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(label, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+        Text(value, style = MaterialTheme.typography.bodyLarge)
     }
 }
 
@@ -8814,6 +9148,7 @@ private class MapViewModelFactory(
                 ),
                 legalTimelineRepository = LegalTimelineRepository(),
                 weatherForecastRepository = WeatherForecastRepository(),
+                weatherAlertsRepository = WeatherAlertsRepository(),
                 nearbyMetarRepository = it.droneskycheck.app.data.weather.NearbyMetarRepository(
                     airportRepository = it.droneskycheck.app.data.AirportRepository(context)
                 ),
@@ -8844,6 +9179,8 @@ private const val MaxDroneAssessmentFactors = 5
 private val ZoneSheetMaxHeight = 720.dp
 private val NotamUtcFormatter: DateTimeFormatter =
     DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm 'UTC'").withZone(ZoneOffset.UTC)
+private val DscWeatherTimeFormatter: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault())
 private val OpenVerdictColor = Color(46, 125, 50)
 private val InactiveZonePillColor = Color(46, 125, 50)
 private val TemporalActiveColor = Color(198, 40, 40)
