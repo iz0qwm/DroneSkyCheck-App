@@ -8,6 +8,19 @@ import org.junit.Test
 
 class AppInfoPresentationTest {
     @Test
+    fun wideMapTitleBarPreservesTheExistingAppInfoCallbackGate() {
+        var callbackCount = 0
+        if (mapTitleAppInfoEnabled(statusMessage = null, trafficAttention = null)) {
+            callbackCount += 1
+        }
+        if (mapTitleAppInfoEnabled(statusMessage = "Ultima copia disponibile", trafficAttention = null)) {
+            callbackCount += 1
+        }
+
+        assertEquals(1, callbackCount)
+    }
+
+    @Test
     fun headerIsTappableWhenNoOperationalState() {
         assertTrue(mapTitleAppInfoEnabled(statusMessage = null, trafficAttention = null))
     }

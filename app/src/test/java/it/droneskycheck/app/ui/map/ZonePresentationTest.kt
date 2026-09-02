@@ -320,6 +320,26 @@ class ZonePresentationTest {
     }
 
     @Test
+    fun temporalDetailsKeepsCompositeFridaySaturdayAndHolidayClausesSeparate() {
+        val details = zone(
+            activeNow = false,
+            enr = enr(
+                schedule = ScheduleInfo(
+                    raw = "FRI 1300 - SS SAT AND HOL HJ",
+                    human = null,
+                    activeNow = false,
+                    explanation = null
+                )
+            )
+        ).temporalDetailsPresentation()
+
+        assertEquals(
+            "Venerdì dalle 13:00 UTC al tramonto; Sabato e festivi da alba a tramonto",
+            details.activitySchedule
+        )
+    }
+
+    @Test
     fun temporalDetailsKeepsSingleWeekdayInCommaSeparatedGroups() {
         val details = zone(
             activeNow = true,

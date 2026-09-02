@@ -41,6 +41,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -49,6 +50,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -109,6 +111,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -177,6 +180,13 @@ import it.droneskycheck.app.data.OfficialInfo
 import it.droneskycheck.app.data.PeriodicNoticeLinks
 import it.droneskycheck.app.data.PeriodicNoticePolicy
 import it.droneskycheck.app.data.PeriodicNoticePreferencesRepository
+import it.droneskycheck.app.data.news.NewsFeedRequest
+import it.droneskycheck.app.data.news.NewsItem
+import it.droneskycheck.app.data.news.NewsLoadResult
+import it.droneskycheck.app.data.news.NewsPreferencesRepository
+import it.droneskycheck.app.data.news.NewsRepository
+import it.droneskycheck.app.data.news.latestNewsId
+import it.droneskycheck.app.data.news.unseenNewsCount
 import it.droneskycheck.app.data.RoomCachedZoneAnalysisStore
 import it.droneskycheck.app.data.SupInfo
 import it.droneskycheck.app.data.TemporalBarEntry
@@ -259,6 +269,8 @@ import it.droneskycheck.app.ui.beginner.BeginnerGuideExperienceDialog
 import it.droneskycheck.app.ui.beginner.BeginnerGuideStartupIntroDialog
 import it.droneskycheck.app.ui.help.HelpBottomSheet
 import it.droneskycheck.app.ui.help.HelpTopicDialog
+import it.droneskycheck.app.ui.news.NewsScreen
+import it.droneskycheck.app.ui.news.NewsTicker
 import it.droneskycheck.app.ui.profile.PilotProfileSheet
 import it.droneskycheck.app.ui.settings.SettingsSheet
 import kotlinx.coroutines.Dispatchers
@@ -305,6 +317,8 @@ fun MapScreen(
     val beginnerGuidePreferences = remember(context) {
         BeginnerGuidePreferencesRepository(context.applicationContext)
     }
+    val newsRepository = remember(context) { NewsRepository(context.applicationContext) }
+    val newsPreferences = remember(context) { NewsPreferencesRepository(context.applicationContext) }
     val activity = context.findActivity()
     val uiState by viewModel.uiState.collectAsState()
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -324,6 +338,11 @@ fun MapScreen(
     var isSettingsSheetVisible by remember { mutableStateOf(false) }
     var isMapWeatherSheetVisible by remember { mutableStateOf(false) }
     var isAiAssistantVisible by remember { mutableStateOf(false) }
+    var isNewsScreenVisible by remember { mutableStateOf(false) }
+    var selectedNewsId by remember { mutableStateOf<Long?>(null) }
+    var tickerNews by remember { mutableStateOf<List<NewsItem>>(emptyList()) }
+    var tickerNewsFromCache by remember { mutableStateOf(false) }
+    var lastSeenNewsId by remember { mutableLongStateOf(newsPreferences.getLastSeenNewsId()) }
     var isSyntheticWindPocEnabled by remember { mutableStateOf(false) }
     var isLocationSearchSheetVisible by remember { mutableStateOf(false) }
     var pendingCameraFocusPoint by remember { mutableStateOf<MapPoint?>(null) }
@@ -388,6 +407,21 @@ fun MapScreen(
     LaunchedEffect(beginnerGuidePreferences) {
         beginnerStartupEnabled = withContext(Dispatchers.IO) {
             beginnerGuidePreferences.getReadingState().autoStartupEnabled
+        }
+    }
+
+    LaunchedEffect(newsRepository, lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                val result = withContext(Dispatchers.IO) {
+                    newsRepository.getNews(NewsFeedRequest(limit = NewsTickerItemLimit))
+                }
+                if (result is NewsLoadResult.Available) {
+                    tickerNews = result.feed.items
+                    tickerNewsFromCache = result.fromCache
+                }
+                delay(NewsTickerRefreshMillis)
+            }
         }
     }
 
@@ -506,6 +540,7 @@ fun MapScreen(
         !uiState.isTrafficAlertSettingsSheetVisible &&
         !uiState.isAppInfoSheetVisible &&
         !isAiAssistantVisible &&
+        !isNewsScreenVisible &&
         uiState.selectedTrafficTarget == null &&
         !isPilotProfileSheetVisible &&
         !isDraftSheetVisible &&
@@ -527,6 +562,7 @@ fun MapScreen(
         !uiState.isTrafficAlertSettingsSheetVisible &&
         !uiState.isAppInfoSheetVisible &&
         !isAiAssistantVisible &&
+        !isNewsScreenVisible &&
         uiState.selectedTrafficTarget == null &&
         !isPilotProfileSheetVisible &&
         !isDraftSheetVisible &&
@@ -679,15 +715,36 @@ fun MapScreen(
             modifier = Modifier.fillMaxSize()
         )
 
-        MapTitlePill(
+        MapHeader(
+            tickerNews = tickerNews,
+            unseenCount = unseenNewsCount(tickerNews, lastSeenNewsId),
             statusMessage = uiState.mapStatusMessage,
             trafficAttention = trafficAttention,
+            onNewsLabelClick = {
+                selectedNewsId = null
+                latestNewsId(tickerNews)?.let { latest ->
+                    newsPreferences.setLastSeenNewsId(latest)
+                    lastSeenNewsId = maxOf(lastSeenNewsId, latest)
+                }
+                isNewsScreenVisible = true
+            },
+            onHeadlineClick = { item ->
+                selectedNewsId = item.id
+                latestNewsId(tickerNews)?.let { latest ->
+                    newsPreferences.setLastSeenNewsId(latest)
+                    lastSeenNewsId = maxOf(lastSeenNewsId, latest)
+                }
+                isNewsScreenVisible = true
+            },
             onTrafficAttentionClick = viewModel::onTrafficTargetSelected,
             onAppInfoClick = viewModel::onAppInfoRequested,
             modifier = Modifier
-                .align(Alignment.TopStart)
-                .windowInsetsPadding(WindowInsets.safeDrawing)
-                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .align(Alignment.TopCenter)
+                .windowInsetsPadding(
+                    WindowInsets.safeDrawing.only(
+                        WindowInsetsSides.Top + WindowInsetsSides.Horizontal
+                    )
+                )
         )
 
         currentDraft?.let { draft ->
@@ -697,7 +754,7 @@ fun MapScreen(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .windowInsetsPadding(WindowInsets.safeDrawing)
-                    .padding(top = 74.dp, start = 16.dp, end = 16.dp)
+                    .padding(top = 94.dp, start = 16.dp, end = 16.dp)
             )
         }
 
@@ -792,7 +849,7 @@ fun MapScreen(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .windowInsetsPadding(WindowInsets.safeDrawing)
-                    .padding(top = 124.dp, start = 16.dp, end = 16.dp)
+                    .padding(top = 148.dp, start = 16.dp, end = 16.dp)
             )
         }
 
@@ -1157,6 +1214,25 @@ fun MapScreen(
                     drone = uiState.selectedDrone
                 ),
                 onBack = { isAiAssistantVisible = false },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        if (isNewsScreenVisible) {
+            NewsScreen(
+                repository = newsRepository,
+                initialItems = tickerNews,
+                initialDataStale = tickerNewsFromCache,
+                selectedNewsId = selectedNewsId,
+                onBack = {
+                    isNewsScreenVisible = false
+                    selectedNewsId = null
+                },
+                onOpenExternalUrl = { url -> openExternalUrl(context, url) },
+                onItemsSeen = { latest ->
+                    newsPreferences.setLastSeenNewsId(latest)
+                    lastSeenNewsId = maxOf(lastSeenNewsId, latest)
+                },
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -2989,6 +3065,34 @@ private fun LayerVisibilityRow(
 }
 
 @Composable
+private fun MapHeader(
+    tickerNews: List<NewsItem>,
+    unseenCount: Int,
+    statusMessage: String?,
+    trafficAttention: TrafficAttentionPresentation?,
+    onNewsLabelClick: () -> Unit,
+    onHeadlineClick: (NewsItem) -> Unit,
+    onTrafficAttentionClick: (String) -> Unit,
+    onAppInfoClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        NewsTicker(
+            items = tickerNews,
+            unseenCount = unseenCount,
+            onNewsLabelClick = onNewsLabelClick,
+            onHeadlineClick = onHeadlineClick
+        )
+        MapTitlePill(
+            statusMessage = statusMessage,
+            trafficAttention = trafficAttention,
+            onTrafficAttentionClick = onTrafficAttentionClick,
+            onAppInfoClick = onAppInfoClick
+        )
+    }
+}
+
+@Composable
 private fun MapTitlePill(
     statusMessage: String?,
     trafficAttention: TrafficAttentionPresentation?,
@@ -3000,17 +3104,17 @@ private fun MapTitlePill(
     val appInfoEnabled = mapTitleAppInfoEnabled(statusMessage, trafficAttention)
     val surfaceModifier = if (appInfoEnabled) {
         modifier
-            .widthIn(max = 340.dp)
+            .fillMaxWidth()
             .clickable(onClick = onAppInfoClick)
             .semantics {
                 contentDescription = "Drone Sky Check. Mappa UAS. Tocca per informazioni sull'app."
             }
     } else {
-        modifier.widthIn(max = 340.dp)
+        modifier.fillMaxWidth()
     }
     Surface(
         modifier = surfaceModifier,
-        shape = MaterialTheme.shapes.large,
+        shape = MaterialTheme.shapes.extraSmall,
         color = if (degraded) {
             MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.94f)
         } else {
@@ -3025,27 +3129,37 @@ private fun MapTitlePill(
         shadowElevation = 4.dp
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Text(
-                text = statusMessage ?: "Drone Sky Check",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = if (degraded) "Avviso mappa" else "Mappa UAS",
-                style = MaterialTheme.typography.bodySmall,
-                color = if (degraded) {
-                    MaterialTheme.colorScheme.onTertiaryContainer
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 46.dp)
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = statusMessage ?: "Drone Sky Check",
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = if (degraded) "Avviso mappa" else "Mappa UAS",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (degraded) {
+                        MaterialTheme.colorScheme.onTertiaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
             AnimatedVisibility(
                 visible = !degraded && trafficAttention != null,
                 enter = fadeIn(),
@@ -8756,6 +8870,8 @@ private const val PeriodicNoticeLogTag = "DscPeriodicNotice"
 private const val ZoneCheckUiLogTag = "DscZoneCheckV3"
 private const val PeriodicNoticeUiSettlingMillis = 700L
 private const val BeginnerGuideStartupSettlingMillis = 500L
+private const val NewsTickerItemLimit = 12
+private const val NewsTickerRefreshMillis = 5 * 60 * 1_000L
 private const val EnvironmentalProtectedAreaInfoText =
     "Quest'area identifica un territorio soggetto a tutela ambientale.\n\n" +
         "La presenza dell'area in questa mappa non significa automaticamente che l'intero territorio " +

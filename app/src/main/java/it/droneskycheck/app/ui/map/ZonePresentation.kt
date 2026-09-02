@@ -281,6 +281,7 @@ private fun String?.toItalianScheduleText(): String? {
         .replace(Regex("\\s+"), " ")
         .normalizeBilingualScheduleMarkers()
         .withoutDuplicatedBilingualSchedule()
+        .withInferredScheduleClauseSeparators()
         .trim()
     val fromToText = value.toItalianFromToSchedule()
     val notamOnlyText = value.toItalianNotamOnlySchedule()
@@ -293,19 +294,25 @@ private fun String?.toItalianScheduleText(): String? {
         .joinToString(" ")
         .takeIf { it.isNotBlank() }
     val mainText = fromToText ?: clauseText ?: defaultText
+    val standaloneHolidayText = holidayText.takeUnless {
+        it == "festivi inclusi" && mainText?.contains("festivi", ignoreCase = true) == true
+    }
 
     if (notamOnlyText != null) {
-        return listOfNotNull(mainText, holidayText, notamOnlyText, inactiveText).joinToString("; ")
+        return listOfNotNull(mainText, standaloneHolidayText, notamOnlyText, inactiveText).joinToString("; ")
     }
     if (fromToText != null || clauseText != null || inactiveText != null) {
-        return listOfNotNull(mainText, holidayText, inactiveText).joinToString("; ")
+        return listOfNotNull(mainText, standaloneHolidayText, inactiveText).joinToString("; ")
     }
 
     val separator = if (";" in value) "; " else " "
-    return listOfNotNull(defaultText, holidayText)
+    return listOfNotNull(defaultText, standaloneHolidayText)
         .joinToString(separator)
         .takeIf { it.isNotBlank() }
 }
+
+private fun String.withInferredScheduleClauseSeparators(): String =
+    replace(AeronauticalScheduleClauseBoundaryRegex, "$1; ")
 
 private fun String?.readableScheduleText(): String? =
     toItalianScheduleText() ?: cleanItalianUiTextOrNull()
@@ -397,10 +404,14 @@ private fun String.toItalianDelimitedScheduleClauses(): String? {
 
 private fun String.toItalianScheduleDayText(): String? {
     if (Regex("""\b(DAILY|DLY|EVERY DAY)\b""").containsMatchIn(this)) return "Ogni giorno"
-    DayExpressionRegex.find(this)
-        ?.let { return formatDayExpression(it.value) }
+    val holidayText = toItalianHolidayText()
+    DayExpressionRegex.find(this)?.let { match ->
+        val selectors = ScheduleSelectorCodeRegex.findAll(match.value).map { it.value }.toList()
+        val isExcludedHolidayOnly = holidayText == "festivi esclusi" && selectors.all { it == "HOL" }
+        if (!isExcludedHolidayOnly) return formatDayExpression(match.value)
+    }
 
-    return if (Regex("""\bHOL\b""").containsMatchIn(this) && toItalianHolidayText() != "festivi esclusi") {
+    return if (Regex("""\bHOL\b""").containsMatchIn(this) && holidayText != "festivi esclusi") {
         "Festivi"
     } else {
         null
@@ -408,7 +419,7 @@ private fun String.toItalianScheduleDayText(): String? {
 }
 
 private fun formatDayExpression(value: String): String? {
-    val days = DayCodeRegex.findAll(value)
+    val days = ScheduleSelectorCodeRegex.findAll(value)
         .map { it.value }
         .distinct()
         .toList()
@@ -421,7 +432,9 @@ private fun formatDayExpression(value: String): String? {
     if (days == WeekendCodes) return "Sabato e domenica"
     if (days.size == 7) return "Ogni giorno"
 
-    return days.mapNotNull { DayLabels[it] }.joinToItalianList()
+    return days.mapNotNull { code ->
+        if (code == "HOL") "festivi" else DayLabels[code]
+    }.joinToItalianList()
 }
 
 private fun String.toItalianScheduleTimeText(): String? {
@@ -684,12 +697,14 @@ private val DayOrder = listOf("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN")
 private val WeekdayCodes = DayOrder.take(5)
 private val WeekendCodes = DayOrder.takeLast(2)
 private val DayCodeRegex = Regex("""\b(MON|TUE|WED|THU|FRI|SAT|SUN)\b""")
-private val DayExpressionRegex = Regex("""\b(?:MON|TUE|WED|THU|FRI|SAT|SUN)(?:\s*(?:-|,|\s)\s*(?:MON|TUE|WED|THU|FRI|SAT|SUN))*\b""")
-private val DayClauseRegex = Regex("""\b((?:MON|TUE|WED|THU|FRI|SAT|SUN)(?:\s*(?:-|,|\s)\s*(?:MON|TUE|WED|THU|FRI|SAT|SUN))*)\s*:""")
+private val ScheduleSelectorCodeRegex = Regex("""\b(MON|TUE|WED|THU|FRI|SAT|SUN|HOL)\b""")
+private val DayExpressionRegex = Regex("""\b(?:MON|TUE|WED|THU|FRI|SAT|SUN|HOL)(?:\s*(?:-|,|\s|AND|E)\s*(?:MON|TUE|WED|THU|FRI|SAT|SUN|HOL))*\b""")
+private val DayClauseRegex = Regex("""\b((?:MON|TUE|WED|THU|FRI|SAT|SUN|HOL)(?:\s*(?:-|,|\s|AND|E)\s*(?:MON|TUE|WED|THU|FRI|SAT|SUN|HOL))*)\s*:""")
 private val StrictDayRangeRegex = Regex("""^(MON|TUE|WED|THU|FRI|SAT|SUN)\s*-\s*(MON|TUE|WED|THU|FRI|SAT|SUN)$""")
 private val TimeRangeRegex = Regex("""\b(\d{2})(\d{2})\s*-\s*(\d{2})(\d{2})\b""")
 private val UtcHourMinuteRegex = Regex("""^\d{2}:\d{2}$""")
 private val AeronauticalTimeRangeRegex = Regex("""\b(\d{4}|SR(?:[+-]\d+)?|SS(?:[+-]\d+)?|SUNRISE(?:[+-]\d+)?|SUNSET(?:[+-]\d+)?)\s*-\s*(\d{4}|SR(?:[+-]\d+)?|SS(?:[+-]\d+)?|SUNRISE(?:[+-]\d+)?|SUNSET(?:[+-]\d+)?)\b""")
+private val AeronauticalScheduleClauseBoundaryRegex = Regex("""\b(H24|HJ|(?:\d{4}|SR(?:[+-]\d+)?|SS(?:[+-]\d+)?|SUNRISE(?:[+-]\d+)?|SUNSET(?:[+-]\d+)?)\s*-\s*(?:\d{4}|SR(?:[+-]\d+)?|SS(?:[+-]\d+)?|SUNRISE(?:[+-]\d+)?|SUNSET(?:[+-]\d+)?))\s+(?=(?:MON|TUE|WED|THU|FRI|SAT|SUN|HOL)\b)""")
 private val DelimitedScheduleClauseSeparatorRegex = Regex(""";\s*|,\s*(?=(?:MON|TUE|WED|THU|FRI|SAT|SUN)\b)""")
 private val FromToDayTimeRegex = Regex("""\b(?:DA|FROM)\s+(MON|TUE|WED|THU|FRI|SAT|SUN)\s+(\d{2})(\d{2})\s+(?:A|TO)\s+(MON|TUE|WED|THU|FRI|SAT|SUN)\s+(\d{2})(\d{2})\b""")
 private val InactivePeriodRegex = Regex("""\bNON\s+ATTIVA\s*:?\s*(\d{1,2})\s+([A-Z]{3})\s*-\s*(\d{1,2})\s+([A-Z]{3})\b""")
