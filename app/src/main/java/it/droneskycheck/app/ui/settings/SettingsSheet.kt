@@ -72,6 +72,7 @@ import it.droneskycheck.app.data.ExternalLinkIcon
 import it.droneskycheck.app.data.PeriodicNoticeLinks
 import it.droneskycheck.app.data.ReleaseNotes
 import it.droneskycheck.app.data.help.HelpManifest
+import it.droneskycheck.app.data.insights.InsightsTool
 import it.droneskycheck.app.ui.help.HelpBottomSheet
 
 private enum class SettingsPage {
@@ -114,6 +115,9 @@ fun SettingsSheet(
     onAppThemeModeChanged: (AppThemeMode) -> Unit,
     beginnerStartupEnabled: Boolean,
     onBeginnerStartupEnabledChanged: (Boolean) -> Unit,
+    insightsEnabled: Boolean,
+    onInsightsEnabledChanged: (Boolean) -> Unit,
+    onInsightsToolOpened: (InsightsTool) -> Unit,
     onOpenBeginnerGuide: () -> Unit,
     onRefreshHelp: () -> Unit,
     onRepeatTour: () -> Unit,
@@ -160,11 +164,20 @@ fun SettingsSheet(
             )
             when (page) {
                 SettingsPage.Home -> SettingsHome(
-                    onOpenBeginnerGuide = { page = SettingsPage.BeginnerGuide },
+                    onOpenBeginnerGuide = {
+                        onInsightsToolOpened(InsightsTool.BeforeFlight)
+                        page = SettingsPage.BeginnerGuide
+                    },
                     onOpenDisplay = { page = SettingsPage.Display },
-                    onOpenDroneWorld = { page = SettingsPage.DroneWorld },
+                    onOpenDroneWorld = {
+                        onInsightsToolOpened(InsightsTool.DroneWorld)
+                        page = SettingsPage.DroneWorld
+                    },
                     onSupport = { onOpenUrl(PeriodicNoticeLinks.BuyMeACoffeeUrl) },
-                    onOpenLegal = { page = SettingsPage.Legal }
+                    onOpenLegal = {
+                        onInsightsToolOpened(InsightsTool.LegalInfo)
+                        page = SettingsPage.Legal
+                    }
                 )
 
                 SettingsPage.BeginnerGuide -> BeginnerGuideSettingsPage(
@@ -212,7 +225,10 @@ fun SettingsSheet(
                 SettingsPage.OperationalRestrictions -> TextInfoPage(
                     body = AppLegalContent.OperationalRestrictionsText
                 )
-                SettingsPage.Privacy -> TextInfoPage(body = AppLegalContent.PrivacyText)
+                SettingsPage.Privacy -> PrivacyPage(
+                    insightsEnabled = insightsEnabled,
+                    onInsightsEnabledChanged = onInsightsEnabledChanged
+                )
                 SettingsPage.Licenses -> LicensesPage()
                 SettingsPage.CommunityLinks -> CommunityLinksPage(onOpenUrl = onOpenUrl)
                 SettingsPage.Contributions -> ContributionsPage()
@@ -677,6 +693,43 @@ private fun TextInfoPage(body: String) {
             )
         }
     }
+}
+
+@Composable
+private fun PrivacyPage(
+    insightsEnabled: Boolean,
+    onInsightsEnabledChanged: (Boolean) -> Unit
+) {
+    SettingsSection(title = "Privacy e dati") {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = "Metriche di utilizzo anonime",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = "Invia soltanto aperture aggregate delle funzioni, senza posizione o dati inseriti.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(
+                checked = insightsEnabled,
+                onCheckedChange = onInsightsEnabledChanged
+            )
+        }
+    }
+    TextInfoPage(body = AppLegalContent.PrivacyText)
 }
 
 @Composable

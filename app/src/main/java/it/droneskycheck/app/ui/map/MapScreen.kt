@@ -196,6 +196,9 @@ import it.droneskycheck.app.data.news.NewsPreferencesRepository
 import it.droneskycheck.app.data.news.NewsRepository
 import it.droneskycheck.app.data.news.latestNewsId
 import it.droneskycheck.app.data.news.unseenNewsCount
+import it.droneskycheck.app.data.insights.AndroidInsightsPreferences
+import it.droneskycheck.app.data.insights.InsightsClient
+import it.droneskycheck.app.data.insights.InsightsTool
 import it.droneskycheck.app.data.RoomCachedZoneAnalysisStore
 import it.droneskycheck.app.data.SupInfo
 import it.droneskycheck.app.data.TemporalBarEntry
@@ -339,6 +342,8 @@ fun MapScreen(
     }
     val newsRepository = remember(context) { NewsRepository(context.applicationContext) }
     val newsPreferences = remember(context) { NewsPreferencesRepository(context.applicationContext) }
+    val insightsPreferences = remember(context) { AndroidInsightsPreferences(context.applicationContext) }
+    val insightsClient = remember(insightsPreferences) { InsightsClient(insightsPreferences) }
     val activity = context.findActivity()
     val uiState by viewModel.uiState.collectAsState()
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -360,6 +365,7 @@ fun MapScreen(
     var isAiAssistantVisible by remember { mutableStateOf(false) }
     var isNewsScreenVisible by remember { mutableStateOf(false) }
     var isDscWeatherSheetVisible by remember { mutableStateOf(false) }
+    var insightsEnabled by remember { mutableStateOf(insightsPreferences.isEnabled()) }
     var selectedNewsId by remember { mutableStateOf<Long?>(null) }
     var tickerNews by remember { mutableStateOf<List<NewsItem>>(emptyList()) }
     var tickerNewsFromCache by remember { mutableStateOf(false) }
@@ -418,6 +424,11 @@ fun MapScreen(
                 effectiveFontScale = effectiveFontScale
             )
         )
+    }
+
+    fun trackInsights(tool: InsightsTool) {
+        if (!insightsEnabled) return
+        coroutineScope.launch { insightsClient.trackToolOpened(tool) }
     }
 
     suspend fun reloadActiveDraft() {
@@ -718,7 +729,10 @@ fun MapScreen(
             cameraFocusPoint = pendingCameraFocusPoint,
             onUserLocationCentered = viewModel::onUserLocationCentered,
             onCameraFocusHandled = { pendingCameraFocusPoint = null },
-            onTrafficTargetTapped = viewModel::onTrafficTargetSelected,
+            onTrafficTargetTapped = { targetId ->
+                trackInsights(InsightsTool.AirTraffic)
+                viewModel.onTrafficTargetSelected(targetId)
+            },
             onTrafficHeatmapCellTapped = viewModel::onTrafficHeatmapCellSelected,
             onMapTapped = { selection ->
                 val draft = currentDraft
@@ -752,6 +766,7 @@ fun MapScreen(
                         }
                     }
                 } else {
+                    trackInsights(InsightsTool.ZoneInformation)
                     viewModel.onMapTapped(selection)
                 }
             },
@@ -769,6 +784,7 @@ fun MapScreen(
             statusMessage = uiState.mapStatusMessage,
             trafficAttention = trafficAttention,
             onNewsLabelClick = {
+                trackInsights(InsightsTool.News)
                 selectedNewsId = null
                 latestNewsId(tickerNews)?.let { latest ->
                     newsPreferences.setLastSeenNewsId(latest)
@@ -777,6 +793,7 @@ fun MapScreen(
                 isNewsScreenVisible = true
             },
             onHeadlineClick = { item ->
+                trackInsights(InsightsTool.News)
                 selectedNewsId = item.id
                 latestNewsId(tickerNews)?.let { latest ->
                     newsPreferences.setLastSeenNewsId(latest)
@@ -784,8 +801,14 @@ fun MapScreen(
                 }
                 isNewsScreenVisible = true
             },
-            onTrafficAttentionClick = viewModel::onTrafficTargetSelected,
-            onDscWeatherClick = { isDscWeatherSheetVisible = true },
+            onTrafficAttentionClick = { targetId ->
+                trackInsights(InsightsTool.AirTraffic)
+                viewModel.onTrafficTargetSelected(targetId)
+            },
+            onDscWeatherClick = {
+                trackInsights(InsightsTool.Weather)
+                isDscWeatherSheetVisible = true
+            },
             onAppInfoClick = viewModel::onAppInfoRequested,
             modifier = Modifier
                 .align(Alignment.TopCenter)
@@ -858,6 +881,7 @@ fun MapScreen(
             onLayersClick = viewModel::onLayerPanelRequested,
             onWeatherClick = {
                 if (uiState.selectedPoint != null) {
+                    trackInsights(InsightsTool.Weather)
                     isMapWeatherSheetVisible = true
                 }
                 viewModel.onOperationalContextRequested()
@@ -867,6 +891,7 @@ fun MapScreen(
                     DscLogger.debug(TrafficAwarenessLogTag, "Traffic Awareness OFF")
                     viewModel.disableTrafficAwareness()
                 } else {
+                    trackInsights(InsightsTool.AirTraffic)
                     DscLogger.debug(
                         TrafficAwarenessLogTag,
                         "Traffic Awareness ON selectedPointAvailable=${uiState.selectedPoint != null} " +
@@ -878,7 +903,10 @@ fun MapScreen(
             },
             onTrafficSettingsClick = viewModel::onTrafficAlertSettingsRequested,
             onSettingsClick = { isSettingsSheetVisible = true },
-            onAiAssistantClick = { isAiAssistantVisible = true },
+            onAiAssistantClick = {
+                trackInsights(InsightsTool.AiAssistant)
+                isAiAssistantVisible = true
+            },
             onLocationClick = {
                 val userLocation = uiState.userLocation
                 when {
@@ -1082,6 +1110,12 @@ fun MapScreen(
                         beginnerGuidePreferences.setAutoStartupEnabled(enabled)
                     }
                 },
+                insightsEnabled = insightsEnabled,
+                onInsightsEnabledChanged = { enabled ->
+                    insightsEnabled = enabled
+                    insightsClient.onConsentChanged(enabled)
+                },
+                onInsightsToolOpened = ::trackInsights,
                 onOpenBeginnerGuide = {
                     isSettingsSheetVisible = false
                     beginnerGuideStartInBook = false

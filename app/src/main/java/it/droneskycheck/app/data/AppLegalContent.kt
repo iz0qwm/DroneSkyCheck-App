@@ -96,7 +96,8 @@ object AppReleaseNotes {
         intro = "Questa versione migliora DSC METEO integrando le informazioni di Vigilanza della Protezione Civile pubblicate per aree regionali.",
         highlights = listOf(
             "La Vigilanza meteorologica nazionale viene letta e associata alle regioni indicate nel bollettino.",
-            "La fascia DSC METEO compare soltanto quando l'area visualizzata ricade in una regione interessata, senza trasformare la Vigilanza in un'allerta gialla, arancione o rossa."
+            "La fascia DSC METEO compare soltanto quando l'area visualizzata ricade in una regione interessata, senza trasformare la Vigilanza in un'allerta gialla, arancione o rossa.",
+            "DSC Insights misura in forma anonima e aggregata l'apertura delle funzioni principali; le metriche si possono disattivare dalla pagina Privacy."
         )
     )
 }
@@ -169,7 +170,13 @@ object AppLegalContent {
 
         I dati locali restano gestiti nello spazio dell'app fino alla loro cancellazione da parte dell'utente, alla cancellazione dei dati dell'applicazione o alla disinstallazione dell'app. In base alle impostazioni del dispositivo, Android puo includere i dati dell'app in backup o trasferimenti di sistema.
 
-        L'app non include, in base al codice Android attuale, Firebase Analytics, Crashlytics, SDK pubblicitari o un sistema di account Drone Sky Check.
+        Metriche di utilizzo
+
+        DSC Insights puo inviare ai server Drone Sky Check metriche first-party relative all'apertura delle principali funzioni dell'app e alla piattaforma Android. Le metriche non includono coordinate, missioni, pratiche, droni, testi inseriti, prompt AI, email, nomi o identificativi personali.
+
+        Le metriche di utilizzo possono essere disattivate in qualsiasi momento tramite l'interruttore presente in questa pagina. La preferenza resta memorizzata localmente sul dispositivo e la disattivazione interrompe l'invio di nuovi eventi.
+
+        L'app non include Firebase Analytics, Crashlytics o SDK pubblicitari e non dispone di un sistema di account Drone Sky Check. Le metriche DSC Insights non vengono usate per pubblicita o profilazione individuale.
 
         Drone Sky Check non vende i dati personali degli utenti e non li utilizza per profilazione pubblicitaria.
     """.trimIndent()
