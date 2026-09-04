@@ -2213,7 +2213,7 @@ class MapViewModel(
     }
 
     private fun currentDscWeatherPoint(): MapPoint? =
-        _uiState.value.selectedPoint ?: _uiState.value.cameraBounds?.centerPoint()
+        _uiState.value.cameraBounds?.centerPoint() ?: _uiState.value.selectedPoint
 
     private fun showTransientMapStatus(message: String) {
         mapStatusMessageJob?.cancel()
@@ -2269,9 +2269,7 @@ class MapViewModel(
             )
         )
         scheduleTrafficHeatmapLoad(bounds)
-        if (current.selectedPoint == null) {
-            requestDscWeatherForCurrentPoint(immediate = false)
-        }
+        requestDscWeatherForCurrentPoint(immediate = false)
     }
 
     fun onLayerPanelRequested() {

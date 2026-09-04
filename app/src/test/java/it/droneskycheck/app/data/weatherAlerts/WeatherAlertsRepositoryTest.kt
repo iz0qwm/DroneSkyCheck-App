@@ -54,6 +54,15 @@ class WeatherAlertsRepositoryTest {
             Instant.parse("2026-09-02T10:00:00Z"),
             result.response.criticality?.periods?.get("TODAY")?.onset
         )
+        val nationalToday = result.response.vigilanceNational?.periods?.get("TODAY")
+        assertEquals(true, nationalToday?.appliesToPoint)
+        assertEquals(listOf("Calabria"), nationalToday?.matchedRegions)
+        assertEquals(Instant.parse("2026-09-02T10:00:00Z"), nationalToday?.onset)
+        assertEquals(Instant.parse("2026-09-02T21:59:59Z"), nationalToday?.expires)
+        assertEquals(
+            "rovesci o temporali su Calabria centro-meridionale",
+            nationalToday?.precipitationText
+        )
         assertNull(result.response.sources)
     }
 
@@ -158,8 +167,8 @@ class WeatherAlertsRepositoryTest {
                 "zone_name": "Collina bolognese",
                 "periods": {
                   "TODAY": {
-                    "onset": "2026-09-02T12:00:00+02:00",
-                    "expires": "2026-09-02T23:59:59+02:00",
+                    "onset": "2026-09-02T12:00:00+02",
+                    "expires": "2026-09-02T23:59:59+02",
                     "overall_level": "YELLOW",
                     "risks": {"thunderstorm": "YELLOW"}
                   }
@@ -169,6 +178,24 @@ class WeatherAlertsRepositoryTest {
                 "zone_id": 84,
                 "zone_name": "Appennino emiliano romagnolo",
                 "periods": {"TODAY": {"precipitation": {"level": "WEAK"}}}
+              },
+              "vigilance_national": {
+                "geolocated": false,
+                "localization": {
+                  "method": "DPC_ZONE_TO_REGION",
+                  "precision": "REGION_APPROXIMATE",
+                  "point_regions": ["Calabria"]
+                },
+                "periods": {
+                  "TODAY": {
+                    "onset": "2026-09-02T12:00:00+02:00",
+                    "expires": "2026-09-02T23:59:59+02:00",
+                    "precipitation_text": "rovesci o temporali su Calabria centro-meridionale",
+                    "affected_regions": ["Calabria", "Sicilia"],
+                    "matched_regions": ["Calabria"],
+                    "applies_to_point": true
+                  }
+                }
               },
               "future_field": {"ignored": true}
             }

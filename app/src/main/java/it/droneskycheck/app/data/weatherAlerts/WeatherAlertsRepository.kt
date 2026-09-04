@@ -1,5 +1,6 @@
 package it.droneskycheck.app.data.weatherAlerts
 
+import it.droneskycheck.app.data.DscLogger
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.SocketTimeoutException
@@ -44,23 +45,46 @@ class WeatherAlertsRepository(
         require(lon.isFinite() && lon in -180.0..180.0)
         val key = WeatherCoordinateKey.from(lat, lon)
         try {
+            DscLogger.debug(
+                LogTag,
+                "weatherAlerts request lat=$lat lon=$lon endpoint=$alertsEndpoint"
+            )
             val json = getJson(
                 "$alertsEndpoint?lat=${lat.encoded()}&lon=${lon.encoded()}"
             )
             ensureActive()
             val response = parseWeatherAlertResponse(json)
+            val nationalToday = response.vigilanceNational?.periods?.get("TODAY")
+            DscLogger.debug(
+                LogTag,
+                "weatherAlerts success lat=$lat lon=$lon " +
+                    "nationalApplies=${nationalToday?.appliesToPoint} " +
+                    "matched=${nationalToday?.matchedRegions.orEmpty()} " +
+                    "onset=${nationalToday?.onset} expires=${nationalToday?.expires}"
+            )
             val fetchedAt = clock.instant()
             cached = CachedWeatherAlert(key, fetchedAt, response)
             WeatherAlertLoadResult.Available(response, fetchedAt, stale = false)
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (_: Exception) {
+        } catch (error: Exception) {
             currentCoroutineContext().ensureActive()
             val fallback = cached
-            if (fallback != null && fallback.key == key &&
-                Duration.between(fallback.fetchedAt, clock.instant()) <= StaleWindow
-            ) {
-                WeatherAlertLoadResult.Available(fallback.response, fallback.fetchedAt, stale = true)
+            val usableFallback = fallback?.takeIf {
+                it.key == key && Duration.between(it.fetchedAt, clock.instant()) <= StaleWindow
+            }
+            DscLogger.warn(
+                LogTag,
+                "weatherAlerts failed lat=$lat lon=$lon " +
+                    "reason=${error::class.simpleName} fallback=${usableFallback != null}",
+                error
+            )
+            if (usableFallback != null) {
+                WeatherAlertLoadResult.Available(
+                    usableFallback.response,
+                    usableFallback.fetchedAt,
+                    stale = true
+                )
             } else {
                 WeatherAlertLoadResult.Unavailable
             }
@@ -126,6 +150,7 @@ class WeatherAlertsRepository(
     }
 
     private companion object {
+        const val LogTag = "DscWeatherAlerts"
         const val AlertsEndpoint = "https://solarmonitor.kwos.org/api/weather-alerts"
         const val StatusEndpoint = "https://solarmonitor.kwos.org/api/weather-status"
         const val TimeoutMillis = 8_000

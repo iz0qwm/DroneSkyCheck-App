@@ -57,7 +57,7 @@ class DscWeatherMapViewModelTest {
     }
 
     @Test
-    fun selectedPointWinsAndRemainsAfterZoneSheetIsDismissed() = runBlocking {
+    fun weatherFollowsCameraCenterEvenWhenASelectedPointExists() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val weather = FakeDscWeatherClient()
         val viewModel = viewModel(scope, weather)
@@ -66,19 +66,16 @@ class DscWeatherMapViewModelTest {
         waitUntil { weather.lastPoint == MapPoint(41.9, 12.5) }
 
         viewModel.onMapTapped(MapTapSelection(MapPoint(44.49, 11.34), null))
-        waitUntil { weather.lastPoint == MapPoint(44.49, 11.34) }
-        val selectedCalls = weather.alertCalls
+        waitUntil { weather.alertCalls >= 2 }
+        assertEquals(MapPoint(41.9, 12.5), weather.lastPoint)
 
-        viewModel.onCameraIdle(bounds(41.90, 12.50))
-        delay(80)
-        assertEquals(selectedCalls, weather.alertCalls)
-        assertEquals(MapPoint(44.49, 11.34), weather.lastPoint)
+        viewModel.onCameraIdle(bounds(38.111, 15.650))
+        waitUntil { weather.lastPoint == MapPoint(38.111, 15.65) }
 
         viewModel.onZoneSheetDismissed()
         delay(40)
         assertEquals(MapPoint(44.49, 11.34), viewModel.uiState.value.selectedPoint)
-        assertEquals(MapPoint(44.49, 11.34), weather.lastPoint)
-        assertEquals(selectedCalls, weather.alertCalls)
+        assertEquals(MapPoint(38.111, 15.65), weather.lastPoint)
         viewModel.onDscWeatherSessionPaused()
         scope.cancel()
     }
@@ -91,8 +88,9 @@ class DscWeatherMapViewModelTest {
         viewModel.onCameraIdle(bounds(42.0, 12.0))
         viewModel.onDscWeatherSessionResumed()
 
-        viewModel.onMapTapped(MapTapSelection(MapPoint(44.49, 11.34), null))
-        viewModel.onMapTapped(MapTapSelection(MapPoint(41.90, 12.50), null))
+        viewModel.onCameraIdle(bounds(44.49, 11.34))
+        delay(30)
+        viewModel.onCameraIdle(bounds(41.90, 12.50))
         waitUntil { viewModel.uiState.value.dscWeather.data?.point?.lat == 41.90 }
         delay(180)
 

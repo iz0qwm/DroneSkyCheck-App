@@ -68,10 +68,35 @@ fun weatherAlertBanner(
             expires = null
         )
     }
+
+    val nationalPeriod = response.vigilanceNational?.periods?.get("TODAY")
+    if (nationalPeriod?.appliesToPoint == true && nationalPeriod.isActiveAt(now)) {
+        val regions = nationalPeriod.matchedRegions.joinToString(" e ")
+        val detail = if (regions.isNotBlank()) {
+            "Fenomeni segnalati per $regions"
+        } else {
+            "Fenomeni segnalati per l'area visualizzata"
+        }
+        return WeatherAlertBanner(
+            kind = WeatherBannerKind.VIGILANCE,
+            criticalityLevel = null,
+            vigilanceLevel = null,
+            headline = "Vigilanza meteorologica",
+            detail = detail,
+            accessibilityText = "DSC Meteo. Vigilanza meteorologica. $detail",
+            expires = nationalPeriod.expires
+        )
+    }
     return null
 }
 
 fun WeatherCriticalityPeriod.isActiveAt(now: Instant): Boolean {
+    val start = onset ?: return false
+    val end = expires ?: return false
+    return !now.isBefore(start) && !now.isAfter(end)
+}
+
+fun WeatherNationalVigilancePeriod.isActiveAt(now: Instant): Boolean {
     val start = onset ?: return false
     val end = expires ?: return false
     return !now.isBefore(start) && !now.isAfter(end)
@@ -90,6 +115,16 @@ fun localWeatherFingerprint(response: WeatherAlertResponse): WeatherLocalFingerp
     }
     fun vigilancePeriod(name: String): String =
         response.vigilance?.periods?.get(name)?.precipitation?.level?.name ?: "MISSING"
+    fun nationalVigilancePeriod(name: String): String {
+        val period = response.vigilanceNational?.periods?.get(name)
+        return listOf(
+            period?.appliesToPoint?.toString() ?: "MISSING",
+            period?.matchedRegions?.joinToString(",").orEmpty(),
+            period?.precipitationText.orEmpty(),
+            period?.onset?.toString().orEmpty(),
+            period?.expires?.toString().orEmpty()
+        ).joinToString("|")
+    }
 
     return WeatherLocalFingerprint(
         listOf(
@@ -101,7 +136,10 @@ fun localWeatherFingerprint(response: WeatherAlertResponse): WeatherLocalFingerp
             response.vigilance?.zoneName.orEmpty(),
             vigilancePeriod("TODAY"),
             vigilancePeriod("TOMORROW"),
-            vigilancePeriod("AFTER_TOMORROW")
+            vigilancePeriod("AFTER_TOMORROW"),
+            nationalVigilancePeriod("TODAY"),
+            nationalVigilancePeriod("TOMORROW"),
+            nationalVigilancePeriod("AFTER_TOMORROW")
         ).joinToString(";")
     )
 }

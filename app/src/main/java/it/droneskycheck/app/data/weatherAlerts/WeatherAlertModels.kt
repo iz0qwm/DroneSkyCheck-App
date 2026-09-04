@@ -1,6 +1,7 @@
 package it.droneskycheck.app.data.weatherAlerts
 
 import java.time.Instant
+import org.json.JSONArray
 import org.json.JSONObject
 
 enum class CriticalityLevel(val priority: Int) {
@@ -41,7 +42,8 @@ data class WeatherAlertResponse(
     val criticality: WeatherCriticality?,
     val vigilance: WeatherVigilance?,
     val sources: WeatherSources?,
-    val disclaimer: String?
+    val disclaimer: String?,
+    val vigilanceNational: WeatherNationalVigilance? = null
 )
 
 data class WeatherAlertPoint(val lat: Double?, val lon: Double?)
@@ -77,6 +79,27 @@ data class WeatherPrecipitation(
     val originalText: String?
 )
 
+data class WeatherNationalVigilance(
+    val geolocated: Boolean?,
+    val localization: WeatherVigilanceLocalization?,
+    val periods: Map<String, WeatherNationalVigilancePeriod>
+)
+
+data class WeatherVigilanceLocalization(
+    val method: String?,
+    val precision: String?,
+    val pointRegions: List<String>
+)
+
+data class WeatherNationalVigilancePeriod(
+    val onset: Instant?,
+    val expires: Instant?,
+    val precipitationText: String?,
+    val affectedRegions: List<String>,
+    val matchedRegions: List<String>,
+    val appliesToPoint: Boolean?
+)
+
 data class WeatherSources(
     val criticality: WeatherSource?,
     val vigilance: WeatherSource?
@@ -104,6 +127,7 @@ fun parseWeatherAlertResponse(json: String): WeatherAlertResponse {
         },
         criticality = root.optJSONObject("criticality")?.toCriticality(),
         vigilance = root.optJSONObject("vigilance")?.toVigilance(),
+        vigilanceNational = root.optJSONObject("vigilance_national")?.toNationalVigilance(),
         sources = root.optJSONObject("sources")?.let { sources ->
             WeatherSources(
                 criticality = sources.optJSONObject("criticality")?.toSource(),
@@ -172,6 +196,35 @@ private fun JSONObject?.toVigilancePeriods(): Map<String, WeatherVigilancePeriod
     }.toMap()
 }
 
+private fun JSONObject.toNationalVigilance(): WeatherNationalVigilance =
+    WeatherNationalVigilance(
+        geolocated = booleanOrNull("geolocated"),
+        localization = optJSONObject("localization")?.let { localization ->
+            WeatherVigilanceLocalization(
+                method = localization.stringOrNull("method"),
+                precision = localization.stringOrNull("precision"),
+                pointRegions = localization.optJSONArray("point_regions").toStringList()
+            )
+        },
+        periods = optJSONObject("periods").toNationalVigilancePeriods()
+    )
+
+private fun JSONObject?.toNationalVigilancePeriods(): Map<String, WeatherNationalVigilancePeriod> {
+    if (this == null) return emptyMap()
+    return periodKeys().mapNotNull { key ->
+        optJSONObject(key)?.let { period ->
+            key to WeatherNationalVigilancePeriod(
+                onset = period.instantOrNull("onset"),
+                expires = period.instantOrNull("expires"),
+                precipitationText = period.stringOrNull("precipitation_text"),
+                affectedRegions = period.optJSONArray("affected_regions").toStringList(),
+                matchedRegions = period.optJSONArray("matched_regions").toStringList(),
+                appliesToPoint = period.booleanOrNull("applies_to_point")
+            )
+        }
+    }.toMap()
+}
+
 private fun JSONObject.toSource(): WeatherSource =
     WeatherSource(
         revision = stringOrNull("revision"),
@@ -187,10 +240,27 @@ private fun JSONObject.stringOrNull(name: String): String? =
     else optString(name).trim().takeIf { it.isNotBlank() && it != "null" }
 
 private fun JSONObject.instantOrNull(name: String): Instant? =
-    stringOrNull(name)?.let { runCatching { Instant.parse(it) }.getOrNull() }
+    stringOrNull(name)?.let { value ->
+        val isoInstant = if (ShortUtcOffset.matchesAtEnd(value)) "$value:00" else value
+        runCatching { Instant.parse(isoInstant) }.getOrNull()
+    }
 
 private fun JSONObject.finiteDoubleOrNull(name: String): Double? =
     if (!has(name) || isNull(name)) null else optDouble(name).takeIf(Double::isFinite)
 
 private fun JSONObject.longOrNull(name: String): Long? =
     if (!has(name) || isNull(name)) null else optLong(name)
+
+private fun JSONObject.booleanOrNull(name: String): Boolean? =
+    if (!has(name) || isNull(name)) null else optBoolean(name)
+
+private fun JSONArray?.toStringList(): List<String> {
+    if (this == null) return emptyList()
+    return (0 until length()).mapNotNull { index ->
+        optString(index).trim().takeIf(String::isNotBlank)
+    }
+}
+
+private val ShortUtcOffset = Regex("[+-]\\d{2}$")
+
+private fun Regex.matchesAtEnd(value: String): Boolean = find(value)?.range?.last == value.lastIndex

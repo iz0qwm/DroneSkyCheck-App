@@ -3334,15 +3334,40 @@ private fun DscWeatherBottomSheet(
 
             HorizontalDivider()
             Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                val nationalPeriod = data.vigilanceNational?.periods?.get("TODAY")
+                    ?.takeIf { it.appliesToPoint == true }
                 Text(
                     text = "VIGILANZA METEO",
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold
                 )
+                nationalPeriod?.let { period ->
+                    val regions = period.matchedRegions.joinToString(" e ")
+                    Text(
+                        text = if (regions.isNotBlank()) {
+                            "Fenomeni segnalati per $regions"
+                        } else {
+                            "Fenomeni segnalati per l'area visualizzata"
+                        },
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    period.precipitationText?.takeIf(String::isNotBlank)?.let { text ->
+                        Text(
+                            text = text.replaceFirstChar { it.uppercase(Locale.ITALIAN) },
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                    }
+                    Text(
+                        text = "Localizzazione regionale approssimativa dal bollettino nazionale",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 data.vigilance?.zoneName?.let { Text(it, style = MaterialTheme.typography.titleMedium) }
                 val precipitation = data.vigilance?.periods?.get("TODAY")?.precipitation
                 Text(
-                    text = when {
+                    text = (if (nationalPeriod != null) "Dettaglio zona DPC: " else "") + when {
                         precipitation == null -> "Precipitazioni non disponibili"
                         !precipitation.originalText.isNullOrBlank() ->
                             "Precipitazioni ${precipitation.originalText.lowercase(Locale.ITALIAN)}"

@@ -63,6 +63,55 @@ class WeatherAlertPresentationTest {
     }
 
     @Test
+    fun matchedNationalVigilanceShowsRegionalBannerDespiteZonalNone() {
+        val banner = weatherAlertBanner(
+            response(
+                nationalToday = nationalVigilance(
+                    appliesToPoint = true,
+                    matchedRegions = listOf("Calabria")
+                )
+            ),
+            now
+        )
+
+        assertEquals(WeatherBannerKind.VIGILANCE, banner?.kind)
+        assertEquals("Vigilanza meteorologica", banner?.headline)
+        assertEquals("Fenomeni segnalati per Calabria", banner?.detail)
+        assertEquals(Instant.parse("2026-09-02T21:59:59Z"), banner?.expires)
+    }
+
+    @Test
+    fun nationalVigilanceForAnotherRegionDoesNotShowBanner() {
+        assertNull(
+            weatherAlertBanner(
+                response(
+                    nationalToday = nationalVigilance(
+                        appliesToPoint = false,
+                        matchedRegions = emptyList()
+                    )
+                ),
+                now
+            )
+        )
+    }
+
+    @Test
+    fun expiredNationalVigilanceDoesNotShowBanner() {
+        assertNull(
+            weatherAlertBanner(
+                response(
+                    nationalToday = nationalVigilance(
+                        appliesToPoint = true,
+                        matchedRegions = listOf("Sicilia"),
+                        expires = Instant.parse("2026-09-02T11:59:59Z")
+                    )
+                ),
+                now
+            )
+        )
+    }
+
+    @Test
     fun criticalityHasPriorityOverHeavyPrecipitation() {
         val banner = weatherAlertBanner(
             response(
@@ -74,6 +123,19 @@ class WeatherAlertPresentationTest {
 
         assertEquals(WeatherBannerKind.CRITICALITY_TODAY, banner?.kind)
         assertEquals(CriticalityLevel.YELLOW, banner?.criticalityLevel)
+    }
+
+    @Test
+    fun criticalityHasPriorityOverMatchedNationalVigilance() {
+        val banner = weatherAlertBanner(
+            response(
+                today = criticality(CriticalityLevel.YELLOW, risks(thunderstorm = CriticalityLevel.YELLOW)),
+                nationalToday = nationalVigilance(true, listOf("Calabria"))
+            ),
+            now
+        )
+
+        assertEquals(WeatherBannerKind.CRITICALITY_TODAY, banner?.kind)
     }
 
     @Test
@@ -153,7 +215,8 @@ class WeatherAlertPresentationTest {
             onset = null,
             expires = null
         ),
-        vigilanceToday: VigilanceLevel = VigilanceLevel.NONE
+        vigilanceToday: VigilanceLevel = VigilanceLevel.NONE,
+        nationalToday: WeatherNationalVigilancePeriod? = null
     ): WeatherAlertResponse = WeatherAlertResponse(
         point = WeatherAlertPoint(44.49, 11.34),
         criticality = WeatherCriticality(
@@ -174,7 +237,32 @@ class WeatherAlertPresentationTest {
             )
         ),
         sources = null,
-        disclaimer = null
+        disclaimer = null,
+        vigilanceNational = nationalToday?.let { period ->
+            WeatherNationalVigilance(
+                geolocated = false,
+                localization = WeatherVigilanceLocalization(
+                    method = "DPC_ZONE_TO_REGION",
+                    precision = "REGION_APPROXIMATE",
+                    pointRegions = listOf("Calabria")
+                ),
+                periods = mapOf("TODAY" to period)
+            )
+        }
+    )
+
+    private fun nationalVigilance(
+        appliesToPoint: Boolean,
+        matchedRegions: List<String>,
+        onset: Instant = Instant.parse("2026-09-02T10:00:00Z"),
+        expires: Instant = Instant.parse("2026-09-02T21:59:59Z")
+    ) = WeatherNationalVigilancePeriod(
+        onset = onset,
+        expires = expires,
+        precipitationText = "rovesci o temporali",
+        affectedRegions = listOf("Calabria", "Sicilia"),
+        matchedRegions = matchedRegions,
+        appliesToPoint = appliesToPoint
     )
 
     private fun criticality(
