@@ -90,14 +90,14 @@ object AppExternalLinks {
 object AppReleaseNotes {
     // When versionName changes, reset this section for the new version and collect only that version's changes.
     val Current = ReleaseNotes(
-        versionName = "4.1",
-        versionCode = 31,
-        title = "Cosa c'è di nuovo in Drone Sky Check 4.1",
-        intro = "Questa versione migliora DSC METEO integrando le informazioni di Vigilanza della Protezione Civile pubblicate per aree regionali.",
+        versionName = "4.2",
+        versionCode = 32,
+        title = "Cosa c'è di nuovo in Drone Sky Check 4.2",
+        intro = "Questa versione rende più comoda la consultazione del risultato del controllo operativo DSC sulla mappa.",
         highlights = listOf(
-            "La Vigilanza meteorologica nazionale viene letta e associata alle regioni indicate nel bollettino.",
-            "La fascia DSC METEO compare soltanto quando l'area visualizzata ricade in una regione interessata, senza trasformare la Vigilanza in un'allerta gialla, arancione o rossa.",
-            "DSC Insights misura in forma anonima e aggregata l'apertura delle funzioni principali; le metriche si possono disattivare dalla pagina Privacy."
+            "Dopo un controllo zona, il pannello del risultato può essere ridotto per continuare a osservare e usare la mappa senza perdere il verdetto già calcolato.",
+            "Nella vista compatta restano disponibili le informazioni essenziali, come lo stato del volo, la quota massima e le eventuali autorizzazioni richieste.",
+            "Con uno swipe verso l'alto il pannello torna completo usando lo stesso risultato, senza eseguire un nuovo controllo."
         )
     )
 }

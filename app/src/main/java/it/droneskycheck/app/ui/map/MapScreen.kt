@@ -87,6 +87,8 @@ import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material.icons.filled.WbTwilight
 import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.Button
+import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -105,10 +107,13 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberBottomSheetScaffoldState
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.rememberStandardBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -1194,65 +1199,67 @@ fun MapScreen(
 
         val selectedPoint = uiState.selectedPoint
         if (uiState.isZoneSheetVisible && selectedPoint != null) {
-            ZoneBottomSheet(
-                point = selectedPoint,
-                zone = uiState.selectedZone,
-                isLoading = uiState.isVerdictLoading,
-                verdict = uiState.verdict,
-                error = uiState.verdictError,
-                isLegalTimelineLoading = uiState.isLegalTimelineLoading,
-                legalTimeline = uiState.legalTimeline,
-                legalTimelineError = uiState.legalTimelineError,
-                isOperationalContextRequested = uiState.isOperationalContextRequested,
-                isWeatherAnalysisLoading = uiState.isWeatherAnalysisLoading,
-                weatherForecast = uiState.weatherForecast,
-                weatherAssessment = uiState.weatherAssessment,
-                weatherError = uiState.weatherError,
-                droneFleet = uiState.droneFleet,
-                selectedDrone = uiState.selectedDrone,
-                selectedDroneCatalogMatch = uiState.selectedDroneCatalogMatch,
-                droneOperationalAssessment = uiState.droneOperationalAssessment,
-                selectedLightPreference = uiState.selectedLightPreference,
-                flightOpportunityMode = uiState.flightOpportunityMode,
-                flightOpportunityStatus = uiState.flightOpportunityStatus,
-                flightOpportunityResult = uiState.flightOpportunityResult,
-                isOperationalReportExpanded = uiState.isOperationalReportExpanded,
-                draftError = draftError,
-                onRetry = viewModel::onZoneCheckRetryRequested,
-                onOperationalContextRequested = viewModel::onOperationalContextRequested,
-                onTechnicalPlanningRequested = viewModel::onTechnicalPlanningRequested,
-                onFlightLightPreferenceSelected = viewModel::onFlightLightPreferenceSelected,
-                onOperationalReportExpansionChanged = viewModel::onOperationalReportExpansionChanged,
-                onDroneSelected = viewModel::onDroneSelected,
-                onContextualHelpRequested = { topicId ->
-                    contextualHelpTopic = uiState.helpManifest.topic(topicId)
-                },
-                onAuthorizationRequest = { zoneInfo ->
-                    draftError = null
-                    coroutineScope.launch {
-                        when (val result = authorizationRepository.createDraftFromZone(
-                            zone = zoneInfo
-                        )) {
-                            is CreateAuthorizationDraftResult.Created -> {
-                                viewModel.onZoneSheetDismissed()
-                                currentDraft = result.draft
-                                isDraftSheetVisible = false
-                            }
-                            is CreateAuthorizationDraftResult.ProcedureSelectionRequired -> {
-                                draftError = "Sono disponibili piu procedure: ${result.procedures.joinToString(", ")}."
-                            }
-                            is CreateAuthorizationDraftResult.ActiveDraftConflict -> {
-                                conflictingDraft = result.activeDraft
-                                pendingConflictZone = zoneInfo
-                            }
-                            is CreateAuthorizationDraftResult.Unsupported -> {
-                                draftError = "Questa zona non puo creare una pratica locale: ${result.reason}."
+            key(selectedPoint) {
+                ZoneBottomSheet(
+                    point = selectedPoint,
+                    zone = uiState.selectedZone,
+                    isLoading = uiState.isVerdictLoading,
+                    verdict = uiState.verdict,
+                    error = uiState.verdictError,
+                    isLegalTimelineLoading = uiState.isLegalTimelineLoading,
+                    legalTimeline = uiState.legalTimeline,
+                    legalTimelineError = uiState.legalTimelineError,
+                    isOperationalContextRequested = uiState.isOperationalContextRequested,
+                    isWeatherAnalysisLoading = uiState.isWeatherAnalysisLoading,
+                    weatherForecast = uiState.weatherForecast,
+                    weatherAssessment = uiState.weatherAssessment,
+                    weatherError = uiState.weatherError,
+                    droneFleet = uiState.droneFleet,
+                    selectedDrone = uiState.selectedDrone,
+                    selectedDroneCatalogMatch = uiState.selectedDroneCatalogMatch,
+                    droneOperationalAssessment = uiState.droneOperationalAssessment,
+                    selectedLightPreference = uiState.selectedLightPreference,
+                    flightOpportunityMode = uiState.flightOpportunityMode,
+                    flightOpportunityStatus = uiState.flightOpportunityStatus,
+                    flightOpportunityResult = uiState.flightOpportunityResult,
+                    isOperationalReportExpanded = uiState.isOperationalReportExpanded,
+                    draftError = draftError,
+                    onRetry = viewModel::onZoneCheckRetryRequested,
+                    onOperationalContextRequested = viewModel::onOperationalContextRequested,
+                    onTechnicalPlanningRequested = viewModel::onTechnicalPlanningRequested,
+                    onFlightLightPreferenceSelected = viewModel::onFlightLightPreferenceSelected,
+                    onOperationalReportExpansionChanged = viewModel::onOperationalReportExpansionChanged,
+                    onDroneSelected = viewModel::onDroneSelected,
+                    onContextualHelpRequested = { topicId ->
+                        contextualHelpTopic = uiState.helpManifest.topic(topicId)
+                    },
+                    onAuthorizationRequest = { zoneInfo ->
+                        draftError = null
+                        coroutineScope.launch {
+                            when (val result = authorizationRepository.createDraftFromZone(
+                                zone = zoneInfo
+                            )) {
+                                is CreateAuthorizationDraftResult.Created -> {
+                                    viewModel.onZoneSheetDismissed()
+                                    currentDraft = result.draft
+                                    isDraftSheetVisible = false
+                                }
+                                is CreateAuthorizationDraftResult.ProcedureSelectionRequired -> {
+                                    draftError = "Sono disponibili piu procedure: ${result.procedures.joinToString(", ")}."
+                                }
+                                is CreateAuthorizationDraftResult.ActiveDraftConflict -> {
+                                    conflictingDraft = result.activeDraft
+                                    pendingConflictZone = zoneInfo
+                                }
+                                is CreateAuthorizationDraftResult.Unsupported -> {
+                                    draftError = "Questa zona non puo creare una pratica locale: ${result.reason}."
+                                }
                             }
                         }
-                    }
-                },
-                onDismiss = viewModel::onZoneSheetDismissed
-            )
+                    },
+                    onDismiss = viewModel::onZoneSheetDismissed
+                )
+            }
         }
 
         if (isPeriodicNoticeVisible) {
@@ -4188,34 +4195,59 @@ private fun ZoneBottomSheet(
     onAuthorizationRequest: (ZoneInfo) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val sheetState = rememberStandardBottomSheetState(
+        initialValue = SheetValue.Expanded,
+        skipHiddenState = false
+    )
+    val scaffoldState = rememberBottomSheetScaffoldState(bottomSheetState = sheetState)
     val listState = rememberLazyListState()
-    val sheetGesturesEnabled by remember {
-        derivedStateOf { !listState.canScrollBackward }
+    val coroutineScope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    var compactContentHeightPx by remember { mutableIntStateOf(0) }
+    val compactPeekHeight = with(density) {
+        maxOf(
+            ZoneCompactSheetMinimumHeight,
+            compactContentHeightPx.takeIf { it > 0 }?.toDp() ?: ZoneCompactSheetInitialHeight
+        )
+    }
+    val isCompact by remember {
+        derivedStateOf { sheetState.currentValue == SheetValue.PartiallyExpanded }
     }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        sheetGesturesEnabled = sheetGesturesEnabled
-    ) {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = ZoneSheetMaxHeight),
-            contentPadding = PaddingValues(start = 24.dp, top = 8.dp, end = 24.dp, bottom = 36.dp)
-        ) {
-            item {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-            EnvironmentalProtectedAreaInfoCard(zone)
+    LaunchedEffect(sheetState.currentValue) {
+        if (sheetState.currentValue == SheetValue.Hidden) onDismiss()
+    }
 
-            if (isLoading) {
-                OperationalCheckLoadingCard(point = point, zone = zone)
-            }
+    BottomSheetScaffold(
+        modifier = Modifier.windowInsetsPadding(
+            WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom)
+        ),
+        scaffoldState = scaffoldState,
+        sheetPeekHeight = compactPeekHeight,
+        sheetDragHandle = null,
+        containerColor = Color.Transparent,
+        sheetContent = {
+            ZoneCompactSheetContent(
+                isCompact = isCompact,
+                isLoading = isLoading,
+                verdict = verdict,
+                error = error,
+                onExpand = { coroutineScope.launch { sheetState.expand() } },
+                onHeightChanged = { height -> compactContentHeightPx = height }
+            )
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                contentPadding = PaddingValues(start = 24.dp, top = 8.dp, end = 24.dp, bottom = 36.dp)
+            ) {
+                item {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+            EnvironmentalProtectedAreaInfoCard(zone)
 
             verdict?.let { response ->
                 response.offlineCache?.let { cacheInfo ->
@@ -4224,7 +4256,6 @@ private fun ZoneBottomSheet(
                         reason = cacheInfo.reason
                     )
                 }
-                VerdictBadge(response)
                 response.verdict.explanation
                     .takeUnless { it.isBlank() || it == verdictHeader(response) }
                     ?.let { explanation ->
@@ -4348,6 +4379,122 @@ private fun ZoneBottomSheet(
                     value = "${point.lat.formatCoordinate()}, ${point.lon.formatCoordinate()}"
                 )
             }
+                    }
+                }
+            }
+        },
+        content = {}
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ZoneCompactSheetContent(
+    isCompact: Boolean,
+    isLoading: Boolean,
+    verdict: ZoneCheckV3Response?,
+    error: String?,
+    onExpand: () -> Unit,
+    onHeightChanged: (Int) -> Unit
+) {
+    val clickableModifier = if (isCompact) {
+        Modifier.clickable(role = Role.Button, onClick = onExpand)
+    } else {
+        Modifier
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .onSizeChanged { size -> onHeightChanged(size.height) }
+            .then(clickableModifier)
+            .padding(start = 20.dp, top = 8.dp, end = 20.dp, bottom = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        BottomSheetDefaults.DragHandle(modifier = Modifier.align(Alignment.CenterHorizontally))
+        val badgeColor = verdict?.let { response ->
+            dscAltitudeColor(response.verdict.maxAltitudeMetersAgl)
+        } ?: MaterialTheme.colorScheme.secondaryContainer
+        val badgeContentColor = verdict?.let { readableContentColor(badgeColor) }
+            ?: MaterialTheme.colorScheme.onSecondaryContainer
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = MaterialTheme.shapes.medium,
+            color = badgeColor,
+            contentColor = badgeContentColor
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    when {
+                        verdict != null -> {
+                            Text(
+                                text = verdictBadgeTitle(verdict),
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = verdictHeader(verdict),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        isLoading -> Text(
+                            text = "Controllo operativo DSC in corso",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
+
+                        error != null -> Text(
+                            text = "Verdetto non disponibile",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                        color = badgeContentColor
+                    )
+                }
+                if (isCompact) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Default.ExpandLess,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = "Dettagli",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
+        }
+        if (verdict != null) {
+            verdict.compactOperationalDetail()?.let { detail ->
+                if (detail.isNotBlank()) {
+                    Text(
+                        text = detail,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
         }
@@ -8392,6 +8539,20 @@ private fun verdictHeader(response: ZoneCheckV3Response): String =
         else -> "Volo consentito fino a ${response.verdict.maxAltitudeMetersAgl} m AGL"
     }
 
+private fun ZoneCheckV3Response.compactOperationalDetail(): String? {
+    val authorizationRequired = zones.any { zone ->
+        zone.authorizationRequired == true || zone.authorization?.required == true
+    }
+    val primaryReason = responsibleZone?.reason
+        ?: verdict.responsibleZoneName?.let { zoneName -> "Zona determinante: $zoneName" }
+        ?: blockers.firstNotNullOfOrNull { issue -> issue.operationalMeaning ?: issue.message }
+
+    return listOfNotNull(
+        if (authorizationRequired) "Autorizzazione richiesta" else null,
+        primaryReason?.cleanUserText()
+    ).joinToString(" · ").takeIf { it.isNotBlank() }
+}
+
 private fun ZoneCheckV3Response.sortedZones(): List<ZoneInfo> =
     zones.sortedWith(
         compareByDescending<ZoneInfo> { zone ->
@@ -9235,6 +9396,8 @@ private const val LOCATION_MIN_DISTANCE_METERS = 5f
 private const val MaxTimelineSegments = 6
 private const val MaxDailySummaryWindows = 4
 private const val MaxDroneAssessmentFactors = 5
+private val ZoneCompactSheetMinimumHeight = 140.dp
+private val ZoneCompactSheetInitialHeight = 168.dp
 private val ZoneSheetMaxHeight = 720.dp
 private val NotamUtcFormatter: DateTimeFormatter =
     DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm 'UTC'").withZone(ZoneOffset.UTC)
