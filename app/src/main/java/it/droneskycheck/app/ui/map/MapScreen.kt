@@ -215,6 +215,10 @@ import it.droneskycheck.app.data.ZoneCheckOfflineFallbackReason
 import it.droneskycheck.app.data.ZoneCheckV3Response
 import it.droneskycheck.app.data.ZoneInfo
 import it.droneskycheck.app.data.ZoneCheckV3Repository
+import it.droneskycheck.app.data.airawareness.AirAwarenessDoaRepository
+import it.droneskycheck.app.data.airawareness.AirAwarenessPhase
+import it.droneskycheck.app.data.airawareness.AirAwarenessState
+import it.droneskycheck.app.data.airawareness.SharedPreferencesAirAwarenessSessionStore
 import it.droneskycheck.app.data.traffic.TrafficAwarenessDefaults
 import it.droneskycheck.app.data.traffic.TrafficAwarenessLogTag
 import it.droneskycheck.app.data.traffic.TrafficAwarenessRepository
@@ -717,6 +721,7 @@ fun MapScreen(
             visibleLayerCategories = visibleLayerCategories,
             selectedPoint = uiState.selectedPoint,
             trafficAwarenessCenter = uiState.trafficAwarenessCenter,
+            airAwarenessDoa = uiState.airAwareness.session?.doa?.takeIf { uiState.airAwareness.active },
             authorizationTakeoff = currentDraft?.operationData?.takeoffMapPoint(),
             authorizationAreaPoints = currentDraft?.operationData?.areaPoints.orEmpty().map { MapPoint(it.lat, it.lon) },
             authorizationAreaClosed = currentDraft?.operationData?.areaClosed == true,
@@ -881,6 +886,7 @@ fun MapScreen(
             isLocationEnabled = uiState.isUserLocationEnabled,
             hasUserLocation = uiState.userLocation != null,
             trafficAwareness = uiState.trafficAwareness,
+            airAwareness = uiState.airAwareness,
             weatherActive = isMapWeatherSheetVisible,
             weatherLoading = uiState.isWeatherAnalysisLoading,
             onLayersClick = viewModel::onLayerPanelRequested,
@@ -892,7 +898,9 @@ fun MapScreen(
                 viewModel.onOperationalContextRequested()
             },
             onTrafficClick = {
-                if (uiState.trafficAwareness.enabled) {
+                if (uiState.airAwareness.active) {
+                    viewModel.onAirAwarenessCommandRequested()
+                } else if (uiState.trafficAwareness.enabled) {
                     DscLogger.debug(TrafficAwarenessLogTag, "Traffic Awareness OFF")
                     viewModel.disableTrafficAwareness()
                 } else {
@@ -907,6 +915,7 @@ fun MapScreen(
                 }
             },
             onTrafficSettingsClick = viewModel::onTrafficAlertSettingsRequested,
+            onAirAwarenessClick = viewModel::onAirAwarenessCommandRequested,
             onSettingsClick = { isSettingsSheetVisible = true },
             onAiAssistantClick = {
                 trackInsights(InsightsTool.AiAssistant)
@@ -933,6 +942,32 @@ fun MapScreen(
                 .windowInsetsPadding(WindowInsets.safeDrawing)
                 .padding(16.dp)
         )
+
+        if (uiState.airAwareness.phase == AirAwarenessPhase.CONFIRMING) {
+            AirAwarenessConfirmationDialog(
+                onDismiss = viewModel::onAirAwarenessConfirmationDismissed,
+                onConfirm = {
+                    viewModel.onAirAwarenessActivationConfirmed()
+                    if (permissionState.hasForegroundLocation) {
+                        viewModel.onLocationEnabled()
+                    } else {
+                        permissionLauncher.launch(LocationPermissions)
+                    }
+                }
+            )
+        }
+
+        if (uiState.airAwareness.statusSheetVisible) {
+            AirAwarenessStatusBottomSheet(
+                state = uiState.airAwareness,
+                isLocationActive = uiState.isUserLocationEnabled && uiState.userLocation != null,
+                trafficAwareness = uiState.trafficAwareness,
+                onOpenRadar = viewModel::onAirAwarenessStatusDismissed,
+                onTerminate = viewModel::terminateAirAwareness,
+                onRetryClose = viewModel::retryAirAwarenessClose,
+                onDismiss = viewModel::onAirAwarenessStatusDismissed
+            )
+        }
 
         trafficAwarenessUnavailableMessage(uiState.trafficAwareness)?.let { message ->
             TrafficAwarenessStatusPill(
@@ -980,7 +1015,13 @@ fun MapScreen(
                 message = uiState.locationStatusMessage,
                 onRecenter = viewModel::onLocationRecenterRequested,
                 onAnalyzeHere = viewModel::onAnalyzeUserLocationRequested,
-                onDisable = viewModel::onLocationDisabled,
+                onDisable = {
+                    if (uiState.airAwareness.active) {
+                        viewModel.terminateAirAwareness()
+                    } else {
+                        viewModel.onLocationDisabled()
+                    }
+                },
                 onDismiss = viewModel::onLocationControlDismissed
             )
         }
@@ -1613,17 +1654,162 @@ private fun TrafficAwarenessStatusPill(
 }
 
 @Composable
+private fun AirAwarenessConfirmationDialog(
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Attiva Air Awareness") },
+        text = {
+            Text(
+                "Attivando Air Awareness, Drone Sky Check utilizzerà la tua posizione, creerà una " +
+                    "Drone Operation Area valida per un'ora e la pubblicherà sui servizi Drone Sky Check, " +
+                    "rendendola visibile sulla mappa agli altri utenti.\n\n" +
+                    "Verranno inoltre attivati il monitoraggio del traffico aereo e la ricezione dei droni " +
+                    "rilevati dalla rete DSC.\n\n" +
+                    "Attiva questa funzione solo quando stai realmente iniziando un'operazione di volo."
+            )
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("ANNULLA") }
+        },
+        confirmButton = {
+            Button(onClick = onConfirm) { Text("ATTIVA") }
+        }
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AirAwarenessStatusBottomSheet(
+    state: AirAwarenessState,
+    isLocationActive: Boolean,
+    trafficAwareness: TrafficAwarenessState,
+    onOpenRadar: () -> Unit,
+    onTerminate: () -> Unit,
+    onRetryClose: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    var nowMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    val endTimeMillis = state.session?.doa?.endTimeMillis
+    LaunchedEffect(endTimeMillis) {
+        while (endTimeMillis != null && endTimeMillis > nowMillis) {
+            delay(30_000)
+            nowMillis = System.currentTimeMillis()
+        }
+    }
+
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = when (state.phase) {
+                    AirAwarenessPhase.ACTIVE -> "Air Awareness attivo"
+                    AirAwarenessPhase.REQUESTING_LOCATION -> "Acquisizione posizione"
+                    AirAwarenessPhase.PUBLISHING_DOA -> "Pubblicazione DOA DSC"
+                    AirAwarenessPhase.STOPPING -> "Terminazione Air Awareness"
+                    AirAwarenessPhase.CLOSE_PENDING -> "Chiusura DOA in sospeso"
+                    else -> "Air Awareness"
+                },
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold
+            )
+
+            if (state.phase == AirAwarenessPhase.ACTIVE) {
+                AirAwarenessStatusRow("Posizione", if (isLocationActive) "ATTIVA" else "NON DISPONIBILE")
+                AirAwarenessStatusRow("DOA DSC", "ATTIVA")
+                AirAwarenessStatusRow("Traffico aereo", mannedTrafficStatus(trafficAwareness))
+                AirAwarenessStatusRow("Droni DSC", dscDroneTrafficStatus(trafficAwareness))
+
+                endTimeMillis?.let { end ->
+                    val minutes = kotlin.math.ceil(((end - nowMillis).coerceAtLeast(0L)) / 60_000.0).toInt()
+                    Text(
+                        text = "DOA valida ancora per $minutes minuti",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            } else if (state.phase == AirAwarenessPhase.REQUESTING_LOCATION) {
+                Text("In attesa di una posizione valida. La DOA non è ancora stata creata.")
+                CircularProgressIndicator()
+            } else if (state.phase == AirAwarenessPhase.PUBLISHING_DOA) {
+                Text("La modalità diventerà attiva solo dopo l'accettazione della DOA da parte dei servizi DSC.")
+                CircularProgressIndicator()
+            } else if (state.phase == AirAwarenessPhase.STOPPING) {
+                Text("I servizi locali sono stati arrestati. Chiusura della DOA DSC in corso.")
+                CircularProgressIndicator()
+            }
+
+            state.error?.let {
+                Text(it, color = MaterialTheme.colorScheme.error)
+            }
+
+            if (state.phase == AirAwarenessPhase.CLOSE_PENDING) {
+                Button(onClick = onRetryClose, modifier = Modifier.fillMaxWidth()) {
+                    Text("RIPROVA CHIUSURA")
+                }
+            }
+            if (state.phase == AirAwarenessPhase.ACTIVE) {
+                Button(onClick = onOpenRadar, modifier = Modifier.fillMaxWidth()) {
+                    Text("APRI RADAR")
+                }
+                OutlinedButton(onClick = onTerminate, modifier = Modifier.fillMaxWidth()) {
+                    Text("TERMINA")
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+    }
+}
+
+@Composable
+private fun AirAwarenessStatusRow(label: String, status: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyLarge)
+        Text(status, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+    }
+}
+
+private fun mannedTrafficStatus(state: TrafficAwarenessState): String {
+    if (!state.enabled) return "NON ATTIVO"
+    if (state.loading && state.response == null) return "IN AVVIO"
+    if (state.error != null && state.response == null) return "TEMP. NON DISPONIBILE"
+    val providers = listOf("adsb_lol", "opensky", "dsc_local", "OGN")
+    val available = providers.any { state.response?.providers?.get(it)?.status in setOf("ok", "zero_results") }
+    return if (available) "ATTIVO" else "TEMP. NON DISPONIBILE"
+}
+
+private fun dscDroneTrafficStatus(state: TrafficAwarenessState): String {
+    if (!state.enabled) return "NON ATTIVI"
+    if (state.loading && state.response == null) return "IN AVVIO"
+    return when (state.response?.providers?.get("dsc_uas")?.status) {
+        "ok", "zero_results" -> "ATTIVI"
+        else -> if (state.response == null && state.error == null) "IN AVVIO" else "TEMP. NON DISPONIBILI"
+    }
+}
+
+@Composable
 private fun MapControlsToolbar(
     hiddenCount: Int,
     isLocationEnabled: Boolean,
     hasUserLocation: Boolean,
     trafficAwareness: TrafficAwarenessState,
+    airAwareness: AirAwarenessState,
     weatherActive: Boolean,
     weatherLoading: Boolean,
     onLayersClick: () -> Unit,
     onWeatherClick: () -> Unit,
     onTrafficClick: () -> Unit,
     onTrafficSettingsClick: () -> Unit,
+    onAirAwarenessClick: () -> Unit,
     onSettingsClick: () -> Unit,
     onAiAssistantClick: () -> Unit,
     onLocationClick: () -> Unit,
@@ -1794,6 +1980,37 @@ private fun MapControlsToolbar(
             ) {
                 Icon(
                     imageVector = Icons.Default.Settings,
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        }
+
+        AnimatedVisibility(
+            visible = expanded,
+            enter = actionEnter,
+            exit = actionExit,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .offset(x = (-72).dp, y = (-136).dp)
+        ) {
+            MapActionFab(
+                label = "Air Awareness",
+                direction = MapActionDirection.Left,
+                contentDescription = if (airAwareness.active) {
+                    "Air Awareness attivo"
+                } else {
+                    "Attiva Air Awareness"
+                },
+                containerColor = mapToggleContainerColor(active = airAwareness.active),
+                contentColor = mapToggleContentColor(active = airAwareness.active),
+                onClick = {
+                    expanded = false
+                    onAirAwarenessClick()
+                }
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Visibility,
                     contentDescription = null,
                     modifier = Modifier.size(24.dp)
                 )
@@ -9373,6 +9590,8 @@ private class MapViewModelFactory(
                     airportRepository = it.droneskycheck.app.data.AirportRepository(context)
                 ),
                 trafficAwarenessRepository = TrafficAwarenessRepository(),
+                airAwarenessDoaRepository = AirAwarenessDoaRepository(),
+                airAwarenessSessionStore = SharedPreferencesAirAwarenessSessionStore(context),
                 weatherAssessmentEngine = WeatherAssessmentEngine(),
                 mapPreferences = MapPreferencesRepository(context),
                 uasDatasetUpdatesRepository = UasDatasetUpdatesRepository(context),

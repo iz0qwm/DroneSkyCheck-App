@@ -16,6 +16,7 @@ object DscApiConfig {
     const val WeatherForecastUrl = "https://appweatherforecast-32dg4v266a-uc.a.run.app/appWeatherForecast"
     const val WeatherMapUrl = "https://us-central1-droneskycheck-d0136.cloudfunctions.net/appWeatherMap"
     const val TrafficAwarenessUrl = "https://apptrafficawareness-32dg4v266a-uc.a.run.app/appTrafficAwareness"
+    const val AirAwarenessDoaUrl = "https://appdoa-32dg4v266a-uc.a.run.app/appDoa"
     const val TrafficHeatmapUrl = "https://us-central1-droneskycheck-d0136.cloudfunctions.net/appTrafficHeatmap"
     const val AiAssistantAnswerUrl = "https://europe-west8-droneskycheck-d0136.cloudfunctions.net/appDscAiAssistantAnswer"
     const val AiAssistantQuotaUrl = AiAssistantAnswerUrl

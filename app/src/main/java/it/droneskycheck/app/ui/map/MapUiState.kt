@@ -18,6 +18,7 @@ import it.droneskycheck.app.data.traffic.TrafficAssessment
 import it.droneskycheck.app.data.traffic.TrafficFeedType
 import it.droneskycheck.app.data.traffic.TrafficHeatmapState
 import it.droneskycheck.app.data.traffic.TrafficTarget
+import it.droneskycheck.app.data.airawareness.AirAwarenessState
 import it.droneskycheck.app.data.weather.WeatherAssessment
 import it.droneskycheck.app.data.weather.WeatherForecast
 import it.droneskycheck.app.data.weather.NearbyMetar
@@ -66,6 +67,7 @@ data class MapUiState(
     val selectedForecastTime: Instant? = null,
     val weatherMapError: String? = null,
     val trafficAwareness: TrafficAwarenessState = TrafficAwarenessState(),
+    val airAwareness: AirAwarenessState = AirAwarenessState(),
     val trafficAwarenessCenter: MapPoint? = null,
     val trafficAwarenessPositionLocked: Boolean = false,
     val trafficAssessments: Map<String, TrafficAssessment> = emptyMap(),

@@ -22,6 +22,11 @@ import it.droneskycheck.app.data.Verdict
 import it.droneskycheck.app.data.ZoneCheckV3Client
 import it.droneskycheck.app.data.ZoneCheckV3Response
 import it.droneskycheck.app.data.ZoneInfo
+import it.droneskycheck.app.data.airawareness.AirAwarenessDoaClient
+import it.droneskycheck.app.data.airawareness.AirAwarenessPhase
+import it.droneskycheck.app.data.airawareness.AirAwarenessSessionStore
+import it.droneskycheck.app.data.airawareness.InMemoryAirAwarenessSessionStore
+import it.droneskycheck.app.data.airawareness.PublishedDoa
 import it.droneskycheck.app.data.drone.DroneCatalogMatchStatus
 import it.droneskycheck.app.data.drone.DroneOperationalLevel
 import it.droneskycheck.app.data.drone.DroneTechnicalCatalogClient
@@ -1825,6 +1830,144 @@ class MapViewModelTest {
         scope.cancel()
     }
 
+    @Test
+    fun airAwarenessFirstTapAndCancelPerformNoOperation() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val doa = FakeAirAwarenessDoaClient()
+        val viewModel = viewModel(
+            scope = scope,
+            airAwarenessDoa = doa,
+            preferences = InMemoryMapPreferences()
+        )
+
+        viewModel.onAirAwarenessCommandRequested()
+        assertEquals(AirAwarenessPhase.CONFIRMING, viewModel.uiState.value.airAwareness.phase)
+        assertEquals(0, doa.createCalls)
+
+        viewModel.onAirAwarenessConfirmationDismissed()
+        assertEquals(AirAwarenessPhase.IDLE, viewModel.uiState.value.airAwareness.phase)
+        assertEquals(0, doa.createCalls)
+        scope.cancel()
+    }
+
+    @Test
+    fun airAwarenessPublishesDoaBeforeStartingExistingTrafficEngine() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val doa = FakeAirAwarenessDoaClient()
+        val traffic = FakeTrafficAwarenessClient()
+        val viewModel = viewModel(
+            scope = scope,
+            traffic = traffic,
+            airAwarenessDoa = doa,
+            preferences = InMemoryMapPreferences(),
+            trafficPollingIntervalMillis = 60_000
+        )
+
+        viewModel.onAirAwarenessCommandRequested()
+        viewModel.onAirAwarenessActivationConfirmed()
+        assertEquals(AirAwarenessPhase.REQUESTING_LOCATION, viewModel.uiState.value.airAwareness.phase)
+        assertEquals(0, traffic.calls)
+
+        viewModel.onLocationEnabled()
+        viewModel.onUserLocationUpdated(UserLocation(MapPoint(41.9, 12.5), 5f, true))
+        waitUntil { viewModel.uiState.value.airAwareness.active && traffic.calls > 0 }
+
+        assertEquals(1, doa.createCalls)
+        assertTrue(viewModel.uiState.value.trafficAwareness.enabled)
+        assertEquals(MapPoint(41.9, 12.5), traffic.lastPoint)
+        scope.cancel()
+    }
+
+    @Test
+    fun airAwarenessLocationDeniedCreatesNoDoa() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val doa = FakeAirAwarenessDoaClient()
+        val viewModel = viewModel(
+            scope = scope,
+            airAwarenessDoa = doa,
+            preferences = InMemoryMapPreferences()
+        )
+
+        viewModel.onAirAwarenessCommandRequested()
+        viewModel.onAirAwarenessActivationConfirmed()
+        viewModel.onLocationPermissionDenied(permanently = false)
+
+        assertEquals(AirAwarenessPhase.FAILED, viewModel.uiState.value.airAwareness.phase)
+        assertEquals(0, doa.createCalls)
+        assertFalse(viewModel.uiState.value.trafficAwareness.enabled)
+        scope.cancel()
+    }
+
+    @Test
+    fun airAwarenessDoaFailureNeverDeclaresModeActive() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val doa = FakeAirAwarenessDoaClient(createResult = Result.failure(IllegalStateException("offline")))
+        val viewModel = viewModel(
+            scope = scope,
+            airAwarenessDoa = doa,
+            preferences = InMemoryMapPreferences()
+        )
+
+        viewModel.onAirAwarenessCommandRequested()
+        viewModel.onAirAwarenessActivationConfirmed()
+        viewModel.onLocationEnabled()
+        viewModel.onUserLocationUpdated(UserLocation(MapPoint(41.9, 12.5), 5f, true))
+        waitUntil { viewModel.uiState.value.airAwareness.phase == AirAwarenessPhase.FAILED }
+
+        assertFalse(viewModel.uiState.value.airAwareness.active)
+        assertFalse(viewModel.uiState.value.trafficAwareness.enabled)
+        scope.cancel()
+    }
+
+    @Test
+    fun airAwarenessStopClosesCloudDoaAndStopsOwnedServices() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val doa = FakeAirAwarenessDoaClient()
+        val viewModel = viewModel(
+            scope = scope,
+            airAwarenessDoa = doa,
+            preferences = InMemoryMapPreferences(),
+            trafficPollingIntervalMillis = 60_000
+        )
+        viewModel.onAirAwarenessCommandRequested()
+        viewModel.onAirAwarenessActivationConfirmed()
+        viewModel.onLocationEnabled()
+        viewModel.onUserLocationUpdated(UserLocation(MapPoint(41.9, 12.5), 5f, true))
+        waitUntil { viewModel.uiState.value.airAwareness.active }
+
+        viewModel.terminateAirAwareness()
+        waitUntil { viewModel.uiState.value.airAwareness.phase == AirAwarenessPhase.IDLE }
+
+        assertEquals(1, doa.closeCalls)
+        assertFalse(viewModel.uiState.value.trafficAwareness.enabled)
+        assertFalse(viewModel.uiState.value.isUserLocationEnabled)
+        scope.cancel()
+    }
+
+    @Test
+    fun airAwarenessStopKeepsRetryableClosePendingStateWhenBackendFails() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val doa = FakeAirAwarenessDoaClient(closeResult = Result.failure(IllegalStateException("offline")))
+        val viewModel = viewModel(
+            scope = scope,
+            airAwarenessDoa = doa,
+            preferences = InMemoryMapPreferences(),
+            trafficPollingIntervalMillis = 60_000
+        )
+        viewModel.onAirAwarenessCommandRequested()
+        viewModel.onAirAwarenessActivationConfirmed()
+        viewModel.onLocationEnabled()
+        viewModel.onUserLocationUpdated(UserLocation(MapPoint(41.9, 12.5), 5f, true))
+        waitUntil { viewModel.uiState.value.airAwareness.active }
+
+        viewModel.terminateAirAwareness()
+        waitUntil { viewModel.uiState.value.airAwareness.phase == AirAwarenessPhase.CLOSE_PENDING }
+
+        assertTrue(viewModel.uiState.value.airAwareness.session?.closePending == true)
+        assertFalse(viewModel.uiState.value.trafficAwareness.enabled)
+        scope.cancel()
+    }
+
     private fun viewModel(
         scope: CoroutineScope,
         zoneCheck: ZoneCheckV3Client = FakeZoneCheckClient(),
@@ -1833,6 +1976,8 @@ class MapViewModelTest {
         weatherMap: WeatherMapClient = FakeWeatherMapClient(),
         metar: NearbyMetarClient = FakeNearbyMetarClient(),
         traffic: TrafficAwarenessClient = FakeTrafficAwarenessClient(),
+        airAwarenessDoa: AirAwarenessDoaClient = FakeAirAwarenessDoaClient(),
+        airAwarenessStore: AirAwarenessSessionStore = InMemoryAirAwarenessSessionStore(),
         trafficHeatmap: TrafficHeatmapClient = FakeTrafficHeatmapClient(),
         preferences: InMemoryMapPreferences,
         pilotStore: LocalPilotStore = FakePilotStore(),
@@ -1850,6 +1995,8 @@ class MapViewModelTest {
             weatherMapRepository = weatherMap,
             nearbyMetarRepository = metar,
             trafficAwarenessRepository = traffic,
+            airAwarenessDoaRepository = airAwarenessDoa,
+            airAwarenessSessionStore = airAwarenessStore,
             trafficHeatmapRepository = trafficHeatmap,
             mapPreferences = preferences,
             helpRepository = helpRepository,
@@ -2240,6 +2387,41 @@ private class FakeNearbyMetarClient(
         calls += 1
         lastPoint = MapPoint(latitude, longitude)
         return Result.success(metar)
+    }
+}
+
+private class FakeAirAwarenessDoaClient(
+    private val createResult: Result<PublishedDoa> = Result.success(
+        PublishedDoa(
+            id = "air-awareness-operation-0001",
+            closeToken = "close-token-with-at-least-24-characters",
+            lat = 41.9,
+            lon = 12.5,
+            radiusMeters = 300.0,
+            startTimeMillis = Instant.parse("2026-08-11T06:00:00Z").toEpochMilli(),
+            endTimeMillis = Instant.parse("2026-08-11T07:00:00Z").toEpochMilli()
+        )
+    ),
+    private val closeResult: Result<Unit> = Result.success(Unit)
+) : AirAwarenessDoaClient {
+    var createCalls = 0
+        private set
+    var closeCalls = 0
+        private set
+
+    override suspend fun createDoa(
+        operationId: String,
+        closeToken: String,
+        lat: Double,
+        lon: Double
+    ): Result<PublishedDoa> {
+        createCalls += 1
+        return createResult.map { it.copy(closeToken = closeToken, lat = lat, lon = lon) }
+    }
+
+    override suspend fun closeDoa(doa: PublishedDoa): Result<Unit> {
+        closeCalls += 1
+        return closeResult
     }
 }
 

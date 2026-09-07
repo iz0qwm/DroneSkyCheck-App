@@ -286,6 +286,27 @@ class TrafficAwarenessPresentationTest {
     }
 
     @Test
+    fun trackerMiniDroneSheetPresentationKeepsItsDscSource() {
+        val target = trafficTarget(
+            id = "dsc_uas:tracker_mini:drone-9",
+            callsign = null,
+            icao24 = null,
+            sourceId = "drone-9",
+            provider = "dsc_uas",
+            source = "tracker_mini",
+            objectType = "drone"
+        )
+
+        val presentation = target.trafficSheetPresentation(assessment(TrafficRelevance.MONITOR))
+
+        assertEquals(TrafficTargetKind.DRONE, presentation.targetKind)
+        assertEquals(
+            "Tipo" to "Drone Tracker Mini",
+            presentation.sections.first { it.title == "Dati traffico" }.rows.first().toPair()
+        )
+    }
+
+    @Test
     fun adsbHelicopterSheetPresentationShowsHelicopterType() {
         val target = trafficTarget(
             id = "icao:heli",

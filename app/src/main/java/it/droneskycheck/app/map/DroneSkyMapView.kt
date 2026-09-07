@@ -33,6 +33,7 @@ import it.droneskycheck.app.data.CachedGeoJson
 import it.droneskycheck.app.data.CachedGeoJsonRepository
 import it.droneskycheck.app.data.DscLogger
 import it.droneskycheck.app.data.ZonesRepository
+import it.droneskycheck.app.data.airawareness.PublishedDoa
 import it.droneskycheck.app.data.traffic.TrafficAwarenessDefaults
 import it.droneskycheck.app.data.traffic.TrafficAwarenessLogTag
 import it.droneskycheck.app.data.traffic.TrafficAwarenessState
@@ -79,6 +80,7 @@ import org.maplibre.android.style.layers.PropertyFactory.fillOpacity
 import org.maplibre.android.style.layers.PropertyFactory.fillPattern
 import org.maplibre.android.style.layers.PropertyFactory.lineCap
 import org.maplibre.android.style.layers.PropertyFactory.lineColor
+import org.maplibre.android.style.layers.PropertyFactory.lineDasharray
 import org.maplibre.android.style.layers.PropertyFactory.lineJoin
 import org.maplibre.android.style.layers.PropertyFactory.lineOpacity
 import org.maplibre.android.style.layers.PropertyFactory.lineWidth
@@ -97,6 +99,7 @@ fun DroneSkyMapView(
     visibleLayerCategories: Set<DscLayerCategory>,
     selectedPoint: MapPoint?,
     trafficAwarenessCenter: MapPoint?,
+    airAwarenessDoa: PublishedDoa?,
     authorizationTakeoff: MapPoint?,
     authorizationAreaPoints: List<MapPoint>,
     authorizationAreaClosed: Boolean,
@@ -272,6 +275,7 @@ fun DroneSkyMapView(
                     addTrafficHeatmapLayer(style)
                     addWeatherWindLayer(style)
                     addMapDarkeningLayer(style)
+                    addAirAwarenessDoaLayers(style)
                     updateMapDarkening(style, mapDarkeningEnabled)
                     updateZoneOutlines(style, enhancedZoneOutlinesEnabled)
                     applyLayerVisibility(style, visibleLayerCategories)
@@ -300,6 +304,7 @@ fun DroneSkyMapView(
                     )
                     updatePointMarkers(style, selectedPoint, userLocation)
                     updateAuthorizationDrawing(style, authorizationTakeoff, authorizationAreaPoints, authorizationAreaClosed)
+                    updateAirAwarenessDoa(style, airAwarenessDoa)
                     updateTrafficAwareness(
                         style,
                         trafficAwarenessCenter ?: selectedPoint,
@@ -369,6 +374,7 @@ private fun configureMap(
         addTrafficAwarenessLayers(it)
         addTrafficHeatmapLayer(it)
         addMapDarkeningLayer(it)
+        addAirAwarenessDoaLayers(it)
         updateMapDarkening(it, mapDarkeningEnabled)
         updateZoneOutlines(it, enhancedZoneOutlinesEnabled)
         addPointMarkerLayers(it)
@@ -488,6 +494,45 @@ private fun configureMap(
             weatherParticleOverlay.setCameraMoving(false)
         }
     }
+}
+
+private fun addAirAwarenessDoaLayers(style: Style) {
+    style.addGeoJsonSourceIfMissing(
+        MapLayerIds.AIR_AWARENESS_DOA_SOURCE_ID,
+        airAwarenessDoaFeatureCollection(null)
+    )
+    style.addLayerBelowIfMissing(
+        MapLayerIds.AIR_AWARENESS_DOA_FILL_LAYER_ID,
+        FillLayer(
+            MapLayerIds.AIR_AWARENESS_DOA_FILL_LAYER_ID,
+            MapLayerIds.AIR_AWARENESS_DOA_SOURCE_ID
+        ).withProperties(
+            fillColor(AIR_AWARENESS_DOA_COLOR),
+            fillOpacity(0.15f)
+        ),
+        MapLayerIds.TRAFFIC_AWARENESS_RADIUS_FILL_LAYER_ID
+    )
+    style.addLayerBelowIfMissing(
+        MapLayerIds.AIR_AWARENESS_DOA_LINE_LAYER_ID,
+        LineLayer(
+            MapLayerIds.AIR_AWARENESS_DOA_LINE_LAYER_ID,
+            MapLayerIds.AIR_AWARENESS_DOA_SOURCE_ID
+        ).withProperties(
+            lineColor(AIR_AWARENESS_DOA_COLOR),
+            lineOpacity(0.96f),
+            lineWidth(2.4f),
+            lineDasharray(arrayOf(3.0f, 2.0f))
+        ),
+        MapLayerIds.TRAFFIC_AWARENESS_RADIUS_FILL_LAYER_ID
+    )
+}
+
+private fun updateAirAwarenessDoa(style: Style, doa: PublishedDoa?) {
+    addAirAwarenessDoaLayers(style)
+    style.setGeoJsonSourceIfAvailable(
+        MapLayerIds.AIR_AWARENESS_DOA_SOURCE_ID,
+        airAwarenessDoaFeatureCollection(doa)
+    )
 }
 
 private fun addPointMarkerLayers(style: Style) {
@@ -1775,6 +1820,7 @@ private const val MAP_DARKENING_SOURCE_ID = "dsc-map-darkening-source"
 private const val MAP_DARKENING_LAYER_ID = "dsc-map-darkening-layer"
 private const val MAP_DARKENING_OPACITY = 0.24f
 private const val TRAFFIC_AWARENESS_COLOR = "#455a64"
+private const val AIR_AWARENESS_DOA_COLOR = "#2ecc71"
 private const val TRAFFIC_ALTITUDE_VERY_LOW_COLOR = "#FFC928"
 private const val TRAFFIC_ALTITUDE_LOW_COLOR = "#32D4E8"
 private const val TRAFFIC_ALTITUDE_HIGH_COLOR = "#8FA9C4"

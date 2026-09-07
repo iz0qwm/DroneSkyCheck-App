@@ -140,7 +140,7 @@ fun TrafficTarget.trafficSheetPresentation(assessment: TrafficAssessment? = null
     }
 
     val dataRows = buildList {
-        add(TrafficAwarenessInfoRow("Tipo", targetKind.presentationLabel()))
+        add(TrafficAwarenessInfoRow("Tipo", targetKind.presentationLabel(provider, source)))
         sourceLabel?.let { add(TrafficAwarenessInfoRow("Sorgente", it)) }
         identifiers.icao24?.let { add(TrafficAwarenessInfoRow("ICAO", it.uppercase(Locale.US))) }
         time.ageSec?.let { add(TrafficAwarenessInfoRow("Aggiornamento", "Aggiornato ${formatTrafficDuration(it)} fa")) }
@@ -248,11 +248,19 @@ private fun TrafficRelevance.presentationLabel(): String =
         TrafficRelevance.ATTENTION -> "Attenzione"
     }
 
-private fun TrafficTargetKind.presentationLabel(): String =
+private fun TrafficTargetKind.presentationLabel(provider: String?, source: String?): String =
     when (this) {
         TrafficTargetKind.AIRCRAFT -> "Aeromobile"
         TrafficTargetKind.HELICOPTER -> "Elicottero"
-        TrafficTargetKind.DRONE -> "Drone AirSense"
+        TrafficTargetKind.DRONE -> {
+            val origin = listOfNotNull(provider, source).joinToString(" ").trim().lowercase(Locale.US)
+            when {
+                "airsense" in origin || "air sense" in origin -> "Drone AirSense"
+                "tracker_mini" in origin || "tracker mini" in origin -> "Drone Tracker Mini"
+                "tracker" in origin -> "Drone Tracker DSC"
+                else -> "Drone DSC"
+            }
+        }
     }
 
 private fun TrafficCalculationConfidence.presentationLabel(): String =

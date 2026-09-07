@@ -93,8 +93,12 @@ object AppReleaseNotes {
         versionName = "4.2",
         versionCode = 32,
         title = "Cosa c'è di nuovo in Drone Sky Check 4.2",
-        intro = "Questa versione rende più comoda la consultazione del risultato del controllo operativo DSC sulla mappa.",
+        intro = "Questa versione introduce Air Awareness e rende più comoda la consultazione operativa direttamente sulla mappa.",
         highlights = listOf(
+            "La nuova modalità Air Awareness crea, dopo conferma, una DOA DSC di 300 metri valida per un'ora e attiva il monitoraggio del traffico nelle vicinanze.",
+            "La DOA attiva è riconoscibile sulla mappa dell'app dal cerchio verde ed è condivisa con la mappa Web Drone Sky Check, dove può essere vista dagli altri utenti.",
+            "Il radar mostra nello stesso quadro operativo il traffico aereo e i droni rilevati dalla rete DSC, inclusi AirSense e Tracker Mini.",
+            "Air Awareness mostra lo stato dei servizi e il tempo residuo della DOA, può essere terminata in anticipo e viene ripristinata se l'app viene riaperta durante l'operazione.",
             "Dopo un controllo zona, il pannello del risultato può essere ridotto per continuare a osservare e usare la mappa senza perdere il verdetto già calcolato.",
             "Nella vista compatta restano disponibili le informazioni essenziali, come lo stato del volo, la quota massima e le eventuali autorizzazioni richieste.",
             "Con uno swipe verso l'alto il pannello torna completo usando lo stesso risultato, senza eseguire un nuovo controllo."

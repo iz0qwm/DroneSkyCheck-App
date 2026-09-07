@@ -23,6 +23,15 @@ import it.droneskycheck.app.data.ZoneCheckV3Repository
 import it.droneskycheck.app.data.ZoneCheckV3Response
 import it.droneskycheck.app.data.ZoneInfo
 import it.droneskycheck.app.data.filterableTypes
+import it.droneskycheck.app.data.airawareness.AirAwarenessActivationRequest
+import it.droneskycheck.app.data.airawareness.AirAwarenessDoaClient
+import it.droneskycheck.app.data.airawareness.AirAwarenessDoaError
+import it.droneskycheck.app.data.airawareness.AirAwarenessDoaRepository
+import it.droneskycheck.app.data.airawareness.AirAwarenessPhase
+import it.droneskycheck.app.data.airawareness.AirAwarenessSession
+import it.droneskycheck.app.data.airawareness.AirAwarenessSessionStore
+import it.droneskycheck.app.data.airawareness.AirAwarenessState
+import it.droneskycheck.app.data.airawareness.InMemoryAirAwarenessSessionStore
 import it.droneskycheck.app.data.drone.DroneOperationalAssessmentEngine
 import it.droneskycheck.app.data.drone.DroneOperationalLevel
 import it.droneskycheck.app.data.drone.DroneTechnicalCatalogClient
@@ -112,6 +121,7 @@ import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
 import java.util.LinkedHashMap
+import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -134,6 +144,8 @@ class MapViewModel(
     private val weatherAlertsRepository: WeatherAlertsClient = WeatherAlertsRepository(),
     private val nearbyMetarRepository: NearbyMetarClient = NearbyMetarRepository(),
     private val trafficAwarenessRepository: TrafficAwarenessClient = TrafficAwarenessRepository(),
+    private val airAwarenessDoaRepository: AirAwarenessDoaClient = AirAwarenessDoaRepository(),
+    private val airAwarenessSessionStore: AirAwarenessSessionStore = InMemoryAirAwarenessSessionStore(),
     private val trafficHeatmapRepository: TrafficHeatmapClient = TrafficHeatmapRepository(),
     private val weatherAssessmentEngine: WeatherAssessmentEngine = WeatherAssessmentEngine(),
     private val droneAssessmentEngine: DroneOperationalAssessmentEngine = DroneOperationalAssessmentEngine(),
@@ -187,6 +199,9 @@ class MapViewModel(
     private var lastVigilanceRevision: String? = null
     private var lastWeatherPoint: MapPoint? = null
     private var trafficAwarenessJob: Job? = null
+    private var airAwarenessActivationJob: Job? = null
+    private var airAwarenessCloseJob: Job? = null
+    private var airAwarenessExpiryJob: Job? = null
     private var trafficHeatmapJob: Job? = null
     private var trafficHeatmapRequestId = 0L
     private var mapStatusMessageJob: Job? = null
@@ -198,6 +213,8 @@ class MapViewModel(
     private var lastLegalTimelineRequest: LegalTimelineRequestKey? = null
     private var catalogResolver: DroneTechnicalCatalogResolver = DroneTechnicalCatalogResolver.empty()
     private var analyzeNextUserLocation = false
+    private var airAwarenessLocationWasEnabledBeforeActivation = false
+    private var airAwarenessTrafficWasEnabledBeforeActivation = false
     private val trafficRelevanceEngine = TrafficRelevanceEngine()
     private val trafficAlertController = TrafficAlertController()
 
@@ -208,6 +225,7 @@ class MapViewModel(
         if (loadHelpOnInit) loadHelpManifest()
         loadUasDatasetUpdates(showRefreshing = false)
         loadDroneCatalogAndFleet()
+        restoreAirAwarenessSession()
     }
 
     private fun loadUasDatasetUpdates(showRefreshing: Boolean) {
@@ -989,6 +1007,210 @@ class MapViewModel(
             weatherMapCameraFit = null,
             selectedForecastTime = null
         )
+    }
+
+    fun onAirAwarenessCommandRequested() {
+        val state = _uiState.value.airAwareness
+        _uiState.value = _uiState.value.copy(
+            airAwareness = when (state.phase) {
+                AirAwarenessPhase.ACTIVE,
+                AirAwarenessPhase.REQUESTING_LOCATION,
+                AirAwarenessPhase.PUBLISHING_DOA,
+                AirAwarenessPhase.STOPPING,
+                AirAwarenessPhase.CLOSE_PENDING -> state.copy(statusSheetVisible = true)
+                else -> AirAwarenessState(phase = AirAwarenessPhase.CONFIRMING)
+            }
+        )
+    }
+
+    fun onAirAwarenessConfirmationDismissed() {
+        if (_uiState.value.airAwareness.phase != AirAwarenessPhase.CONFIRMING) return
+        _uiState.value = _uiState.value.copy(airAwareness = AirAwarenessState())
+    }
+
+    fun onAirAwarenessActivationConfirmed() {
+        if (_uiState.value.airAwareness.phase != AirAwarenessPhase.CONFIRMING) return
+        airAwarenessLocationWasEnabledBeforeActivation = _uiState.value.isUserLocationEnabled
+        airAwarenessTrafficWasEnabledBeforeActivation = _uiState.value.trafficAwareness.enabled
+        _uiState.value = _uiState.value.copy(
+            airAwareness = AirAwarenessState(
+                phase = AirAwarenessPhase.REQUESTING_LOCATION,
+                statusSheetVisible = true
+            )
+        )
+        _uiState.value.userLocation?.let(::publishAirAwarenessDoa)
+    }
+
+    fun onAirAwarenessStatusDismissed() {
+        _uiState.value = _uiState.value.copy(
+            airAwareness = _uiState.value.airAwareness.copy(statusSheetVisible = false)
+        )
+    }
+
+    fun terminateAirAwareness() {
+        val session = _uiState.value.airAwareness.session ?: return
+        if (_uiState.value.airAwareness.phase == AirAwarenessPhase.STOPPING) return
+
+        stopAirAwarenessOwnedServices(session)
+        val pendingSession = session.copy(closePending = true)
+        airAwarenessSessionStore.save(pendingSession)
+        _uiState.value = _uiState.value.copy(
+            airAwareness = AirAwarenessState(
+                phase = AirAwarenessPhase.STOPPING,
+                session = pendingSession,
+                statusSheetVisible = true
+            )
+        )
+        closeAirAwarenessDoa(pendingSession)
+    }
+
+    fun retryAirAwarenessClose() {
+        val session = _uiState.value.airAwareness.session?.takeIf { it.closePending } ?: return
+        _uiState.value = _uiState.value.copy(
+            airAwareness = _uiState.value.airAwareness.copy(
+                phase = AirAwarenessPhase.STOPPING,
+                error = null,
+                statusSheetVisible = true
+            )
+        )
+        closeAirAwarenessDoa(session)
+    }
+
+    private fun publishAirAwarenessDoa(location: UserLocation) {
+        if (_uiState.value.airAwareness.phase != AirAwarenessPhase.REQUESTING_LOCATION) return
+        val pending = airAwarenessSessionStore.loadPendingActivation()
+            ?: AirAwarenessActivationRequest(
+                operationId = "air-awareness-${UUID.randomUUID()}",
+                closeToken = "${UUID.randomUUID()}-${UUID.randomUUID()}",
+                lat = location.point.lat,
+                lon = location.point.lon
+            ).also(airAwarenessSessionStore::savePendingActivation)
+
+        _uiState.value = _uiState.value.copy(
+            airAwareness = AirAwarenessState(
+                phase = AirAwarenessPhase.PUBLISHING_DOA,
+                statusSheetVisible = true
+            )
+        )
+        airAwarenessActivationJob?.cancel()
+        airAwarenessActivationJob = scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                airAwarenessDoaRepository.createDoa(
+                    operationId = pending.operationId,
+                    closeToken = pending.closeToken,
+                    lat = pending.lat,
+                    lon = pending.lon
+                )
+            }
+            if (_uiState.value.airAwareness.phase != AirAwarenessPhase.PUBLISHING_DOA) return@launch
+            result.onSuccess { doa ->
+                airAwarenessSessionStore.clearPendingActivation()
+                val session = AirAwarenessSession(
+                    doa = doa,
+                    locationStartedByMode = !airAwarenessLocationWasEnabledBeforeActivation,
+                    trafficStartedByMode = !airAwarenessTrafficWasEnabledBeforeActivation
+                )
+                airAwarenessSessionStore.save(session)
+                _uiState.value = _uiState.value.copy(
+                    selectedPoint = location.point,
+                    airAwareness = AirAwarenessState(
+                        phase = AirAwarenessPhase.ACTIVE,
+                        session = session,
+                        statusSheetVisible = true
+                    )
+                )
+                startTrafficAwarenessPolling(location.point, clearSnapshot = true)
+                scheduleAirAwarenessExpiry(session)
+            }.onFailure { error ->
+                if (error is AirAwarenessDoaError.Http && error.statusCode in 400..499) {
+                    airAwarenessSessionStore.clearPendingActivation()
+                }
+                _uiState.value = _uiState.value.copy(
+                    airAwareness = AirAwarenessState(
+                        phase = AirAwarenessPhase.FAILED,
+                        statusSheetVisible = true,
+                        error = "Impossibile pubblicare la DOA DSC. Air Awareness non è stata attivata."
+                    )
+                )
+                if (!airAwarenessLocationWasEnabledBeforeActivation) onLocationDisabled()
+                showTransientMapStatus("Air Awareness non attivata: pubblicazione DOA fallita")
+            }
+        }
+    }
+
+    private fun closeAirAwarenessDoa(session: AirAwarenessSession) {
+        airAwarenessCloseJob?.cancel()
+        airAwarenessCloseJob = scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                airAwarenessDoaRepository.closeDoa(session.doa)
+            }
+            result.onSuccess {
+                airAwarenessSessionStore.clear()
+                _uiState.value = _uiState.value.copy(airAwareness = AirAwarenessState())
+                showTransientMapStatus("Air Awareness terminata e DOA DSC chiusa")
+            }.onFailure {
+                val pending = session.copy(closePending = true)
+                airAwarenessSessionStore.save(pending)
+                _uiState.value = _uiState.value.copy(
+                    airAwareness = AirAwarenessState(
+                        phase = AirAwarenessPhase.CLOSE_PENDING,
+                        session = pending,
+                        statusSheetVisible = true,
+                        error = "Servizi locali arrestati. Chiusura della DOA cloud in sospeso: riprova quando torna la connessione."
+                    )
+                )
+            }
+        }
+    }
+
+    private fun restoreAirAwarenessSession() {
+        val session = airAwarenessSessionStore.load() ?: return
+        if (session.doa.endTimeMillis <= clock.millis()) {
+            airAwarenessSessionStore.clear()
+            return
+        }
+        if (session.closePending) {
+            _uiState.value = _uiState.value.copy(
+                airAwareness = AirAwarenessState(
+                    phase = AirAwarenessPhase.CLOSE_PENDING,
+                    session = session,
+                    error = "Chiusura della DOA cloud in sospeso."
+                )
+            )
+            closeAirAwarenessDoa(session)
+            return
+        }
+
+        val point = MapPoint(session.doa.lat, session.doa.lon)
+        _uiState.value = _uiState.value.copy(
+            isUserLocationEnabled = true,
+            selectedPoint = point,
+            airAwareness = AirAwarenessState(
+                phase = AirAwarenessPhase.ACTIVE,
+                session = session
+            )
+        )
+        startTrafficAwarenessPolling(point, clearSnapshot = true)
+        scheduleAirAwarenessExpiry(session)
+    }
+
+    private fun scheduleAirAwarenessExpiry(session: AirAwarenessSession) {
+        airAwarenessExpiryJob?.cancel()
+        airAwarenessExpiryJob = scope.launch {
+            val remaining = session.doa.endTimeMillis - clock.millis()
+            if (remaining > 0) delay(remaining)
+            if (_uiState.value.airAwareness.session?.doa?.id != session.doa.id) return@launch
+            stopAirAwarenessOwnedServices(session)
+            airAwarenessSessionStore.clear()
+            _uiState.value = _uiState.value.copy(airAwareness = AirAwarenessState())
+            showTransientMapStatus("Air Awareness terminata: DOA DSC scaduta")
+        }
+    }
+
+    private fun stopAirAwarenessOwnedServices(session: AirAwarenessSession) {
+        airAwarenessExpiryJob?.cancel()
+        if (session.trafficStartedByMode) disableTrafficAwareness()
+        if (session.locationStartedByMode) onLocationDisabled()
     }
 
     fun enableTrafficAwareness() {
@@ -2455,7 +2677,8 @@ class MapViewModel(
 
     fun onLocationEnabled() {
         val location = _uiState.value.userLocation
-        analyzeNextUserLocation = location == null
+        val airAwarenessWaiting = _uiState.value.airAwareness.phase == AirAwarenessPhase.REQUESTING_LOCATION
+        analyzeNextUserLocation = location == null && !airAwarenessWaiting
         _uiState.value = _uiState.value.copy(
             isUserLocationEnabled = true,
             shouldCenterOnUserLocation = true,
@@ -2463,7 +2686,9 @@ class MapViewModel(
             locationPermissionSheetVisible = false,
             locationStatusMessage = null
         )
-        if (location != null) {
+        if (location != null && airAwarenessWaiting) {
+            publishAirAwarenessDoa(location)
+        } else if (location != null) {
             selectUserLocationForAnalysis(location)
         }
     }
@@ -2496,6 +2721,13 @@ class MapViewModel(
 
     fun onUserLocationUpdated(location: UserLocation) {
         _uiState.value = _uiState.value.copy(userLocation = location)
+        if (_uiState.value.airAwareness.phase == AirAwarenessPhase.REQUESTING_LOCATION) {
+            publishAirAwarenessDoa(location)
+            return
+        }
+        if (_uiState.value.airAwareness.active && shouldRefreshAirAwarenessTrafficCenter(location.point)) {
+            startTrafficAwarenessPolling(location.point)
+        }
         if (analyzeNextUserLocation && _uiState.value.isUserLocationEnabled) {
             analyzeNextUserLocation = false
             selectUserLocationForAnalysis(location)
@@ -2508,6 +2740,7 @@ class MapViewModel(
 
     fun onLocationPermissionDenied(permanently: Boolean) {
         analyzeNextUserLocation = false
+        val airAwarenessFailure = _uiState.value.airAwareness.activationInProgress
         _uiState.value = _uiState.value.copy(
             isUserLocationEnabled = false,
             userLocation = null,
@@ -2518,12 +2751,22 @@ class MapViewModel(
                 "Permesso posizione non disponibile. Puoi continuare a usare la mappa e abilitarlo dalle impostazioni di Android."
             } else {
                 "Posizione non attivata. Puoi comunque esplorare la mappa e selezionare un punto manualmente."
+            },
+            airAwareness = if (airAwarenessFailure) {
+                AirAwarenessState(
+                    phase = AirAwarenessPhase.FAILED,
+                    statusSheetVisible = true,
+                    error = "Permesso posizione negato. Nessuna DOA è stata creata."
+                )
+            } else {
+                _uiState.value.airAwareness
             }
         )
     }
 
     fun onLocationPermissionRevoked() {
         analyzeNextUserLocation = false
+        val shouldTerminateAirAwareness = _uiState.value.airAwareness.active
         _uiState.value = _uiState.value.copy(
             isUserLocationEnabled = false,
             userLocation = null,
@@ -2531,13 +2774,31 @@ class MapViewModel(
             isLocationControlSheetVisible = false,
             locationStatusMessage = "Permesso posizione non piu disponibile."
         )
+        if (shouldTerminateAirAwareness) terminateAirAwareness()
     }
 
     fun onLocationProviderUnavailable() {
         analyzeNextUserLocation = false
+        val airAwarenessFailure = _uiState.value.airAwareness.activationInProgress
         _uiState.value = _uiState.value.copy(
-            locationStatusMessage = "Posizione non disponibile: controlla che i servizi di localizzazione siano attivi."
+            locationStatusMessage = "Posizione non disponibile: controlla che i servizi di localizzazione siano attivi.",
+            airAwareness = if (airAwarenessFailure) {
+                AirAwarenessState(
+                    phase = AirAwarenessPhase.FAILED,
+                    statusSheetVisible = true,
+                    error = "Posizione non disponibile. Nessuna DOA è stata creata."
+                )
+            } else {
+                _uiState.value.airAwareness
+            }
         )
+    }
+
+    private fun shouldRefreshAirAwarenessTrafficCenter(point: MapPoint): Boolean {
+        val center = _uiState.value.trafficAwarenessCenter ?: return true
+        val latDelta = point.lat - center.lat
+        val lonDelta = (point.lon - center.lon) * kotlin.math.cos(Math.toRadians(point.lat))
+        return (latDelta * latDelta + lonDelta * lonDelta) >= AirAwarenessTrafficRefreshDegreesSquared
     }
 
     private fun selectUserLocationForAnalysis(location: UserLocation) {
@@ -2576,6 +2837,7 @@ class MapViewModel(
         const val WeatherCameraDebounceMillis = 400L
         const val WeatherTimeRefreshMillis = 30_000L
         const val MaxHelpTourSteps = 7
+        const val AirAwarenessTrafficRefreshDegreesSquared = 0.00045 * 0.00045
         val DscWeatherStaleWindow: Duration = Duration.ofMinutes(30)
     }
 
@@ -2586,6 +2848,9 @@ class MapViewModel(
         weatherTimeRefreshJob?.cancel()
         weatherCameraDebounceJob?.cancel()
         trafficAwarenessJob?.cancel()
+        airAwarenessActivationJob?.cancel()
+        airAwarenessCloseJob?.cancel()
+        airAwarenessExpiryJob?.cancel()
         trafficHeatmapJob?.cancel()
         mapStatusMessageJob?.cancel()
         super.onCleared()
