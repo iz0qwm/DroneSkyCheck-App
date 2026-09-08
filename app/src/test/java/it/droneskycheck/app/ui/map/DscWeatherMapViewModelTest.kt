@@ -30,6 +30,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Test
 
@@ -95,6 +96,36 @@ class DscWeatherMapViewModelTest {
         delay(180)
 
         assertEquals(41.90, viewModel.uiState.value.dscWeather.data?.point?.lat ?: -1.0, 0.0)
+        viewModel.onDscWeatherSessionPaused()
+        scope.cancel()
+    }
+
+    @Test
+    fun cameraDrivenRefreshKeepsThePreviousBannerUntilTheNewResultArrives() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val weather = FakeDscWeatherClient(
+            delaysByLatitude = mapOf(44.49 to 140L),
+            responses = ArrayDeque(
+                listOf(
+                    response(41.9, 12.5, CriticalityLevel.YELLOW),
+                    response(44.49, 11.34, CriticalityLevel.ORANGE)
+                )
+            )
+        )
+        val viewModel = viewModel(scope, weather)
+        viewModel.onCameraIdle(bounds(41.90, 12.50))
+        viewModel.onDscWeatherSessionResumed()
+        waitUntil { viewModel.uiState.value.dscWeather.data?.point?.lat == 41.90 }
+
+        viewModel.onCameraIdle(bounds(44.49, 11.34))
+        waitUntil { weather.lastPoint == MapPoint(44.49, 11.34) }
+
+        assertEquals(41.90, viewModel.uiState.value.dscWeather.data?.point?.lat ?: -1.0, 0.0)
+        assertEquals(CriticalityLevel.YELLOW, viewModel.uiState.value.dscWeather.banner?.criticalityLevel)
+        assertFalse(viewModel.uiState.value.dscWeather.loading)
+
+        waitUntil { viewModel.uiState.value.dscWeather.data?.point?.lat == 44.49 }
+        assertEquals(CriticalityLevel.ORANGE, viewModel.uiState.value.dscWeather.banner?.criticalityLevel)
         viewModel.onDscWeatherSessionPaused()
         scope.cancel()
     }

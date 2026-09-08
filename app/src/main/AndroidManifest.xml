@@ -5,6 +5,15 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="org.kwos.airsense.permission.ECOSYSTEM_STATUS" />
+
+    <permission
+        android:name="it.droneskycheck.app.permission.ECOSYSTEM_STATUS"
+        android:protectionLevel="signature" />
+
+    <queries>
+        <package android:name="org.kwos.airsense" />
+    </queries>
 
     <application
         android:allowBackup="true"
@@ -24,6 +33,11 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <receiver
+            android:name=".integration.DscEcosystemStatusReceiver"
+            android:exported="true"
+            android:permission="it.droneskycheck.app.permission.ECOSYSTEM_STATUS" />
 
         <activity
             android:name=".MainActivity"

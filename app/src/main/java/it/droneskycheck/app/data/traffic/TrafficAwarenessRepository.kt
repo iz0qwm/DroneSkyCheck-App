@@ -34,14 +34,6 @@ class TrafficAwarenessRepository(
             val disabledProviders = TemporarilyDisabledProviders.joinToString(",")
             val url = "$endpointUrl?lat=${encode(lat)}&lon=${encode(lon)}&radius=${encode(radiusKm)}" +
                 "&disabledProviders=${encode(disabledProviders)}"
-            DscLogger.trace(
-                TrafficAwarenessLogTag,
-                "HTTP request start method=GET endpoint=appTrafficAwareness " +
-                    "lat=${lat.coarseTraffic()} lon=${lon.coarseTraffic()} " +
-                    "radiusKm=${radiusKm.coarseTraffic(0)} disabledProviders=$disabledProviders " +
-                    "timeoutMillis=$TimeoutMillis"
-            )
-            val startedAt = System.currentTimeMillis()
             val response = httpClient.get(
                 url = url,
                 headers = mapOf(
@@ -50,11 +42,6 @@ class TrafficAwarenessRepository(
                 ),
                 timeoutMillis = TimeoutMillis
             )
-            DscLogger.trace(
-                TrafficAwarenessLogTag,
-                "HTTP response code=${response.statusCode} durationMs=${System.currentTimeMillis() - startedAt}"
-            )
-
             if (response.statusCode !in 200..299) {
                 DscLogger.warn(
                     TrafficAwarenessLogTag,
@@ -68,12 +55,7 @@ class TrafficAwarenessRepository(
             }
 
             try {
-                parseTrafficAwarenessResponse(JSONObject(response.body)).also { parsed ->
-                    DscLogger.trace(
-                        TrafficAwarenessLogTag,
-                        "providers ${parsed.providers.entries.joinToString(" ") { "${it.key}=${it.value.status}" }}"
-                    )
-                }
+                parseTrafficAwarenessResponse(JSONObject(response.body))
             } catch (err: JSONException) {
                 throw TrafficAwarenessRepositoryError.InvalidJson(err.message)
             } catch (err: TrafficAwarenessMappingError) {
@@ -155,10 +137,8 @@ class UrlConnectionTrafficAwarenessHttpClient : TrafficAwarenessHttpClient {
                 body = body
             )
         } catch (err: SocketTimeoutException) {
-            DscLogger.warn(TrafficAwarenessLogTag, "network error type=SocketTimeoutException", err)
             throw TrafficAwarenessRepositoryError.Timeout(err.message)
         } catch (err: IOException) {
-            DscLogger.warn(TrafficAwarenessLogTag, "network error type=${err.javaClass.simpleName}", err)
             throw TrafficAwarenessRepositoryError.Network(err.message)
         } finally {
             connection.disconnect()

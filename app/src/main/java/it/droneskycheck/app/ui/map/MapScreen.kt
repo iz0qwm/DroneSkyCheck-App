@@ -285,6 +285,7 @@ import it.droneskycheck.app.data.weatherAlerts.WeatherRisk
 import it.droneskycheck.app.data.weatherAlerts.criticalityLevelLabel
 import it.droneskycheck.app.data.weatherAlerts.isActiveAt
 import it.droneskycheck.app.data.weatherAlerts.vigilanceLevelLabel
+import it.droneskycheck.app.integration.DscEcosystemIntegrationClient
 import it.droneskycheck.app.map.DscLayerCategory
 import it.droneskycheck.app.map.DscZoneMapColors
 import it.droneskycheck.app.map.DroneSkyMapView
@@ -333,9 +334,12 @@ fun MapScreen(
     onAppThemeModeChanged: (AppThemeMode) -> Unit = {}
 ) {
     val context = LocalContext.current
+    val ecosystemIntegration = remember(context) {
+        DscEcosystemIntegrationClient(context.applicationContext)
+    }
     val viewModel: MapViewModel = providedViewModel ?: viewModel(
-        factory = remember(context) {
-            MapViewModelFactory(context.applicationContext)
+        factory = remember(context, ecosystemIntegration) {
+            MapViewModelFactory(context.applicationContext, ecosystemIntegration)
         }
     )
     val coroutineScope = rememberCoroutineScope()
@@ -355,6 +359,7 @@ fun MapScreen(
     val insightsClient = remember(insightsPreferences) { InsightsClient(insightsPreferences) }
     val activity = context.findActivity()
     val uiState by viewModel.uiState.collectAsState()
+    val airSenseIntegrationState by ecosystemIntegration.airSenseState.collectAsState()
     val lifecycleOwner = LocalLifecycleOwner.current
     val hapticFeedback = LocalHapticFeedback.current
     val trafficAlertToneGenerator = rememberTrafficAlertToneGenerator()
@@ -407,6 +412,9 @@ fun MapScreen(
         targets = uiState.trafficAwareness.response?.traffic?.targets.orEmpty(),
         assessments = uiState.trafficAssessments
     )
+    val airSenseReceiverActive =
+        airSenseIntegrationState.installed && airSenseIntegrationState.receiverActive
+    val trafficAwarenessStatusMessage = trafficAwarenessUnavailableMessage(uiState.trafficAwareness)
     val aiInstallationIdRepository = remember(context) {
         DscAiInstallationIdRepository(context.applicationContext)
     }
@@ -476,6 +484,18 @@ fun MapScreen(
                 awaitCancellation()
             } finally {
                 viewModel.onDscWeatherSessionPaused()
+            }
+        }
+    }
+
+    LaunchedEffect(viewModel, lifecycleOwner, ecosystemIntegration) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            ecosystemIntegration.refreshAirSenseStatus()
+            viewModel.onTrafficAwarenessAppForegrounded()
+            try {
+                awaitCancellation()
+            } finally {
+                viewModel.onTrafficAwarenessAppBackgrounded()
             }
         }
     }
@@ -721,7 +741,7 @@ fun MapScreen(
             visibleLayerCategories = visibleLayerCategories,
             selectedPoint = uiState.selectedPoint,
             trafficAwarenessCenter = uiState.trafficAwarenessCenter,
-            airAwarenessDoa = uiState.airAwareness.session?.doa?.takeIf { uiState.airAwareness.active },
+            airAwarenessActive = uiState.airAwareness.active,
             authorizationTakeoff = currentDraft?.operationData?.takeoffMapPoint(),
             authorizationAreaPoints = currentDraft?.operationData?.areaPoints.orEmpty().map { MapPoint(it.lat, it.lon) },
             authorizationAreaClosed = currentDraft?.operationData?.areaClosed == true,
@@ -793,6 +813,8 @@ fun MapScreen(
             dscWeather = uiState.dscWeather,
             statusMessage = uiState.mapStatusMessage,
             trafficAttention = trafficAttention,
+            airSenseReceiverActive = airSenseReceiverActive,
+            trafficAwarenessStatusMessage = trafficAwarenessStatusMessage,
             onNewsLabelClick = {
                 trackInsights(InsightsTool.News)
                 selectedNewsId = null
@@ -945,6 +967,7 @@ fun MapScreen(
 
         if (uiState.airAwareness.phase == AirAwarenessPhase.CONFIRMING) {
             AirAwarenessConfirmationDialog(
+                airSenseInstalled = airSenseIntegrationState.installed,
                 onDismiss = viewModel::onAirAwarenessConfirmationDismissed,
                 onConfirm = {
                     viewModel.onAirAwarenessActivationConfirmed()
@@ -962,20 +985,18 @@ fun MapScreen(
                 state = uiState.airAwareness,
                 isLocationActive = uiState.isUserLocationEnabled && uiState.userLocation != null,
                 trafficAwareness = uiState.trafficAwareness,
+                airSenseInstalled = airSenseIntegrationState.installed,
                 onOpenRadar = viewModel::onAirAwarenessStatusDismissed,
+                onOpenAirSense = {
+                    if (ecosystemIntegration.openAirSense()) {
+                        viewModel.onAirAwarenessStatusDismissed()
+                    } else {
+                        Toast.makeText(context, "AirSense non disponibile", Toast.LENGTH_SHORT).show()
+                    }
+                },
                 onTerminate = viewModel::terminateAirAwareness,
                 onRetryClose = viewModel::retryAirAwarenessClose,
                 onDismiss = viewModel::onAirAwarenessStatusDismissed
-            )
-        }
-
-        trafficAwarenessUnavailableMessage(uiState.trafficAwareness)?.let { message ->
-            TrafficAwarenessStatusPill(
-                message = message,
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .windowInsetsPadding(WindowInsets.safeDrawing)
-                    .padding(top = 148.dp, start = 16.dp, end = 16.dp)
             )
         }
 
@@ -1655,6 +1676,7 @@ private fun TrafficAwarenessStatusPill(
 
 @Composable
 private fun AirAwarenessConfirmationDialog(
+    airSenseInstalled: Boolean,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit
 ) {
@@ -1668,6 +1690,12 @@ private fun AirAwarenessConfirmationDialog(
                     "rendendola visibile sulla mappa agli altri utenti.\n\n" +
                     "Verranno inoltre attivati il monitoraggio del traffico aereo e la ricezione dei droni " +
                     "rilevati dalla rete DSC.\n\n" +
+                    if (airSenseInstalled) {
+                        "Se hai AirSense puoi utilizzare questo smartphone anche come ricevitore locale Remote ID. " +
+                            "Dopo l'attivazione potrai aprire AirSense da questa schermata.\n\n"
+                    } else {
+                        "AirSense è opzionale e permette di utilizzare questo smartphone come ricevitore locale Remote ID.\n\n"
+                    } +
                     "Attiva questa funzione solo quando stai realmente iniziando un'operazione di volo."
             )
         },
@@ -1686,7 +1714,9 @@ private fun AirAwarenessStatusBottomSheet(
     state: AirAwarenessState,
     isLocationActive: Boolean,
     trafficAwareness: TrafficAwarenessState,
+    airSenseInstalled: Boolean,
     onOpenRadar: () -> Unit,
+    onOpenAirSense: () -> Unit,
     onTerminate: () -> Unit,
     onRetryClose: () -> Unit,
     onDismiss: () -> Unit
@@ -1757,6 +1787,11 @@ private fun AirAwarenessStatusBottomSheet(
             if (state.phase == AirAwarenessPhase.ACTIVE) {
                 Button(onClick = onOpenRadar, modifier = Modifier.fillMaxWidth()) {
                     Text("APRI RADAR")
+                }
+                if (airSenseInstalled) {
+                    OutlinedButton(onClick = onOpenAirSense, modifier = Modifier.fillMaxWidth()) {
+                        Text("APRI AIRSENSE")
+                    }
                 }
                 OutlinedButton(onClick = onTerminate, modifier = Modifier.fillMaxWidth()) {
                     Text("TERMINA")
@@ -3398,6 +3433,8 @@ private fun MapHeader(
     dscWeather: WeatherAlertUiState,
     statusMessage: String?,
     trafficAttention: TrafficAttentionPresentation?,
+    airSenseReceiverActive: Boolean,
+    trafficAwarenessStatusMessage: String?,
     onNewsLabelClick: () -> Unit,
     onHeadlineClick: (NewsItem) -> Unit,
     onTrafficAttentionClick: (String) -> Unit,
@@ -3430,6 +3467,22 @@ private fun MapHeader(
             onTrafficAttentionClick = onTrafficAttentionClick,
             onAppInfoClick = onAppInfoClick
         )
+        if (airSenseReceiverActive) {
+            TrafficAwarenessStatusPill(
+                message = "AirSense · Remote ID attivo",
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .padding(top = 4.dp)
+            )
+        }
+        trafficAwarenessStatusMessage?.let { message ->
+            TrafficAwarenessStatusPill(
+                message = message,
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .padding(top = 4.dp)
+            )
+        }
     }
 }
 
@@ -9574,7 +9627,8 @@ private fun copyAiInstallationIdToClipboard(context: Context, installationId: St
 }
 
 private class MapViewModelFactory(
-    private val context: Context
+    private val context: Context,
+    private val ecosystemIntegration: DscEcosystemIntegrationClient
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -9592,6 +9646,8 @@ private class MapViewModelFactory(
                 trafficAwarenessRepository = TrafficAwarenessRepository(),
                 airAwarenessDoaRepository = AirAwarenessDoaRepository(),
                 airAwarenessSessionStore = SharedPreferencesAirAwarenessSessionStore(context),
+                airAwarenessStatusPublisher = ecosystemIntegration,
+                initialTrafficAwarenessAppForeground = false,
                 weatherAssessmentEngine = WeatherAssessmentEngine(),
                 mapPreferences = MapPreferencesRepository(context),
                 uasDatasetUpdatesRepository = UasDatasetUpdatesRepository(context),

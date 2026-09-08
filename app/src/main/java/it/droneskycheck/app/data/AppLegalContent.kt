@@ -90,18 +90,16 @@ object AppExternalLinks {
 object AppReleaseNotes {
     // When versionName changes, reset this section for the new version and collect only that version's changes.
     val Current = ReleaseNotes(
-        versionName = "4.2",
-        versionCode = 32,
-        title = "Cosa c'è di nuovo in Drone Sky Check 4.2",
-        intro = "Questa versione introduce Air Awareness e rende più comoda la consultazione operativa direttamente sulla mappa.",
+        versionName = "4.3",
+        versionCode = 33,
+        title = "Cosa c'è di nuovo in Drone Sky Check 4.3",
+        intro = "Air Awareness, integrazione con AirSense e una mappa più stabile durante l'uso operativo.",
         highlights = listOf(
-            "La nuova modalità Air Awareness crea, dopo conferma, una DOA DSC di 300 metri valida per un'ora e attiva il monitoraggio del traffico nelle vicinanze.",
-            "La DOA attiva è riconoscibile sulla mappa dell'app dal cerchio verde ed è condivisa con la mappa Web Drone Sky Check, dove può essere vista dagli altri utenti.",
-            "Il radar mostra nello stesso quadro operativo il traffico aereo e i droni rilevati dalla rete DSC, inclusi AirSense e Tracker Mini.",
-            "Air Awareness mostra lo stato dei servizi e il tempo residuo della DOA, può essere terminata in anticipo e viene ripristinata se l'app viene riaperta durante l'operazione.",
-            "Dopo un controllo zona, il pannello del risultato può essere ridotto per continuare a osservare e usare la mappa senza perdere il verdetto già calcolato.",
-            "Nella vista compatta restano disponibili le informazioni essenziali, come lo stato del volo, la quota massima e le eventuali autorizzazioni richieste.",
-            "Con uno swipe verso l'alto il pannello torna completo usando lo stesso risultato, senza eseguire un nuovo controllo."
+            "Air Awareness: monitora in un'unica modalità il traffico aereo e i droni rilevati dalla rete Drone Sky Check durante la tua operazione.",
+            "La mappa mostra con discreti cerchi concentrici le distanze operative usate dagli avvisi di traffico.",
+            "Se AirSense è installata, puoi aprirla da Air Awareness e vedere sulla mappa quando il ricevitore Remote ID è realmente attivo.",
+            "Il monitoraggio del traffico viene sospeso quando l'app passa in background e riprende al ritorno, mantenendo l'ultimo quadro disponibile.",
+            "Migliorata la stabilità dei banner meteo e degli avvisi nella parte superiore della mappa durante pan e zoom."
         )
     )
 }

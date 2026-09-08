@@ -182,25 +182,11 @@ fun parseTrafficAwarenessResponse(json: JSONObject): TrafficAwarenessResponse {
         ),
         providers = json.optJSONObject("providers").toProviderMap(),
         cache = json.optJSONObject("cache")?.toTrafficCacheInfo()
-    ).also { response ->
-        DscLogger.trace(
-            TrafficAwarenessLogTag,
-            "parsed ok=${response.ok} trafficCount=${response.traffic.count} " +
-                "targetsParsed=${response.traffic.targets.size} cacheHit=${response.cache?.hit}"
-        )
-        response.traffic.targets.forEach { target ->
-            DscLogger.trace(
-                TrafficAwarenessLogTag,
-                "target id=${target.id} callsign=${target.identifiers.callsign ?: target.identifiers.registration ?: target.identifiers.icao24 ?: target.identifiers.sourceId} " +
-                    "provider=${target.provider} source=${target.source} " +
-                    "lat=${target.position.lat.coarseTraffic(4)} lon=${target.position.lon.coarseTraffic(4)} " +
-                    "distanceM=${target.relative.distanceM?.toInt()}"
-            )
-        }
-    }
+    )
 }
 
 private fun JSONObject.toTrafficTargetOrNull(): TrafficTarget? {
+    logRawTrafficTarget(this)
     val id = optStringOrNull("id") ?: run {
         DscLogger.warn(TrafficAwarenessLogTag, "target skipped reason=missing_id")
         return null
@@ -224,7 +210,7 @@ private fun JSONObject.toTrafficTargetOrNull(): TrafficTarget? {
         sources = optJSONArray("sources").toObjectList { it.toTrafficSource() },
         provenance = optJSONObject("provenance")?.toTrafficProvenance(),
         objectType = optFirstStringOrNull("kind", "targetKind", "trafficKind", "objectType", "vehicleType", "targetType")
-    )
+    ).also { it.logNormalizedTrafficTarget() }
 }
 
 fun TrafficTarget.trafficTargetKind(): TrafficTargetKind =
@@ -233,6 +219,29 @@ fun TrafficTarget.trafficTargetKind(): TrafficTargetKind =
         isHelicopterTrafficTarget() -> TrafficTargetKind.HELICOPTER
         else -> TrafficTargetKind.AIRCRAFT
     }
+
+internal fun TrafficTarget.trafficClassificationReason(): String =
+    when {
+        aircraft.category.isAdsbUavCategory() -> "explicit_uav_category"
+        isDscDiagnosticTarget() && isDroneTrafficTarget() -> "source_dsc_drone"
+        objectType?.hasDroneTrafficHint() == true -> "explicit_uas_type"
+        isDroneTrafficTarget() -> "drone_hint"
+        aircraft.category.isAdsbHelicopterCategory() -> "explicit_helicopter_category"
+        aircraft.type.hasHelicopterTrafficHint() || objectType.hasHelicopterTrafficHint() -> "helicopter_hint"
+        isOgnDiagnosticTarget() -> "ogn_default_aircraft"
+        else -> "default_aircraft"
+    }
+
+private fun TrafficTarget.isDscDiagnosticTarget(): Boolean =
+    droneTrafficHints().any { hint ->
+        val normalized = hint.normalizedTrafficToken()
+        normalized.contains("dsc uas") || normalized.contains("airsense") ||
+            normalized.contains("air sense") || normalized.contains("tracker mini") ||
+            normalized.contains("drone pilot app")
+    }
+
+private fun TrafficTarget.isOgnDiagnosticTarget(): Boolean =
+    trafficClassificationTokens().any { token -> token == "ogn" || token.startsWith("ogn:") }
 
 fun TrafficTarget.trafficFeedType(): TrafficFeedType {
     val tokens = trafficClassificationTokens()

@@ -1,6 +1,9 @@
 package it.droneskycheck.app.map
 
-import it.droneskycheck.app.data.airawareness.PublishedDoa
+import it.droneskycheck.app.data.traffic.TrafficAwarenessDefaults
+import it.droneskycheck.app.data.traffic.TrafficRelevance
+import it.droneskycheck.app.data.traffic.TrafficRelevanceThresholds
+import it.droneskycheck.app.ui.map.MapPoint
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
@@ -12,36 +15,60 @@ import org.maplibre.geojson.Polygon
 
 class AirAwarenessMapFeaturesTest {
     @Test
-    fun activeDoaCreatesGeodeticCircleWithPublishedRadius() {
-        val doa = publishedDoa(radiusMeters = 300.0)
-        val polygon = airAwarenessDoaFeatureCollection(doa)
-            .features().orEmpty().single().geometry() as Polygon
-        val ring = polygon.coordinates().single()
+    fun activeAirAwarenessUsesTheRealAlertThresholds() {
+        val center = MapPoint(41.9028, 12.4964)
+        val features = airAwarenessAlertRingsFeatureCollection(center, enabled = true)
+            .features().orEmpty()
+        val expected = listOf(
+            Triple(
+                TrafficRelevanceThresholds.DroneAttentionDistanceM,
+                TrafficRelevance.ATTENTION,
+                "drone-proximity-attention"
+            ),
+            Triple(
+                TrafficRelevanceThresholds.AttentionCpaDistanceM,
+                TrafficRelevance.ATTENTION,
+                "cpa-attention"
+            ),
+            Triple(
+                TrafficRelevanceThresholds.MonitorDistanceM,
+                TrafficRelevance.MONITOR,
+                "monitor"
+            )
+        )
 
-        assertEquals(97, ring.size)
-        assertEquals(ring.first().longitude(), ring.last().longitude(), 0.0)
-        assertEquals(ring.first().latitude(), ring.last().latitude(), 0.0)
-        assertEquals(300.0, distanceMeters(doa.lat, doa.lon, ring.first()), 1.0)
+        assertEquals(expected.size, features.size)
+        expected.zip(features).forEach { (ring, feature) ->
+            val polygon = feature.geometry() as Polygon
+            val coordinates = polygon.coordinates().single()
+            assertEquals(97, coordinates.size)
+            assertEquals(ring.first, distanceMeters(center.lat, center.lon, coordinates.first()), 1.0)
+            assertEquals(ring.second.name, feature.getStringProperty(AirAwarenessAlertRingProperties.Relevance))
+            assertEquals(ring.third, feature.getStringProperty(AirAwarenessAlertRingProperties.Id))
+        }
     }
 
     @Test
-    fun missingOrInvalidDoaClearsCircle() {
-        assertTrue(airAwarenessDoaFeatureCollection(null).features().orEmpty().isEmpty())
-        assertTrue(
-            airAwarenessDoaFeatureCollection(publishedDoa(radiusMeters = 0.0))
-                .features().orEmpty().isEmpty()
-        )
+    fun inactiveAirAwarenessClearsAlertRings() {
+        val center = MapPoint(41.9028, 12.4964)
+
+        assertTrue(airAwarenessAlertRingsFeatureCollection(center, enabled = false).features().orEmpty().isEmpty())
+        assertTrue(airAwarenessAlertRingsFeatureCollection(null, enabled = true).features().orEmpty().isEmpty())
     }
 
-    private fun publishedDoa(radiusMeters: Double) = PublishedDoa(
-        id = "doa-test",
-        closeToken = "close-token",
-        lat = 41.9028,
-        lon = 12.4964,
-        radiusMeters = radiusMeters,
-        startTimeMillis = 1_000L,
-        endTimeMillis = 3_601_000L
-    )
+    @Test
+    fun acquisitionBoundaryKeepsTheConfiguredTrafficRadius() {
+        val center = MapPoint(41.9028, 12.4964)
+        val polygon = trafficRadiusFeatureCollection(center, TrafficAwarenessDefaults.DefaultRadiusKm)
+            .features().orEmpty().single().geometry() as Polygon
+
+        assertEquals(20.0, TrafficAwarenessDefaults.DefaultRadiusKm, 0.0)
+        assertEquals(
+            20_000.0,
+            distanceMeters(center.lat, center.lon, polygon.coordinates().single().first()),
+            1.0
+        )
+    }
 
     private fun distanceMeters(lat: Double, lon: Double, point: Point): Double {
         val lat1 = Math.toRadians(lat)

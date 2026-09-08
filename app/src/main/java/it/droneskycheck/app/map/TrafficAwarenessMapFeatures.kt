@@ -9,7 +9,7 @@ import it.droneskycheck.app.data.traffic.TrafficFeedType
 import it.droneskycheck.app.data.traffic.TrafficPosition
 import it.droneskycheck.app.data.traffic.TrafficRelevance
 import it.droneskycheck.app.data.traffic.TrafficTarget
-import it.droneskycheck.app.data.traffic.coarseTraffic
+import it.droneskycheck.app.data.traffic.logFinalTrafficTarget
 import it.droneskycheck.app.data.traffic.trafficFeedType
 import it.droneskycheck.app.data.traffic.trafficTargetKind
 import it.droneskycheck.app.data.traffic.TrafficTargetKind
@@ -93,10 +93,9 @@ fun trafficTargetsFeatureCollection(
                 target.mapRadarLabelPriority(assessments[target.id]?.relevance ?: TrafficRelevance.INFORMATION)
             )
         }.also {
-            DscLogger.trace(
-                TrafficAwarenessLogTag,
-                "feature id=${target.id} lat=${target.position.lat.coarseTraffic(4)} " +
-                    "lon=${target.position.lon.coarseTraffic(4)} rotation=${target.mapRotationDeg().coarseTraffic(2)}"
+            target.logFinalTrafficTarget(
+                displayType = target.mapTrafficTypeLabel(),
+                icon = target.mapTrafficIconName()
             )
         }
     }
@@ -239,6 +238,19 @@ fun TrafficTarget.mapTrafficTypeLabel(): String =
             TrafficTargetKind.HELICOPTER -> "ELICOTTERO"
             TrafficTargetKind.DRONE -> "DRONE"
             TrafficTargetKind.AIRCRAFT -> "TRAFFICO"
+        }
+    }
+
+private fun TrafficTarget.mapTrafficIconName(): String =
+    when (trafficFeedType()) {
+        TrafficFeedType.FANET,
+        TrafficFeedType.FREEFLIGHT -> "FREEFLIGHT_GLYPH"
+        TrafficFeedType.FLARM -> "GLIDER_GLYPH"
+        TrafficFeedType.ADSB,
+        TrafficFeedType.UNKNOWN -> when (trafficTargetKind()) {
+            TrafficTargetKind.DRONE -> "DRONE_GLYPH"
+            TrafficTargetKind.HELICOPTER -> "HELICOPTER_GLYPH"
+            TrafficTargetKind.AIRCRAFT -> "AIRCRAFT_GLYPH"
         }
     }
 

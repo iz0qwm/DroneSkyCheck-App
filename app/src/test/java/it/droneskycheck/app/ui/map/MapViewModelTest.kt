@@ -83,6 +83,7 @@ import it.droneskycheck.app.data.weatherMap.WeatherMapForecast
 import it.droneskycheck.app.data.weatherMap.WeatherMapGrid
 import it.droneskycheck.app.data.weatherMap.WeatherMapNode
 import it.droneskycheck.app.data.weatherMap.WeatherMapUnits
+import it.droneskycheck.app.integration.AirAwarenessStatusPublisher
 import java.time.LocalDate
 import java.io.File
 import java.time.Clock
@@ -997,6 +998,107 @@ class MapViewModelTest {
     }
 
     @Test
+    fun trafficAwarenessPollingSuspendsInBackgroundAndResumesImmediatelyOnce() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val traffic = FakeTrafficAwarenessClient()
+        val viewModel = viewModel(
+            scope = scope,
+            traffic = traffic,
+            preferences = InMemoryMapPreferences(),
+            trafficPollingIntervalMillis = 1_000
+        )
+
+        viewModel.onMapTapped(selection(41.9, 12.5))
+        waitUntil { viewModel.uiState.value.selectedPoint != null }
+        viewModel.enableTrafficAwareness()
+        waitUntil { traffic.calls >= 1 && viewModel.uiState.value.trafficAwareness.response != null }
+        viewModel.onTrafficAwarenessAppBackgrounded()
+        val callsAfterBackground = traffic.calls
+        val snapshotInBackground = viewModel.uiState.value.trafficAwareness.response
+        delay(80)
+
+        assertEquals(callsAfterBackground, traffic.calls)
+        assertTrue(viewModel.uiState.value.trafficAwareness.enabled)
+        assertEquals(snapshotInBackground, viewModel.uiState.value.trafficAwareness.response)
+        assertFalse(viewModel.uiState.value.trafficAwareness.loading)
+
+        viewModel.onTrafficAwarenessAppForegrounded()
+        viewModel.onTrafficAwarenessAppForegrounded()
+        waitUntil { traffic.calls == callsAfterBackground + 1 }
+        delay(10)
+
+        assertEquals(callsAfterBackground + 1, traffic.calls)
+        assertEquals(1, traffic.maxConcurrentCalls)
+        scope.cancel()
+    }
+
+    @Test
+    fun backgroundKeepsAirAwarenessAndDoaActiveWithoutTrafficRequests() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val doa = FakeAirAwarenessDoaClient()
+        val traffic = FakeTrafficAwarenessClient()
+        val statusPublisher = FakeAirAwarenessStatusPublisher()
+        val viewModel = viewModel(
+            scope = scope,
+            traffic = traffic,
+            airAwarenessDoa = doa,
+            airAwarenessStatusPublisher = statusPublisher,
+            preferences = InMemoryMapPreferences(),
+            trafficPollingIntervalMillis = 20
+        )
+
+        viewModel.onAirAwarenessCommandRequested()
+        viewModel.onAirAwarenessActivationConfirmed()
+        viewModel.onLocationEnabled()
+        viewModel.onUserLocationUpdated(UserLocation(MapPoint(41.9, 12.5), 5f, true))
+        waitUntil {
+            viewModel.uiState.value.airAwareness.active &&
+                viewModel.uiState.value.trafficAwareness.response != null
+        }
+        val doaId = viewModel.uiState.value.airAwareness.session?.doa?.id
+        viewModel.onTrafficAwarenessAppBackgrounded()
+        val callsAfterBackground = traffic.calls
+        val snapshotInBackground = viewModel.uiState.value.trafficAwareness.response
+        delay(80)
+
+        assertEquals(callsAfterBackground, traffic.calls)
+        assertTrue(viewModel.uiState.value.airAwareness.active)
+        assertEquals(doaId, viewModel.uiState.value.airAwareness.session?.doa?.id)
+        assertEquals(0, doa.closeCalls)
+        assertTrue(viewModel.uiState.value.trafficAwareness.enabled)
+        assertEquals(snapshotInBackground, viewModel.uiState.value.trafficAwareness.response)
+        assertTrue(statusPublisher.statuses.last())
+        scope.cancel()
+    }
+
+    @Test
+    fun disablingTrafficAwarenessInBackgroundPreventsPollingFromResuming() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val traffic = FakeTrafficAwarenessClient()
+        val viewModel = viewModel(
+            scope = scope,
+            traffic = traffic,
+            preferences = InMemoryMapPreferences(),
+            trafficPollingIntervalMillis = 20
+        )
+
+        viewModel.onMapTapped(selection(41.9, 12.5))
+        waitUntil { viewModel.uiState.value.selectedPoint != null }
+        viewModel.enableTrafficAwareness()
+        waitUntil { traffic.calls >= 1 && viewModel.uiState.value.trafficAwareness.response != null }
+        viewModel.onTrafficAwarenessAppBackgrounded()
+        viewModel.disableTrafficAwareness()
+        val callsAfterDisable = traffic.calls
+        viewModel.onTrafficAwarenessAppForegrounded()
+        delay(80)
+
+        assertEquals(callsAfterDisable, traffic.calls)
+        assertFalse(viewModel.uiState.value.trafficAwareness.enabled)
+        assertNull(viewModel.uiState.value.trafficAwareness.response)
+        scope.cancel()
+    }
+
+    @Test
     fun trafficAwarenessPollingDoesNotOverlapSlowFetches() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         try {
@@ -1855,10 +1957,12 @@ class MapViewModelTest {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val doa = FakeAirAwarenessDoaClient()
         val traffic = FakeTrafficAwarenessClient()
+        val statusPublisher = FakeAirAwarenessStatusPublisher()
         val viewModel = viewModel(
             scope = scope,
             traffic = traffic,
             airAwarenessDoa = doa,
+            airAwarenessStatusPublisher = statusPublisher,
             preferences = InMemoryMapPreferences(),
             trafficPollingIntervalMillis = 60_000
         )
@@ -1875,6 +1979,7 @@ class MapViewModelTest {
         assertEquals(1, doa.createCalls)
         assertTrue(viewModel.uiState.value.trafficAwareness.enabled)
         assertEquals(MapPoint(41.9, 12.5), traffic.lastPoint)
+        assertTrue(statusPublisher.statuses.last())
         scope.cancel()
     }
 
@@ -1923,9 +2028,11 @@ class MapViewModelTest {
     fun airAwarenessStopClosesCloudDoaAndStopsOwnedServices() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val doa = FakeAirAwarenessDoaClient()
+        val statusPublisher = FakeAirAwarenessStatusPublisher()
         val viewModel = viewModel(
             scope = scope,
             airAwarenessDoa = doa,
+            airAwarenessStatusPublisher = statusPublisher,
             preferences = InMemoryMapPreferences(),
             trafficPollingIntervalMillis = 60_000
         )
@@ -1941,6 +2048,7 @@ class MapViewModelTest {
         assertEquals(1, doa.closeCalls)
         assertFalse(viewModel.uiState.value.trafficAwareness.enabled)
         assertFalse(viewModel.uiState.value.isUserLocationEnabled)
+        assertFalse(statusPublisher.statuses.last())
         scope.cancel()
     }
 
@@ -1978,6 +2086,7 @@ class MapViewModelTest {
         traffic: TrafficAwarenessClient = FakeTrafficAwarenessClient(),
         airAwarenessDoa: AirAwarenessDoaClient = FakeAirAwarenessDoaClient(),
         airAwarenessStore: AirAwarenessSessionStore = InMemoryAirAwarenessSessionStore(),
+        airAwarenessStatusPublisher: AirAwarenessStatusPublisher = FakeAirAwarenessStatusPublisher(),
         trafficHeatmap: TrafficHeatmapClient = FakeTrafficHeatmapClient(),
         preferences: InMemoryMapPreferences,
         pilotStore: LocalPilotStore = FakePilotStore(),
@@ -1997,6 +2106,7 @@ class MapViewModelTest {
             trafficAwarenessRepository = traffic,
             airAwarenessDoaRepository = airAwarenessDoa,
             airAwarenessSessionStore = airAwarenessStore,
+            airAwarenessStatusPublisher = airAwarenessStatusPublisher,
             trafficHeatmapRepository = trafficHeatmap,
             mapPreferences = preferences,
             helpRepository = helpRepository,
@@ -2422,6 +2532,14 @@ private class FakeAirAwarenessDoaClient(
     override suspend fun closeDoa(doa: PublishedDoa): Result<Unit> {
         closeCalls += 1
         return closeResult
+    }
+}
+
+private class FakeAirAwarenessStatusPublisher : AirAwarenessStatusPublisher {
+    val statuses = mutableListOf<Boolean>()
+
+    override fun publishAirAwarenessStatus(active: Boolean) {
+        statuses += active
     }
 }
 

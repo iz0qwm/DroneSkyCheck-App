@@ -111,10 +111,13 @@ import it.droneskycheck.app.data.traffic.TrafficTarget
 import it.droneskycheck.app.data.traffic.TrafficTargetKind
 import it.droneskycheck.app.data.traffic.TrafficTime
 import it.droneskycheck.app.data.traffic.coarseTraffic
+import it.droneskycheck.app.data.traffic.logTrafficDeduplicationDiagnostics
 import it.droneskycheck.app.data.traffic.toTrafficHeatmapDiagnosticReason
 import it.droneskycheck.app.data.traffic.toTrafficAwarenessDiagnosticReason
 import it.droneskycheck.app.data.traffic.trafficFeedType
 import it.droneskycheck.app.data.traffic.trafficTargetKind
+import it.droneskycheck.app.integration.AirAwarenessStatusPublisher
+import it.droneskycheck.app.integration.NoOpAirAwarenessStatusPublisher
 import it.droneskycheck.app.map.DscLayerCategory
 import java.time.Clock
 import java.time.Duration
@@ -146,6 +149,7 @@ class MapViewModel(
     private val trafficAwarenessRepository: TrafficAwarenessClient = TrafficAwarenessRepository(),
     private val airAwarenessDoaRepository: AirAwarenessDoaClient = AirAwarenessDoaRepository(),
     private val airAwarenessSessionStore: AirAwarenessSessionStore = InMemoryAirAwarenessSessionStore(),
+    private val airAwarenessStatusPublisher: AirAwarenessStatusPublisher = NoOpAirAwarenessStatusPublisher,
     private val trafficHeatmapRepository: TrafficHeatmapClient = TrafficHeatmapRepository(),
     private val weatherAssessmentEngine: WeatherAssessmentEngine = WeatherAssessmentEngine(),
     private val droneAssessmentEngine: DroneOperationalAssessmentEngine = DroneOperationalAssessmentEngine(),
@@ -161,6 +165,7 @@ class MapViewModel(
     private val timelineZoneId: ZoneId = ZoneId.systemDefault(),
     private val trafficAwarenessPollingIntervalMillis: Long = TrafficAwarenessDefaults.PollingIntervalMillis,
     private val trafficAwarenessRadiusKm: Double = TrafficAwarenessDefaults.DefaultRadiusKm,
+    private val initialTrafficAwarenessAppForeground: Boolean = true,
     private val trafficHeatmapDebounceMillis: Long = TrafficHeatmapDefaults.DebounceMillis,
     private val weatherStatusPollingIntervalMillis: Long = WeatherStatusPollingIntervalMillis,
     private val weatherCameraDebounceMillis: Long = WeatherCameraDebounceMillis,
@@ -199,6 +204,7 @@ class MapViewModel(
     private var lastVigilanceRevision: String? = null
     private var lastWeatherPoint: MapPoint? = null
     private var trafficAwarenessJob: Job? = null
+    private var trafficAwarenessAppForeground = initialTrafficAwarenessAppForeground
     private var airAwarenessActivationJob: Job? = null
     private var airAwarenessCloseJob: Job? = null
     private var airAwarenessExpiryJob: Job? = null
@@ -1054,6 +1060,7 @@ class MapViewModel(
         stopAirAwarenessOwnedServices(session)
         val pendingSession = session.copy(closePending = true)
         airAwarenessSessionStore.save(pendingSession)
+        airAwarenessStatusPublisher.publishAirAwarenessStatus(active = false)
         _uiState.value = _uiState.value.copy(
             airAwareness = AirAwarenessState(
                 phase = AirAwarenessPhase.STOPPING,
@@ -1119,6 +1126,7 @@ class MapViewModel(
                         statusSheetVisible = true
                     )
                 )
+                airAwarenessStatusPublisher.publishAirAwarenessStatus(active = true)
                 startTrafficAwarenessPolling(location.point, clearSnapshot = true)
                 scheduleAirAwarenessExpiry(session)
             }.onFailure { error ->
@@ -1164,12 +1172,17 @@ class MapViewModel(
     }
 
     private fun restoreAirAwarenessSession() {
-        val session = airAwarenessSessionStore.load() ?: return
+        val session = airAwarenessSessionStore.load() ?: run {
+            airAwarenessStatusPublisher.publishAirAwarenessStatus(active = false)
+            return
+        }
         if (session.doa.endTimeMillis <= clock.millis()) {
             airAwarenessSessionStore.clear()
+            airAwarenessStatusPublisher.publishAirAwarenessStatus(active = false)
             return
         }
         if (session.closePending) {
+            airAwarenessStatusPublisher.publishAirAwarenessStatus(active = false)
             _uiState.value = _uiState.value.copy(
                 airAwareness = AirAwarenessState(
                     phase = AirAwarenessPhase.CLOSE_PENDING,
@@ -1190,6 +1203,7 @@ class MapViewModel(
                 session = session
             )
         )
+        airAwarenessStatusPublisher.publishAirAwarenessStatus(active = true)
         startTrafficAwarenessPolling(point, clearSnapshot = true)
         scheduleAirAwarenessExpiry(session)
     }
@@ -1202,6 +1216,7 @@ class MapViewModel(
             if (_uiState.value.airAwareness.session?.doa?.id != session.doa.id) return@launch
             stopAirAwarenessOwnedServices(session)
             airAwarenessSessionStore.clear()
+            airAwarenessStatusPublisher.publishAirAwarenessStatus(active = false)
             _uiState.value = _uiState.value.copy(airAwareness = AirAwarenessState())
             showTransientMapStatus("Air Awareness terminata: DOA DSC scaduta")
         }
@@ -1250,6 +1265,30 @@ class MapViewModel(
         )
     }
 
+    fun onTrafficAwarenessAppBackgrounded() {
+        if (!trafficAwarenessAppForeground) return
+        trafficAwarenessAppForeground = false
+        if (!_uiState.value.trafficAwareness.enabled) return
+
+        trafficAwarenessJob?.cancel()
+        trafficAwarenessJob = null
+        _uiState.value = _uiState.value.copy(
+            trafficAwareness = _uiState.value.trafficAwareness.copy(loading = false)
+        )
+        DscLogger.debug(TrafficAwarenessLogTag, "polling suspended reason=app_background")
+    }
+
+    fun onTrafficAwarenessAppForegrounded() {
+        if (trafficAwarenessAppForeground) return
+        trafficAwarenessAppForeground = true
+        val state = _uiState.value
+        if (!state.trafficAwareness.enabled) return
+        val point = state.trafficAwarenessCenter ?: return
+
+        DscLogger.debug(TrafficAwarenessLogTag, "polling resumed reason=app_foreground")
+        launchTrafficAwarenessPolling(point)
+    }
+
     private fun startTrafficAwarenessPolling(
         point: MapPoint,
         clearSnapshot: Boolean = false
@@ -1262,7 +1301,7 @@ class MapViewModel(
         _uiState.value = _uiState.value.copy(
             trafficAwareness = currentTraffic.copy(
                 enabled = true,
-                loading = true,
+                loading = trafficAwarenessAppForeground,
                 response = if (clearSnapshot) null else currentTraffic.response,
                 error = null
             ),
@@ -1271,33 +1310,41 @@ class MapViewModel(
             trafficVisualAssessments = if (clearSnapshot) emptyMap() else _uiState.value.trafficVisualAssessments,
             selectedTrafficTarget = if (clearSnapshot) null else _uiState.value.selectedTrafficTarget
         )
+        if (!trafficAwarenessAppForeground) return
+
         DscLogger.debug(
             TrafficAwarenessLogTag,
             "polling started lat=${point.lat.coarseTraffic()} lon=${point.lon.coarseTraffic()} " +
                 "radiusKm=${trafficAwarenessRadiusKm.coarseTraffic(0)} clearSnapshot=$clearSnapshot"
         )
 
+        launchTrafficAwarenessPolling(point)
+    }
+
+    private fun launchTrafficAwarenessPolling(point: MapPoint) {
+        trafficAwarenessJob?.cancel()
         trafficAwarenessJob = scope.launch {
             try {
-                while (_uiState.value.trafficAwareness.enabled && _uiState.value.trafficAwarenessCenter == point) {
+                while (
+                    trafficAwarenessAppForeground &&
+                    _uiState.value.trafficAwareness.enabled &&
+                    _uiState.value.trafficAwarenessCenter == point
+                ) {
                     fetchTrafficAwareness(point)
                     delay(trafficAwarenessPollingIntervalMillis)
                 }
             } finally {
-                DscLogger.debug(
-                    TrafficAwarenessLogTag,
-                    "polling stopped reason=${trafficAwarenessStopReason(point)}"
-                )
+                if (trafficAwarenessAppForeground) {
+                    DscLogger.debug(
+                        TrafficAwarenessLogTag,
+                        "polling stopped reason=${trafficAwarenessStopReason(point)}"
+                    )
+                }
             }
         }
     }
 
     private suspend fun fetchTrafficAwareness(point: MapPoint) {
-        DscLogger.trace(
-            TrafficAwarenessLogTag,
-            "poll request lat=${point.lat.coarseTraffic()} lon=${point.lon.coarseTraffic()} " +
-                "radiusKm=${trafficAwarenessRadiusKm.coarseTraffic(0)}"
-        )
         _uiState.value = _uiState.value.copy(
             trafficAwareness = _uiState.value.trafficAwareness.copy(
                 loading = true,
@@ -1313,16 +1360,17 @@ class MapViewModel(
             )
         }
 
-        if (!_uiState.value.trafficAwareness.enabled || _uiState.value.trafficAwarenessCenter != point) {
+        if (
+            !trafficAwarenessAppForeground ||
+            !_uiState.value.trafficAwareness.enabled ||
+            _uiState.value.trafficAwarenessCenter != point
+        ) {
             return
         }
 
         result.onSuccess { response ->
-            DscLogger.trace(
-                TrafficAwarenessLogTag,
-                "state updated enabled=true targets=${response.traffic.targets.size}"
-            )
             val nowMillis = clock.millis()
+            logTrafficDeduplicationDiagnostics(response.traffic.targets, nowMillis)
             val previousTraffic = _uiState.value.trafficAwareness
             val unfilteredResponse = response.withPersistentDroneTargets(
                 previousResponse = previousTraffic.response,
@@ -1343,14 +1391,6 @@ class MapViewModel(
                 target.isHiddenHighAltitudeTraffic(_uiState.value.highAltitudeTrafficAlertEnabled)
             }
             val alertAttentionCount = assessments.values.count { it.relevance == TrafficRelevance.ATTENTION }
-            assessments.forEach { (id, assessment) ->
-                DscLogger.trace(
-                    TrafficAwarenessLogTag,
-                    "assessment id=$id relevance=${assessment.relevance} " +
-                        "distance=${assessment.currentDistanceM?.toInt()} " +
-                        "cpa=${assessment.cpaDistanceM?.toInt()} tcpa=${assessment.timeToCpaSec?.toInt()}"
-                )
-            }
             if (hiddenHighAltitudeCount > 0 || alertAttentionCount > 0) {
                 DscLogger.debug(
                     TrafficAwarenessLogTag,
@@ -1358,7 +1398,11 @@ class MapViewModel(
                         "highAltitudeVisible=${_uiState.value.highAltitudeTrafficAlertEnabled}"
                 )
             }
-            if (!_uiState.value.trafficAwareness.enabled || _uiState.value.trafficAwarenessCenter != point) {
+            if (
+                !trafficAwarenessAppForeground ||
+                !_uiState.value.trafficAwareness.enabled ||
+                _uiState.value.trafficAwarenessCenter != point
+            ) {
                 return@onSuccess
             }
             trafficAlertController.update(assessments, nowMillis)?.let { event ->
@@ -1601,10 +1645,6 @@ class MapViewModel(
         }
         if (retainedDrones.isEmpty()) return this
 
-        DscLogger.trace(
-            TrafficAwarenessLogTag,
-            "drone persistence retained=${retainedDrones.size} freshTargets=${traffic.targets.size}"
-        )
         val visibleTargets = traffic.targets + retainedDrones
         return copy(
             traffic = traffic.copy(
@@ -2371,10 +2411,10 @@ class MapViewModel(
         val generation = weatherRequestGeneration
         weatherAlertsJob?.cancel()
         val currentWeather = _uiState.value.dscWeather
-        val samePoint = lastWeatherPoint == point
         _uiState.value = _uiState.value.copy(
-            dscWeather = if (samePoint) {
-                currentWeather.copy(loading = currentWeather.data == null, error = false)
+            dscWeather = if (currentWeather.data != null) {
+                // Preserve the visible banner while a camera-driven refresh is in flight.
+                currentWeather.copy(loading = false, error = false)
             } else {
                 WeatherAlertUiState(loading = true)
             }
@@ -2407,9 +2447,13 @@ class MapViewModel(
                     )
                 }
                 WeatherAlertLoadResult.Unavailable -> {
-                    lastWeatherPoint = null
+                    val currentWeather = _uiState.value.dscWeather
                     _uiState.value = _uiState.value.copy(
-                        dscWeather = WeatherAlertUiState(error = true)
+                        dscWeather = if (currentWeather.data != null) {
+                            currentWeather.copy(loading = false, stale = true, error = true)
+                        } else {
+                            WeatherAlertUiState(error = true)
+                        }
                     )
                 }
             }

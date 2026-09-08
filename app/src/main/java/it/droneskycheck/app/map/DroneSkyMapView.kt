@@ -33,7 +33,6 @@ import it.droneskycheck.app.data.CachedGeoJson
 import it.droneskycheck.app.data.CachedGeoJsonRepository
 import it.droneskycheck.app.data.DscLogger
 import it.droneskycheck.app.data.ZonesRepository
-import it.droneskycheck.app.data.airawareness.PublishedDoa
 import it.droneskycheck.app.data.traffic.TrafficAwarenessDefaults
 import it.droneskycheck.app.data.traffic.TrafficAwarenessLogTag
 import it.droneskycheck.app.data.traffic.TrafficAwarenessState
@@ -99,7 +98,7 @@ fun DroneSkyMapView(
     visibleLayerCategories: Set<DscLayerCategory>,
     selectedPoint: MapPoint?,
     trafficAwarenessCenter: MapPoint?,
-    airAwarenessDoa: PublishedDoa?,
+    airAwarenessActive: Boolean,
     authorizationTakeoff: MapPoint?,
     authorizationAreaPoints: List<MapPoint>,
     authorizationAreaClosed: Boolean,
@@ -126,6 +125,17 @@ fun DroneSkyMapView(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val trafficCenter = trafficAwarenessCenter ?: selectedPoint
+    val airAwarenessAlertRings = remember(
+        trafficCenter,
+        airAwarenessActive,
+        trafficAwareness.enabled
+    ) {
+        airAwarenessAlertRingsFeatureCollection(
+            center = trafficCenter,
+            enabled = airAwarenessActive && trafficAwareness.enabled
+        )
+    }
     val syntheticWindPocActive = remember(context, syntheticWindPocEnabled) {
         syntheticWindPocEnabled && context.isSyntheticWindPocAllowed()
     }
@@ -275,7 +285,6 @@ fun DroneSkyMapView(
                     addTrafficHeatmapLayer(style)
                     addWeatherWindLayer(style)
                     addMapDarkeningLayer(style)
-                    addAirAwarenessDoaLayers(style)
                     updateMapDarkening(style, mapDarkeningEnabled)
                     updateZoneOutlines(style, enhancedZoneOutlinesEnabled)
                     applyLayerVisibility(style, visibleLayerCategories)
@@ -304,13 +313,13 @@ fun DroneSkyMapView(
                     )
                     updatePointMarkers(style, selectedPoint, userLocation)
                     updateAuthorizationDrawing(style, authorizationTakeoff, authorizationAreaPoints, authorizationAreaClosed)
-                    updateAirAwarenessDoa(style, airAwarenessDoa)
                     updateTrafficAwareness(
                         style,
-                        trafficAwarenessCenter ?: selectedPoint,
+                        trafficCenter,
                         trafficAwareness,
                         trafficAssessments,
-                        radarLabelOverlay
+                        radarLabelOverlay,
+                        airAwarenessAlertRings
                     )
                     updateTrafficHeatmap(style, trafficHeatmap)
                     updateWeatherWindField(style, weatherWindField)
@@ -374,7 +383,6 @@ private fun configureMap(
         addTrafficAwarenessLayers(it)
         addTrafficHeatmapLayer(it)
         addMapDarkeningLayer(it)
-        addAirAwarenessDoaLayers(it)
         updateMapDarkening(it, mapDarkeningEnabled)
         updateZoneOutlines(it, enhancedZoneOutlinesEnabled)
         addPointMarkerLayers(it)
@@ -496,45 +504,6 @@ private fun configureMap(
     }
 }
 
-private fun addAirAwarenessDoaLayers(style: Style) {
-    style.addGeoJsonSourceIfMissing(
-        MapLayerIds.AIR_AWARENESS_DOA_SOURCE_ID,
-        airAwarenessDoaFeatureCollection(null)
-    )
-    style.addLayerBelowIfMissing(
-        MapLayerIds.AIR_AWARENESS_DOA_FILL_LAYER_ID,
-        FillLayer(
-            MapLayerIds.AIR_AWARENESS_DOA_FILL_LAYER_ID,
-            MapLayerIds.AIR_AWARENESS_DOA_SOURCE_ID
-        ).withProperties(
-            fillColor(AIR_AWARENESS_DOA_COLOR),
-            fillOpacity(0.15f)
-        ),
-        MapLayerIds.TRAFFIC_AWARENESS_RADIUS_FILL_LAYER_ID
-    )
-    style.addLayerBelowIfMissing(
-        MapLayerIds.AIR_AWARENESS_DOA_LINE_LAYER_ID,
-        LineLayer(
-            MapLayerIds.AIR_AWARENESS_DOA_LINE_LAYER_ID,
-            MapLayerIds.AIR_AWARENESS_DOA_SOURCE_ID
-        ).withProperties(
-            lineColor(AIR_AWARENESS_DOA_COLOR),
-            lineOpacity(0.96f),
-            lineWidth(2.4f),
-            lineDasharray(arrayOf(3.0f, 2.0f))
-        ),
-        MapLayerIds.TRAFFIC_AWARENESS_RADIUS_FILL_LAYER_ID
-    )
-}
-
-private fun updateAirAwarenessDoa(style: Style, doa: PublishedDoa?) {
-    addAirAwarenessDoaLayers(style)
-    style.setGeoJsonSourceIfAvailable(
-        MapLayerIds.AIR_AWARENESS_DOA_SOURCE_ID,
-        airAwarenessDoaFeatureCollection(doa)
-    )
-}
-
 private fun addPointMarkerLayers(style: Style) {
     style.addSource(GeoJsonSource(SELECTED_POINT_SOURCE_ID, emptyFeatureCollection()))
     style.addSource(GeoJsonSource(USER_LOCATION_SOURCE_ID, emptyFeatureCollection()))
@@ -646,6 +615,10 @@ private fun addTrafficAwarenessLayers(style: Style) {
         MapLayerIds.TRAFFIC_AWARENESS_RADIUS_SOURCE_ID,
         emptyTrafficFeatureCollection()
     )
+    val alertRingsSourceCreated = style.addGeoJsonSourceIfMissing(
+        MapLayerIds.AIR_AWARENESS_ALERT_RINGS_SOURCE_ID,
+        emptyTrafficFeatureCollection()
+    )
     val targetSourceCreated = style.addGeoJsonSourceIfMissing(
         MapLayerIds.TRAFFIC_AWARENESS_SOURCE_ID,
         emptyTrafficFeatureCollection()
@@ -665,7 +638,7 @@ private fun addTrafficAwarenessLayers(style: Style) {
             MapLayerIds.TRAFFIC_AWARENESS_RADIUS_SOURCE_ID
         ).withProperties(
             fillColor(TRAFFIC_AWARENESS_COLOR),
-            fillOpacity(0.045f)
+            fillOpacity(0.0f)
         )
     )
     val radiusLineLayerCreated = style.addLayerIfMissing(
@@ -675,8 +648,30 @@ private fun addTrafficAwarenessLayers(style: Style) {
             MapLayerIds.TRAFFIC_AWARENESS_RADIUS_SOURCE_ID
         ).withProperties(
             lineColor(TRAFFIC_AWARENESS_COLOR),
-            lineOpacity(0.72f),
-            lineWidth(1.6f)
+            lineOpacity(0.38f),
+            lineWidth(1.2f),
+            lineDasharray(arrayOf(4.0f, 3.0f))
+        )
+    )
+    val alertRingsFillLayerCreated = style.addLayerIfMissing(
+        MapLayerIds.AIR_AWARENESS_ALERT_RINGS_FILL_LAYER_ID,
+        FillLayer(
+            MapLayerIds.AIR_AWARENESS_ALERT_RINGS_FILL_LAYER_ID,
+            MapLayerIds.AIR_AWARENESS_ALERT_RINGS_SOURCE_ID
+        ).withProperties(
+            fillColor(airAwarenessAlertRingColorExpression()),
+            fillOpacity(0.018f)
+        )
+    )
+    val alertRingsLineLayerCreated = style.addLayerIfMissing(
+        MapLayerIds.AIR_AWARENESS_ALERT_RINGS_LINE_LAYER_ID,
+        LineLayer(
+            MapLayerIds.AIR_AWARENESS_ALERT_RINGS_LINE_LAYER_ID,
+            MapLayerIds.AIR_AWARENESS_ALERT_RINGS_SOURCE_ID
+        ).withProperties(
+            lineColor(airAwarenessAlertRingColorExpression()),
+            lineOpacity(0.56f),
+            lineWidth(1.5f)
         )
     )
     val attentionHaloLayerCreated = style.addLayerBelowIfMissing(
@@ -773,11 +768,14 @@ private fun addTrafficAwarenessLayers(style: Style) {
     )
     if (
         radiusSourceCreated ||
+        alertRingsSourceCreated ||
         targetSourceCreated ||
         vectorSourceCreated ||
         glyphSourceCreated ||
         radiusFillLayerCreated ||
         radiusLineLayerCreated ||
+        alertRingsFillLayerCreated ||
+        alertRingsLineLayerCreated ||
         attentionHaloLayerCreated ||
         vectorLayerCreated ||
         markerLayerCreated ||
@@ -1023,7 +1021,8 @@ private fun updateTrafficAwareness(
     selectedPoint: MapPoint?,
     trafficAwareness: TrafficAwarenessState,
     trafficAssessments: Map<String, TrafficAssessment>,
-    radarLabelOverlay: TrafficRadarLabelOverlay
+    radarLabelOverlay: TrafficRadarLabelOverlay,
+    airAwarenessAlertRings: FeatureCollection
 ) {
     val enabled = trafficAwareness.enabled
     val targets = if (enabled) {
@@ -1034,14 +1033,13 @@ private fun updateTrafficAwareness(
     addTrafficAwarenessLayers(style)
 
     val targetFeatures = trafficTargetsFeatureCollection(targets, trafficAssessments)
-    val targetUpdated = style.setGeoJsonSourceIfAvailable(
+    style.setGeoJsonSourceIfAvailable(
         MapLayerIds.TRAFFIC_AWARENESS_SOURCE_ID,
         targetFeatures
     )
     radarLabelOverlay.setTargets(
         if (enabled) targets.toTrafficRadarLabelTargets(trafficAssessments) else emptyList()
     )
-    val targetFeatureList = targetFeatures.features().orEmpty()
     val vectorFeatures = if (enabled) {
         trafficDirectionVectorFeatureCollection(targets)
     } else {
@@ -1060,24 +1058,6 @@ private fun updateTrafficAwareness(
         MapLayerIds.TRAFFIC_AWARENESS_GLYPH_SOURCE_ID,
         glyphFeatures
     )
-    if (enabled || targets.isNotEmpty()) {
-        val firstFeature = targetFeatureList.firstOrNull()
-        val firstProperties = firstFeature?.properties()
-        DscLogger.debug(
-            TrafficAwarenessLogTag,
-            "map traffic render update enabled=$enabled targets=${targets.size} " +
-                "pointFeatures=${targetFeatureList.size} vectorFeatures=${vectorFeatures.features().orEmpty().size} " +
-                "glyphFeatures=${glyphFeatures.features().orEmpty().size} radarLabelFeatures=${targetFeatureList.count { it.properties()?.has(TrafficAwarenessMapProperties.RadarLabel) == true }} " +
-                "targetSourceUpdated=$targetUpdated targetLayer=${style.getLayer(MapLayerIds.TRAFFIC_AWARENESS_MARKER_LAYER_ID) != null} " +
-                "glyphLayer=${style.getLayer(MapLayerIds.TRAFFIC_AWARENESS_GLYPH_LAYER_ID) != null} " +
-                "firstId=${firstProperties?.stringValue(TrafficAwarenessMapProperties.TargetId) ?: "none"} " +
-                "firstAltLabel=${firstProperties?.stringValue(TrafficAwarenessMapProperties.AltitudeLabel) ?: "none"} " +
-                "firstRadarLabel=${firstProperties?.stringValue(TrafficAwarenessMapProperties.RadarLabel) ?: "none"} " +
-                "firstBand=${firstProperties?.stringValue(TrafficAwarenessMapProperties.AltitudeBand) ?: "none"} " +
-                "firstFeed=${firstProperties?.stringValue(TrafficAwarenessMapProperties.FeedType) ?: "none"}"
-        )
-    }
-
     val radiusFeatures = if (enabled) {
         trafficRadiusFeatureCollection(
             center = selectedPoint,
@@ -1089,6 +1069,10 @@ private fun updateTrafficAwareness(
     val radiusUpdated = style.setGeoJsonSourceIfAvailable(
         MapLayerIds.TRAFFIC_AWARENESS_RADIUS_SOURCE_ID,
         radiusFeatures
+    )
+    style.setGeoJsonSourceIfAvailable(
+        MapLayerIds.AIR_AWARENESS_ALERT_RINGS_SOURCE_ID,
+        airAwarenessAlertRings
     )
     // Paused noisy traffic radius diagnostics during field testing.
     // DscLogger.trace(
@@ -1717,6 +1701,16 @@ private fun trafficVectorColorExpression(): Expression =
         Expression.literal(TRAFFIC_AWARENESS_COLOR)
     )
 
+private fun airAwarenessAlertRingColorExpression(): Expression =
+    Expression.match(
+        Expression.get(AirAwarenessAlertRingProperties.Relevance),
+        Expression.literal(TrafficRelevanceAttention),
+        Expression.literal(TRAFFIC_AWARENESS_ATTENTION_COLOR),
+        Expression.literal(TrafficRelevanceMonitor),
+        Expression.literal(TRAFFIC_AWARENESS_COLOR),
+        Expression.literal(TRAFFIC_AWARENESS_COLOR)
+    )
+
 private fun trafficHeatmapColorExpression(): Expression =
     Expression.interpolate(
         Expression.linear(),
@@ -1820,7 +1814,6 @@ private const val MAP_DARKENING_SOURCE_ID = "dsc-map-darkening-source"
 private const val MAP_DARKENING_LAYER_ID = "dsc-map-darkening-layer"
 private const val MAP_DARKENING_OPACITY = 0.24f
 private const val TRAFFIC_AWARENESS_COLOR = "#455a64"
-private const val AIR_AWARENESS_DOA_COLOR = "#2ecc71"
 private const val TRAFFIC_ALTITUDE_VERY_LOW_COLOR = "#FFC928"
 private const val TRAFFIC_ALTITUDE_LOW_COLOR = "#32D4E8"
 private const val TRAFFIC_ALTITUDE_HIGH_COLOR = "#8FA9C4"
@@ -1838,6 +1831,7 @@ private const val TRAFFIC_ATTENTION_GLYPH_MIN_WIDTH = 13.0f
 private const val TRAFFIC_ATTENTION_GLYPH_MAX_WIDTH = 23.0f
 private const val TRAFFIC_ATTENTION_GLYPH_MAX_OPACITY = 0.82f
 private const val TrafficRelevanceAttention = "ATTENTION"
+private const val TrafficRelevanceMonitor = "MONITOR"
 private const val NOTAM_ZEBRA_SIZE_PX = 32
 private const val NOTAM_ZEBRA_STEP_PX = 16
 private const val NOTAM_ZEBRA_STROKE_PX = 2.2f
